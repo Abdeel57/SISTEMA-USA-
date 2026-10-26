@@ -40,7 +40,7 @@ guarda desde su panel, en su base de datos.
 ## Lanzar un cliente nuevo (a mano, desde Coolify)
 
 1. **Projects -> + Add** -> nombre del cliente.
-2. **+ New -> Private Repository (with GitHub App)** -> este repositorio, rama
+2. **+ New -> Private Repository (with GitHub App)** -> `Abdeel57/SISTEMA-USA-`, rama
    `main`, **Build Pack: Docker Compose**, archivo `/docker-compose.yml`.
 3. **Domains**: servicio `web` -> `https://cliente.com:8080`; servicio `api` ->
    `https://api.cliente.com:8080` (el `:8080` es el puerto interno).

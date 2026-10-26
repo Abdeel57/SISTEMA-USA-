@@ -60,7 +60,7 @@ export async function coolify(method, path, body) {
 }
 
 /** El repositorio de la plantilla, tal como lo guarda Coolify (`usuario/repo`). */
-export const TEMPLATE_REPOSITORY = process.env.TEMPLATE_REPOSITORY ?? "Abdeel57/plantilla-sorteos";
+export const TEMPLATE_REPOSITORY = process.env.TEMPLATE_REPOSITORY ?? "Abdeel57/SISTEMA-USA-";
 export const TEMPLATE_BRANCH = process.env.TEMPLATE_BRANCH ?? "main";
 
 /** Lee `--clave valor` y `--clave=valor` de la linea de comandos. */
