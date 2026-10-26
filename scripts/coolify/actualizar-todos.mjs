@@ -45,7 +45,8 @@ if (args.listar !== undefined) process.exit(0);
 let failures = 0;
 for (const site of sites) {
   try {
-    await coolify("GET", `/deploy?uuid=${site.uuid}`);
+    // Desde Coolify 4.5 `/deploy` es POST.
+    await coolify("POST", `/deploy?uuid=${site.uuid}`);
     console.log(`  desplegando: ${site.name}`);
   } catch (error) {
     failures += 1;

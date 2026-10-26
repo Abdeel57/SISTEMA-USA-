@@ -6,8 +6,9 @@
 #   - SERVICE_PASSWORD_* / SERVICE_USER_*: Coolify genera un valor aleatorio la
 #     primera vez y lo conserva en cada despliegue. Cada cliente tiene asi sus
 #     propias contrasenas sin que nadie las invente ni las copie.
-#   - SERVICE_URL_* / SERVICE_FQDN_*: el dominio que se le asigne en Coolify a
-#     ese servicio (el numero final es su puerto interno), con o sin `https://`.
+#   - SERVICE_URL_<SERVICIO> / SERVICE_FQDN_<SERVICIO>: el dominio que se le
+#     asigne en Coolify a ese servicio, con o sin `https://`. La variante con
+#     `_8080` al final solo indica el puerto interno (ver COOLIFY_PORT_HINT).
 #
 # Lo unico obligatorio que rellena una persona es ADMIN_EMAIL. Los dominios de
 # `web` y `api` tienen que ser HTTPS: en produccion la API se niega a arrancar
@@ -47,9 +48,14 @@ services:
       API_HOST: 0.0.0.0
       API_PORT: 8080
       PORT: 8080
-      API_PUBLIC_URL: ${SERVICE_URL_API_8080}
+      # Coolify llena SERVICE_URL_API / SERVICE_URL_WEB con el dominio asignado
+      # (con `https://`). Las variantes `_8080` solo le dicen el puerto interno
+      # para el proxy: su valor llega VACIO (comprobado en Coolify 4.5), por eso
+      # se nombran en COOLIFY_PORT_HINT y no se usan para nada mas.
+      COOLIFY_PORT_HINT: ${SERVICE_URL_API_8080}
+      API_PUBLIC_URL: ${SERVICE_URL_API}
       API_BODY_LIMIT_BYTES: 1048576
-      API_CORS_ALLOWED_ORIGINS: ${SERVICE_URL_WEB_8080}
+      API_CORS_ALLOWED_ORIGINS: ${SERVICE_URL_WEB}
       API_REQUEST_ID_HEADER: x-request-id
       API_RATE_LIMIT_WINDOW_SECONDS: 60
       API_RATE_LIMIT_MAX_REQUESTS: 120
@@ -68,7 +74,7 @@ services:
 
       SESSION_SECRET: ${SERVICE_PASSWORD_64_SESSION}
       SESSION_COOKIE_NAME: app_session
-      SESSION_COOKIE_DOMAIN: ${SERVICE_FQDN_WEB_8080}
+      SESSION_COOKIE_DOMAIN: ${SERVICE_FQDN_WEB}
       SESSION_COOKIE_SECURE: "true"
       SESSION_TTL_MINUTES: 1440
       ADMIN_SESSION_TTL_MINUTES: 480
@@ -114,7 +120,8 @@ services:
       NODE_ENV: production
       TZ: UTC
       PORT: 8080
-      SITE_URL: ${SERVICE_URL_WEB_8080}
+      COOLIFY_PORT_HINT: ${SERVICE_URL_WEB_8080}
+      SITE_URL: ${SERVICE_URL_WEB}
       # `web` habla con `api` por la red privada del recurso, nunca por Internet.
       API_BASE_URL: http://api:8080/api/v1
       WEB_ENABLE_API_MOCKS: "false"

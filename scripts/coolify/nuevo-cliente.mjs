@@ -89,13 +89,20 @@ async function pickServer() {
   return servers[0].uuid;
 }
 
+/** La GitHub App privada de Coolify que tiene acceso al repositorio de la plantilla. */
 async function pickGithubApp() {
   if (args["github-app"] !== undefined) return args["github-app"];
   const apps = await coolify("GET", "/github-apps");
   const privateApps = (Array.isArray(apps) ? apps : []).filter((app) => app.is_public !== true);
-  if (privateApps.length === 1) return privateApps[0].uuid;
-  console.error("Elige la GitHub App con acceso al repositorio con --github-app <uuid>:");
-  for (const app of privateApps) console.error(`  ${app.uuid}  ${app.name}`);
+  const wanted = TEMPLATE_REPOSITORY.toLowerCase();
+  for (const app of privateApps) {
+    const repos = await coolify("GET", `/github-apps/${String(app.id)}/repositories`);
+    const list = Array.isArray(repos) ? repos : (repos?.repositories ?? []);
+    if (list.some((repo) => String(repo.full_name ?? "").toLowerCase() === wanted)) return app.uuid;
+  }
+  console.error(
+    `Ninguna GitHub App de Coolify tiene acceso a ${TEMPLATE_REPOSITORY}. En GitHub: Settings -> Applications -> la app de Coolify -> Configure -> Repository access.`,
+  );
   process.exit(1);
 }
 
@@ -161,7 +168,8 @@ if (args["cliente-email"] !== undefined) {
 await coolify("PATCH", `/applications/${application.uuid}/envs/bulk`, { data: variables });
 
 console.log("4. Desplegando (la primera vez tarda unos minutos)...");
-const deploy = await coolify("GET", `/deploy?uuid=${application.uuid}`);
+// Desde Coolify 4.5 `/deploy` es POST ("This endpoint has changed to a POST request").
+const deploy = await coolify("POST", `/deploy?uuid=${application.uuid}`);
 const deploymentUuid = deploy?.deployments?.[0]?.deployment_uuid;
 const ok =
   args["sin-esperar"] === undefined && typeof deploymentUuid === "string"
