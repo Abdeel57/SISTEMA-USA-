@@ -1,0 +1,325 @@
+import { cva, type VariantProps } from "class-variance-authority";
+import type { ButtonHTMLAttributes, ReactNode, Ref } from "react";
+
+import { cn } from "../lib/cn";
+import { FOCUS_VISIBLE_CLASSES } from "../lib/focus";
+import { VisuallyHidden } from "./visually-hidden";
+
+/**
+ * Clases del boton, expuestas para poder aplicar el mismo aspecto a un enlace.
+ *
+ * Un enlace que navega NO debe renderizarse como `<button>` ni envolverse en
+ * uno: cambia la semantica y rompe la navegacion por teclado. Cuando un enlace
+ * tiene que parecer un boton, se le aplican estas clases y sigue siendo `<a>`.
+ */
+/**
+ * Destello que cruza el boton al pasar el raton (DEC-068). Solo en las dos
+ * acciones con relleno de color -compra y marca-, que es donde lo ponen las
+ * referencias. Es un pseudo-elemento: no entra en el arbol de accesibilidad, y
+ * con movimiento reducido no existe.
+ */
+const SHINE = cn(
+  "before:pointer-events-none before:absolute before:inset-y-0 before:left-0 before:w-1/3",
+  "before:-translate-x-[150%] before:-skew-x-12",
+  "before:bg-gradient-to-r before:from-white/0 before:via-white/35 before:to-white/0",
+  "before:transition-transform before:duration-700 before:ease-standard",
+  "hover:before:translate-x-[420%] motion-reduce:before:hidden",
+);
+
+export const buttonVariants = cva(
+  cn(
+    // `app-button` no pinta nada: es el gancho con el que el panel (tema claro,
+    // `[data-admin]` en `apps/web/src/app/globals.css`) cambia la letra de
+    // titular por una sobria sin tocar la tienda.
+    "app-button",
+    "relative isolate inline-flex select-none items-center justify-center gap-2 overflow-hidden whitespace-nowrap",
+    // DEC-038: los botones son tipografia de marca en caja alta. La caja alta
+    // NO altera el DOM: `text-transform` es presentacion, asi que el nombre
+    // accesible que anuncia un lector de pantalla sigue siendo el texto
+    // traducido tal cual llego del diccionario.
+    // DEC-068: en la letra de titular -Saira gruesa en italica-, la de las
+    // referencias de carreras que eligio el cliente. DEC-074: en su peso
+    // maximo (900), el mismo del titular del hero, y un punto mas apretada.
+    "rounded-md font-headline font-black italic uppercase tracking-[0.02em]",
+    "transition-[background-color,border-color,color,box-shadow,transform] duration-fast ease-standard",
+    "active:translate-y-px",
+    FOCUS_VISIBLE_CLASSES,
+    "disabled:pointer-events-none disabled:opacity-50",
+  ),
+  {
+    variants: {
+      variant: {
+        /**
+         * Accion principal de la pantalla. Como maximo una por vista.
+         *
+         * DEC-068: oro METALICO. El degradado es una capa translucida encima
+         * del relleno solido (`bg-brand`), no un relleno nuevo: el color base
+         * sigue siendo el token y el contraste medido con `on-brand` no cambia
+         * en el centro del boton, que es donde va el texto.
+         */
+        primary: cn(
+          "bg-brand text-on-brand hover:bg-brand-hover active:bg-brand-active",
+          "bg-gradient-to-b from-white/25 via-white/0 to-black/25",
+          // El resplandor sigue al color de marca vigente (lo elige el panel):
+          // escrito con el token y no con el oro de la paleta original.
+          "shadow-[0_10px_28px_-12px_rgb(var(--app-color-brand)/0.8)] hover:shadow-[0_14px_34px_-10px_rgb(var(--app-color-brand-hover)/0.85)]",
+          SHINE,
+        ),
+        /**
+         * Accion secundaria: contorno dorado sobre el fondo de la pagina.
+         *
+         * Sobre negro, una accion secundaria RELLENA compite con la principal
+         * -dos rectangulos solidos uno al lado del otro- mientras que un
+         * contorno se lee como segunda opcion sin dejar de ser visible.
+         */
+        secondary:
+          "border border-brand/45 bg-transparent text-brand hover:border-brand hover:bg-brand/12 active:bg-brand/20",
+        /**
+         * ACCION DE COMPRA (DEC-042): relleno ROJO con texto blanco.
+         *
+         * No sustituye a `primary`, convive con ella y el reparto es
+         * semantico, no de gusto:
+         *
+         *   `primary` (oro) .. la accion de MARCA. Ver las Reglas Oficiales,
+         *                      ver el detalle de una promocion, volver.
+         *   `accent`  (rojo) . la accion de COMPRA. Ir a la mercancia, anadir
+         *                      al carrito, continuar en el carrito.
+         *
+         * Que el CTA de compra sea rojo no cambia lo que dice: sigue siendo
+         * "comprar mercancia" y nunca "participar" (DEC-042, CLAUDE.md #1).
+         *
+         * CONTRASTES MEDIDOS
+         * ------------------
+         * Relleno #e10012 (rojo puro, DEC-074) con `on-accent` (blanco puro)
+         * encima: 4,99:1, por encima del 4,5:1 de AA. En hover aclara a #ea0816
+         * y sigue en 4,62:1 -ese es el techo, y el motivo de que el rojo no sea
+         * el de la referencia (#e8232a da 4,46:1)-. El pulsado oscurece a
+         * #c0000c (6,47:1), al reves que `primary`, porque por arriba ya no
+         * queda margen sin romper el texto.
+         *
+         * EL ANILLO DE FOCO ES EL DEL SISTEMA, Y NO SE REASIGNA.
+         * `ink` e `inkGhost` tuvieron que cambiarlo porque su relleno es blanco
+         * y el oro de foco sobre la banda clara da 1,35:1. Aqui no hace falta y
+         * seria peor: el indicador es el oro de foco (#f2d680) separado del
+         * boton por el offset, que se pinta en el negro de pagina. Ese borde
+         * INTERIOR mide 14:1 y no depende de sobre que superficie se apoye el
+         * boton, asi que el foco sigue cumpliendo WCAG 1.4.11 tanto sobre negro
+         * como sobre la banda clara. El oro sobre el propio rojo mide ademas
+         * 3,85:1.
+         *
+         * (Y no se reasigna el offset porque no se puede reasignar sin riesgo:
+         * `buttonVariants()` se usa a pelo en varios enlaces, sin pasar por
+         * `cn`, y ahi dos clases `ring-offset-*` a la vez las resolveria el
+         * orden de emision del CSS, que no es un contrato.)
+         */
+        accent: cn(
+          "bg-accent text-on-accent hover:bg-accent-hover active:bg-accent-active",
+          // DEC-068: volumen y resplandor rojo, como el "ENTER NOW" de la
+          // referencia. La capa es casi transparente en el centro (donde va el
+          // texto), asi que los contrastes medidos arriba siguen valiendo.
+          // DEC-074: la sombra del pie baja a la mitad -oscurecia el rojo y lo
+          // hacia ver apagado- y el resplandor crece.
+          "bg-gradient-to-b from-white/[0.1] via-white/0 to-black/10",
+          // Mismo motivo: el color de acento lo elige el panel.
+          "shadow-[0_10px_34px_-10px_rgb(var(--app-color-accent)/0.9)] hover:shadow-[0_14px_42px_-8px_rgb(var(--app-color-accent-hover)/0.95)]",
+          "[text-shadow:0_1px_1px_rgb(0_0_0/0.25)]",
+          SHINE,
+        ),
+        /**
+         * ACCION DE COMPRA, SIEMPRE ROJA: comprar ahora, anadir al carrito,
+         * pagar, ir a la tienda.
+         *
+         * Es `accent` con el rojo FIJO (`--app-color-buy`) en vez del acento de
+         * la marca: el cliente pidio que los botones de compra sean rojo fuerte
+         * elija el panel el color que elija. `accent` sigue existiendo para el
+         * resto de acciones principales (entrar, registrarse, guardar), que si
+         * siguen la marca.
+         */
+        buy: cn(
+          "bg-buy text-on-buy hover:bg-buy-hover active:bg-buy-active",
+          // Rojo vivo: luz arriba, un punto de sombra abajo, y un canto claro
+          // interior que lo hace parecer encendido.
+          "bg-gradient-to-b from-white/[0.2] via-white/0 to-black/[0.12]",
+          "shadow-[inset_0_1px_0_rgb(255_255_255/0.35),0_10px_36px_-8px_rgb(var(--app-color-buy)/0.95)]",
+          "hover:shadow-[inset_0_1px_0_rgb(255_255_255/0.4),0_14px_46px_-6px_rgb(var(--app-color-buy-hover)/1)]",
+          // Sombra bajo la letra: el rojo es claro y el blanco necesita apoyo.
+          "[text-shadow:0_1px_2px_rgb(90_0_8/0.55)]",
+          SHINE,
+        ),
+        /**
+         * Accion terciaria: superficie elevada, sin oro. DEC-068: el gris de
+         * metal del "VIEW DETAILS" de la referencia.
+         */
+        subtle: cn(
+          "border border-white/10 bg-surface-raised text-text hover:border-white/25 hover:bg-surface",
+          "bg-gradient-to-b from-white/[0.07] to-black/20 shadow-[inset_0_1px_0_rgb(255_255_255/0.06)]",
+        ),
+        /** Accion de bajo peso; solo texto. */
+        ghost: "bg-transparent text-text-muted hover:bg-surface-raised hover:text-text",
+        /** Accion destructiva. Nunca es la accion por defecto de un formulario. */
+        danger: "bg-danger text-on-danger hover:bg-danger/90 active:bg-danger/80",
+        /**
+         * Accion sobre BANDA CLARA (DEC-039): contorno de tinta sobre blanco.
+         *
+         * Existe porque `secondary` NO se puede usar ahi. Su contorno y su texto
+         * son el oro de marca, que sobre el blanco calido de la banda da 2,3:1:
+         * ilegible, y ademas el unico fallo de contraste que esta composicion
+         * puede producir. Esta variante lleva tinta (18,4:1) y reserva el oro de
+         * tinta para el estado de hover, donde marca la accion sin depender solo
+         * del color para decir que hay un control.
+         *
+         * EL ANILLO DE FOCO CAMBIA DE COLOR, NO SOLO DE OFFSET.
+         * Es el hallazgo M2/A1 de la revision de DEC-039: la primera version
+         * reasignaba `ring-offset` y dejaba el COLOR del anillo en el que trae
+         * `FOCUS_VISIBLE_CLASSES` (`--app-color-focus`, #f2d680), calibrado
+         * sobre el negro de pagina. Medido sobre esta banda ese oro claro da
+         * 1,35:1 contra el fondo (#faf8f4) y 1,43:1 contra el relleno blanco del
+         * boton: el indicador de foco existia en el DOM y no se veia. WCAG
+         * 1.4.11 pide 3:1 a un indicador de foco.
+         *
+         * El oro de TINTA (`--app-color-light-gold`, #7a6116) mide 5,58:1 sobre
+         * la banda y 5,92:1 sobre el blanco del boton. Es la misma sustitucion
+         * que ya hacia `ProductCard` para su propio anillo.
+         */
+        ink: cn(
+          "border border-light-border-strong bg-light-surface text-light-text",
+          "hover:border-light-gold hover:text-light-gold active:bg-light-bg",
+          // El offset del anillo se pinta sobre el fondo de la banda, no sobre
+          // el negro de pagina: un halo negro alrededor de un boton blanco se
+          // lee como un borde, no como foco.
+          "focus-visible:ring-light-gold focus-visible:ring-offset-light-bg",
+        ),
+        /**
+         * La misma banda clara, sin caja: el enlace de seccion (el “ver todo” que
+         * va a la derecha del titular). En la referencia esa accion es texto, no
+         * un boton, y darle caja la pondria a competir con las tarjetas.
+         *
+         * Mismo anillo de tinta que `ink`, y por el mismo motivo medido.
+         */
+        inkGhost: cn(
+          "bg-transparent text-light-text hover:text-light-gold",
+          "focus-visible:ring-light-gold focus-visible:ring-offset-light-bg",
+        ),
+      },
+      size: {
+        /** Solo para superficies densas de escritorio (tablas del admin). */
+        sm: "h-control-sm px-3 text-body-sm",
+        /** Por defecto. 44px de alto: area tactil comoda en movil. */
+        md: "h-control-md px-5 text-body-sm",
+        /**
+         * DEC-074: 17px y no 16. El techo lo pone el texto mas largo que lleva
+         * este tamano en un telefono de 360px ("Ver el detalle de la
+         * promocion"): a 17px le quedan 15px de aire por lado; a 18px, 6. Por
+         * eso tambien el relleno lateral baja en telefono.
+         */
+        lg: "h-control-lg px-5 text-heading-sm sm:px-6",
+        /**
+         * Llamada principal del hero. Existe con DEC-038: la referencia visual
+         * pide un CTA que no se pueda pasar por alto, y agrandar `lg` con
+         * clases sueltas en la portada habria dejado el tamano fuera del
+         * sistema. DEC-074: 22px (antes 18); "Comprar ahora" ocupa ahi la
+         * mitad del boton en un telefono de 360px.
+         */
+        xl: "h-control-xl px-8 text-[1.375rem]",
+      },
+      fullWidth: {
+        true: "w-full",
+        false: "",
+      },
+    },
+    defaultVariants: {
+      variant: "primary",
+      size: "md",
+      fullWidth: false,
+    },
+  },
+);
+
+export type ButtonVariant = NonNullable<VariantProps<typeof buttonVariants>["variant"]>;
+export type ButtonSize = NonNullable<VariantProps<typeof buttonVariants>["size"]>;
+
+export interface ButtonProps extends Omit<
+  ButtonHTMLAttributes<HTMLButtonElement>,
+  "className" | "type"
+> {
+  readonly variant?: ButtonVariant;
+  readonly size?: ButtonSize;
+  readonly fullWidth?: boolean;
+  /**
+   * Estado de envio en curso. Deshabilita el boton y marca `aria-busy`, pero
+   * NO sustituye el contenido: el texto sigue visible para que no aparezca
+   * ninguna cadena que el componente tuviera que inventarse. Todo texto llega
+   * traducido desde `apps/web` (DEC-021, DEC-022).
+   */
+  readonly loading?: boolean;
+  /**
+   * Anuncio opcional para lectores de pantalla durante la carga, ya traducido
+   * por el consumidor. Si no se pasa, no se anuncia nada adicional.
+   */
+  readonly loadingLabel?: string;
+  /** Contenido decorativo antes del texto. Debe ser `aria-hidden`. */
+  readonly iconStart?: ReactNode;
+  /** Contenido decorativo despues del texto. Debe ser `aria-hidden`. */
+  readonly iconEnd?: ReactNode;
+  readonly className?: string;
+  readonly ref?: Ref<HTMLButtonElement>;
+  /**
+   * `type` explicito y obligatorio: el valor por defecto del navegador es
+   * `submit`, que dentro de un formulario provoca envios accidentales.
+   */
+  readonly type?: "button" | "submit" | "reset";
+}
+
+export function Button({
+  variant,
+  size,
+  fullWidth,
+  loading = false,
+  loadingLabel,
+  iconStart,
+  iconEnd,
+  className,
+  children,
+  disabled,
+  type = "button",
+  ref,
+  ...rest
+}: ButtonProps) {
+  return (
+    <button
+      {...rest}
+      ref={ref}
+      type={type}
+      disabled={disabled === true || loading}
+      aria-busy={loading || undefined}
+      className={cn(buttonVariants({ variant, size, fullWidth }), className)}
+    >
+      {loading ? <Spinner /> : iconStart}
+      {children}
+      {loading ? null : iconEnd}
+      {loading && loadingLabel !== undefined ? (
+        <VisuallyHidden>{loadingLabel}</VisuallyHidden>
+      ) : null}
+    </button>
+  );
+}
+
+function Spinner() {
+  return (
+    <svg
+      className="h-4 w-4 shrink-0 animate-app-spin motion-reduce:animate-none"
+      viewBox="0 0 16 16"
+      fill="none"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <circle cx="8" cy="8" r="6.5" stroke="currentColor" strokeOpacity="0.25" strokeWidth="2" />
+      <path
+        d="M14.5 8a6.5 6.5 0 0 0-6.5-6.5"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}

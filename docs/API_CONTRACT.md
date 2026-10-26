@@ -1,0 +1,4647 @@
+# API_CONTRACT.md
+
+**Fuente de verdad compartida entre `frontend` y `backend`** para todas las
+APIs de Plantilla Sorteos.
+
+## Reglas
+
+1. **Un agente no debe asumir una API que no esté documentada aquí.**
+   Si el frontend necesita un endpoint inexistente, abre un handoff en
+   `docs/AGENT_HANDOFF.md`; no lo inventa ni lo mockea como definitivo.
+2. El **owner** de un endpoint es quien lo implementa y mantiene. Nadie más
+   cambia su forma sin handoff.
+3. **Ningún cambio de API es silencioso.** Modificar request, response,
+   códigos de error o autorización obliga a actualizar esta entrada.
+4. Un cambio incompatible con lo ya implementado requiere además una entrada
+   en `docs/DECISIONS.md`.
+5. **No se crean APIs alternativas** para evitar coordinarse.
+6. Los ejemplos de request/response **no contienen datos reales** ni secretos.
+7. `Status: PROPOSED` significa que el frontend puede diseñar contra el
+   contrato, pero **no** asumir que existe.
+8. **El campo `Authorization:` es obligatorio** en toda entrada (DEC-015), con
+   el nombre exacto del permiso del catálogo de `@app/security`. Un test de
+   contrato compara `apps/api/openapi/route-manifest.json` contra este
+   documento y falla en CI si una ruta existe en código y no aquí.
+
+## Estados
+
+- `PROPOSED` — acordado en papel, aún no implementado.
+- `IMPLEMENTED` — existe en el backend y respeta este contrato.
+- `TESTED` — cubierto por pruebas y revisado por `security-integration`.
+
+---
+
+## Plantilla
+
+```text
+Method:
+Endpoint:
+
+Purpose:
+
+Authentication:
+
+Request:
+
+Response:
+
+Errors:
+
+Authorization:
+
+Owner:
+
+Status:
+PROPOSED / IMPLEMENTED / TESTED
+```
+
+---
+
+# Convenciones transversales
+
+Estas convenciones aplican a **todos** los endpoints y no se repiten en cada
+entrada.
+
+## Prefijo y versión
+
+Toda ruta cuelga de `/api/v1/`. La base la publica el backend por
+`API_BASE_URL`; el frontend nunca la compone a mano.
+
+`apps/api` corre como proceso separado de `apps/web` (DEC-004). El frontend
+consume por HTTP, incluso desde el servidor.
+
+## Autorización (DEC-015)
+
+Los valores admitidos en `Authorization:` son tres, y solo tres:
+
+| Valor                          | Significado                                                                     |
+| ------------------------------ | ------------------------------------------------------------------------------- |
+| `PUBLIC`                       | Sin sesión. La ruta debe justificar por escrito por qué lo es, en el código.    |
+| `PARTICIPANT_SELF`             | Sesión de participante; la ruta solo devuelve recursos del propio participante. |
+| `<dominio>.<recurso>.<acción>` | Capacidad exacta del catálogo de `@app/security` (DEC-027).                     |
+
+El registro central de `apps/api` es **deny-by-default**: una ruta sin
+autorización declarada **no arranca el proceso**.
+
+Ojo con el vocabulario del catálogo: es `rules.version.read` (no
+`rules_version.read`), y `product.write` / `product.publish` son capacidades
+distintas (editar una ficha no es decidir qué se puede comprar).
+
+## Errores (DEC-022, DEC-031)
+
+Envelope único, en todas las rutas y en todos los códigos:
+
+```json
+{
+  "error": {
+    "code": "PROMOTION_NOT_FOUND",
+    "details": { "slug": "example-promotion" },
+    "request_id": "01JC000000000000000000EXAMPLE"
+  }
+}
+```
+
+- `code` **es la clave canónica de traducción**. No existe `message_key`, ni
+  `message_en`, ni `message_es`.
+- `details` es siempre estructurado. **Nunca prosa.**
+- El copy en ambos idiomas pertenece a `frontend` (`messages/en-US.json` y
+  `messages/es-US.json`).
+
+Códigos transversales: `UNAUTHENTICATED` (401), `FORBIDDEN` (403),
+`STEP_UP_REQUIRED` (403), `NOT_FOUND` (404), `VALIDATION_FAILED` (422),
+`RATE_LIMITED` (429), `INTERNAL_ERROR` (500), `SERVICE_UNAVAILABLE` (503).
+
+## Dinero y entries (DEC-010)
+
+**Nunca coma flotante.**
+
+- Dinero: `{ "amount_minor": "1999", "currency": "USD" }`. El importe viaja
+  como **cadena de dígitos**, no como número: un entero grande no sobrevive a
+  `JSON.parse` sin riesgo de perder precisión.
+- Cantidades de entries: entero.
+- Multiplicadores: `{ "numerator": 2, "denominator": 1 }`.
+- Números de entry: **cadena** (`"APP26-000450001"`), jamás número.
+
+## Tiempo (DEC-011)
+
+Todo instante es ISO-8601 en UTC (`2026-09-15T12:00:00.000Z`). Cada promoción
+declara además su `legal_timezone` IANA, y **los deadlines los evalúa el
+servidor** contra esa zona. El navegador nunca es fuente de verdad.
+
+## Texto (DEC-022, DEC-030)
+
+Tres categorías, con tres dueños distintos:
+
+1. **Copy de producto** — vive en los diccionarios de `frontend`. El backend
+   manda códigos.
+2. **Contenido dinámico localizado** — títulos, nombres de premio,
+   descripciones de producto. Viaja por locale desde el backend:
+   `{ "en-US": "...", "es-US": "..." }`. Ambas claves obligatorias.
+   `frontend` lo renderiza tal cual y **no lo traduce jamás**.
+3. **Texto legalmente controlante** — Official Rules y disclaimers. Viaja con
+   `is_legally_controlling` e `is_informational_translation`, y se renderiza
+   literalmente.
+
+## Locale
+
+Cabecera `Accept-Language` con la **etiqueta completa** (`en-US`, `es-US`), no
+el segmento de ruta (`en`, `es`) — DEC-029.
+
+## Paginación
+
+Por **cursor**, nunca por offset: con offset, una entrada nueva durante la
+paginación desplaza filas y el cliente ve duplicados o huecos.
+
+```json
+{ "items": [], "next_cursor": "opaque-string-or-null" }
+```
+
+Parámetros: `?cursor=<opaque>&limit=<1..100>`. El cursor es opaco: el cliente
+no lo interpreta.
+
+---
+
+# Endpoints
+
+## Estado de esta sección
+
+Poblada por `backend` resolviendo `HO-016` y reconciliando las listas P0 de
+`frontend` y `backend` (`HO-005`).
+
+**Hay 15 rutas `IMPLEMENTED`** tras el hito B3: las tres de infraestructura,
+la configuración pública, las cuatro de storefront (promociones y catálogo) y
+las cinco del carrito de servidor con su cotización de entries. Todo lo demás
+sigue en `PROPOSED`: acordado en papel, para que `frontend` diseñe contra ello,
+y **no asumible como existente**.
+
+`IMPLEMENTED` **no es** `TESTED`: significa que existe en el backend y respeta
+este contrato, con pruebas propias de `backend`. La revisión de
+`security-integration` es lo que las mueve a `TESTED`.
+
+### Aviso sobre las rutas del carrito (DEC-079)
+
+Las cinco rutas de carrito son **`PUBLIC`** desde DEC-079: un visitante **sin
+cuenta** tiene carrito y ve su total; la cuenta se pide **al pagar**. El carrito
+pertenece a un participante (sesión de cuenta) o a una **sesión anónima de
+carrito**, que emite `POST /cart/items` la primera vez que el visitante añade
+algo. Esa sesión la produce el mismo sistema de sesión de DEC-006 —token opaco,
+SHA-256 en tabla, cookie `httpOnly`, revocable—, vive en su propia tabla
+(`cart_sessions`) y **ninguna puerta de participante ni de personal la acepta**.
+Al registrarse o iniciar sesión, su carrito se suma al de la cuenta y la sesión
+anónima se revoca (sección 10).
+
+Que sean `PUBLIC` no significa que cualquiera vea cualquier carrito: el carrito
+sale **siempre** del principal de la petición, nunca de un identificador que
+mande el cliente, y una línea ajena responde `404` igual que una inexistente.
+
+### Índice de rutas implementadas
+
+Con el **camino tal y como lo declara el código** (`:slug`, no `{slug}`). Las
+entradas detalladas de más abajo usan la notación OpenAPI `{slug}`, que es la
+misma ruta escrita de otra forma; esta tabla es la que permite comparar el
+documento contra `apps/api/openapi/route-manifest.json` sin interpretar el
+markdown, y es lo que verifica el test de contrato de DEC-015.
+
+| Método | Camino                                  | Authorization      |
+| ------ | --------------------------------------- | ------------------ |
+| GET    | /api/v1/config                          | `PUBLIC`           |
+| GET    | /api/v1/promotions                      | `PUBLIC`           |
+| GET    | /api/v1/promotions/active               | `PUBLIC`           |
+| GET    | /api/v1/promotions/:slug                | `PUBLIC`           |
+| GET    | /api/v1/promotions/:slug/official-rules | `PUBLIC`           |
+| GET    | /api/v1/products                        | `PUBLIC`           |
+| GET    | /api/v1/products/:slug                  | `PUBLIC`           |
+| GET    | /api/v1/cart                            | `PUBLIC` (DEC-079) |
+| POST   | /api/v1/cart/items                      | `PUBLIC` (DEC-079) |
+| PATCH  | /api/v1/cart/items/:item_id             | `PUBLIC` (DEC-079) |
+| DELETE | /api/v1/cart/items/:item_id             | `PUBLIC` (DEC-079) |
+| GET    | /api/v1/cart/entry-quote                | `PUBLIC` (DEC-079) |
+| POST   | /api/v1/auth/register                   | `PUBLIC`           |
+| POST   | /api/v1/auth/login                      | `PUBLIC`           |
+| GET    | /api/v1/auth/session                    | `PUBLIC`           |
+| POST   | /api/v1/auth/logout                     | `PUBLIC`           |
+
+**Plantilla:** se retiraron `POST /auth/mfa/verify`, `/auth/verify-email`,
+`/auth/verify-email/resend`, `/auth/password/forgot`, `/auth/password/reset`,
+`/auth/phone/start`, `/auth/password/reset-sms` y `POST /privacy-requests`. El
+acceso es solo con correo y contraseña; las contraseñas olvidadas las fija el
+administrador (`POST /admin/participants/{id}/password`).
+
+Las tres de infraestructura (`/api/v1/health`, `/api/v1/health/ready`,
+`/api/v1/openapi.json`) están documentadas más abajo y exentas de ese gate por
+etiqueta `meta`: no las consume `frontend`.
+
+### Aviso sobre `amount_minor`
+
+Es **cadena de dígitos**, no número, en todas las rutas ya implementadas
+(DEC-010). El contrato provisional de `apps/web` (`src/lib/api/contract.ts`)
+lo declara como `number`; esa divergencia hay que resolverla en el frontend, no
+aquí, y desaparece cuando se consuman los tipos generados del OpenAPI (DEC-014).
+
+---
+
+## 1. Infraestructura (`meta`)
+
+Estas rutas no las consume `frontend`: las consulta el orquestador. Se listan
+para que el documento describa la superficie completa.
+
+```text
+Method: GET
+Endpoint: /api/v1/health
+
+Purpose:
+Liveness. "El proceso responde." NO consulta la base de datos a propósito: si
+lo hiciera, un incidente de PostgreSQL provocaría que el orquestador reiniciara
+procesos sanos y empeorara la caída.
+
+Authentication: ninguna
+
+Request: sin parámetros
+
+Response: 200 { "status": "ok" }
+
+Errors: ninguno propio
+
+Authorization: PUBLIC
+
+Owner: backend
+
+Status: IMPLEMENTED
+```
+
+```text
+Method: GET
+Endpoint: /api/v1/health/ready
+
+Purpose:
+Readiness. "Puedo atender tráfico." Sí comprueba la base de datos.
+
+Authentication: ninguna
+
+Request: sin parámetros
+
+Response:
+200 | 503 { "status": "ready" | "degraded", "checks": [{ "name": "database", "ok": true }] }
+
+Devuelve el nombre de cada comprobación y si pasó. Nunca el detalle del fallo:
+un healthcheck es el endpoint que cualquiera puede consultar, y por tanto el
+peor sitio para dar pistas.
+
+Errors: ninguno propio
+
+Authorization: PUBLIC
+
+Owner: backend
+
+Status: IMPLEMENTED
+```
+
+```text
+Method: GET
+Endpoint: /api/v1/openapi.json
+
+Purpose:
+Documento OpenAPI 3.1 generado desde los esquemas Zod (DEC-014). No es una API
+documentada por este contrato: ES este contrato en forma legible por máquina.
+
+Authentication: ninguna
+
+Request: sin parámetros
+
+Response: 200 documento OpenAPI 3.1
+
+Errors: ninguno propio
+
+Authorization: PUBLIC
+
+Owner: backend
+
+Status: IMPLEMENTED
+```
+
+---
+
+## 2. Configuración pública
+
+```text
+Method: GET
+Endpoint: /api/v1/config
+
+Purpose:
+Feature flags legalmente materiales y modalidad AMOE vigente, leídos en
+servidor (DEC-013). Es lo que decide QUÉ renderiza la interfaz.
+
+Authentication: ninguna
+
+Request: sin parámetros
+
+Response: 200
+{
+  "feature_flags": {
+    "amoe_enabled": false,
+    "visible_entry_numbers_enabled": false,
+    "internal_draw_enabled": false,
+    "state_eligibility_enforcement_enabled": false,
+    "age_gate_enabled": false,
+    "entry_multipliers_enabled": false,
+    "entry_caps_enabled": false,
+    "entry_expiration_enabled": false,
+    "winner_publication_enabled": false,
+    "manual_adjustments_enabled": false,
+    "provisional_entries_enabled": false,
+    "dual_approval_for_sensitive_actions_enabled": true
+  },
+  "amoe_mode": null,
+  "supported_locales": ["en-US", "es-US"],
+  "password_policy": { "minimum_length": 12, "maximum_length": 1024 },
+  "required_consents": [
+    { "key": "OFFICIAL_RULES", "version": "2026-10-04", "text_key": "OFFICIAL_RULES", "required": true },
+    { "key": "TERMS", "version": "2026-09-30", "text_key": "TERMS", "required": true },
+    { "key": "PRIVACY", "version": "2026-09-30", "text_key": "PRIVACY", "required": true }
+  ],
+  "brand": { ...misma forma que `GET /admin/brand` sin `logo_media_id` ni `updated_by_admin_user_id` (§17)... }
+}
+
+`brand` (§17) es la marca guardada desde el panel: nombre, logotipo, colores,
+datos legales, contacto, dominio, prefijos y zona horaria. La web la aplica en
+el siguiente render; por eso viaja aquí, que ya se lee en cada petición sin
+caché. Nada de ello es secreto: está impreso en cada página pública.
+
+`required_consents` (DEC-067) son los documentos que el alta exige aceptar, con
+la versión vigente (`apps/api/src/config/consents.ts`). La web pinta una casilla
+por cada uno; el alta y `PUT /me/eligibility` revalidan.
+
+`password_policy` publica la política de `packages/security`
+(`MINIMUM_PASSWORD_LENGTH`, `MAXIMUM_PASSWORD_LENGTH`) para que los
+formularios de alta y de restablecimiento la digan ANTES de enviar (añadido
+2026-10-01). Es la misma constante que aplica `POST /auth/register`; la web no
+tiene copia del número.
+
+Las 12 claves son las de DEC-032. `amoe_mode` es un enum
+(`ONLINE_FORM` | `MAIL_IN_REVIEW` | `CODE` | `EXTERNAL_INSTRUCTIONS`) o `null`
+cuando todavía no hay modalidad elegida. NO existe el valor `DISABLED`: si hay
+vía AMOE lo responde `amoe_enabled` y solo él.
+
+Esta respuesta NO se cachea. Un flag legalmente material que se apaga en el
+admin tiene que apagarse en la siguiente petición.
+
+Errors: ninguno propio
+
+Authorization: PUBLIC
+
+Owner: backend
+
+Status: IMPLEMENTED
+```
+
+---
+
+## 3. Storefront: promociones
+
+```text
+Method: GET
+Endpoint: /api/v1/promotions
+
+Purpose:
+Listado de promociones visibles al público.
+
+Authentication: ninguna
+
+Request: ?cursor=<opaque>&limit=<1..100>
+
+Response: 200 { "items": [PromotionSummary], "next_cursor": null }
+
+Errors: VALIDATION_FAILED (422) si el cursor o el límite no son válidos
+
+Authorization: PUBLIC
+
+Owner: backend
+
+Status: IMPLEMENTED
+```
+
+```text
+Method: GET
+Endpoint: /api/v1/promotions/active
+
+Purpose:
+La promoción activa, para la portada.
+
+Authentication: ninguna
+
+Request: sin parámetros
+
+Response: 200 PromotionSummary
+
+Errors:
+404 NOT_FOUND cuando no hay ninguna promoción activa.
+
+NOTA PARA `frontend`: ese 404 NO es un error. Es un estado normal del negocio
+-el periodo entre promociones- y debe renderizarse como estado vacío, no como
+fallo.
+
+Authorization: PUBLIC
+
+Owner: backend
+
+Status: IMPLEMENTED
+```
+
+```text
+Method: GET
+Endpoint: /api/v1/promotions/{slug}
+
+Purpose:
+Detalle de una promoción.
+
+Authentication: ninguna
+
+Request: `slug` en la ruta
+
+Response: 200 PromotionDetail
+
+Errors:
+404 PROMOTION_NOT_FOUND. Aquí el 404 SÍ es significativo: la ruta apunta a un
+slug concreto, así que debe acabar en la página 404.
+
+Authorization: PUBLIC
+
+Owner: backend
+
+Status: IMPLEMENTED
+```
+
+```text
+Method: GET
+Endpoint: /api/v1/promotions/{slug}/official-rules
+
+Purpose:
+Texto legalmente controlante de la versión de reglas vigente (DEC-012,
+excepción de DEC-022).
+
+Authentication: ninguna
+
+Request: `slug` en la ruta
+
+Response: 200
+{
+  "rules_version_id": "uuid",
+  "version": 1,
+  "effective_at": "2026-09-01T05:00:00.000Z",
+  "documents": [
+    {
+      "locale": "en-US",
+      "title": "...",
+      "body": "...",
+      "is_legally_controlling": true,
+      "is_informational_translation": false
+    }
+  ]
+}
+
+`frontend` renderiza este texto TAL CUAL. No lo traduce, no lo autotraduce y no
+hace fallback de un idioma al otro. Puede no haber ningún documento marcado
+como controlante: el idioma controlante sigue en `TBD`
+(`docs/LEGAL_PENDING.md`), y el sistema no lo adivina.
+
+Errors: 404 PROMOTION_NOT_FOUND, 404 RULES_VERSION_NOT_FOUND
+
+Authorization: PUBLIC
+
+Owner: backend
+
+Status: IMPLEMENTED
+```
+
+### Forma de `PromotionSummary`
+
+```json
+{
+  "id": "uuid",
+  "slug": "example-promotion",
+  "status": "ACTIVE",
+  "title": { "en-US": "...", "es-US": "..." },
+  "summary": { "en-US": "...", "es-US": "..." },
+  "legal_timezone": "America/Chicago",
+  "starts_at": "2026-09-01T05:00:00.000Z",
+  "ends_at": "2026-10-01T05:00:00.000Z",
+  "rules_version_id": "uuid",
+  "prize_value": { "amount_minor": "5000000", "currency": "USD" }
+}
+```
+
+`status` usa el enum canónico de `@app/sweepstakes`: `DRAFT`, `SCHEDULED`,
+`ACTIVE`, `CLOSED`, `EXPORT_PREPARATION`, `DRAW_PENDING`,
+`POTENTIAL_WINNER_REVIEW`, `COMPLETED`, `CANCELLED`.
+
+`rules_version_id` y `prize_value` pueden ser `null` mientras no haya versión
+de reglas activa o premio configurado. La interfaz debe poder representar ese
+caso sin inventarse nada.
+
+**`prize_value` es `null` SIEMPRE hoy.** No existe todavía ninguna tabla de
+premios ni ninguna clave de premio en `PromotionRulesVersion`, y el valor de un
+premio es un dato legalmente material que nadie ha aprobado (principio 2). El
+campo se sirve para que `frontend` no tenga que cambiar de forma cuando exista.
+Modelar el premio requiere una decisión previa: es un handoff abierto, no un
+olvido de implementación.
+
+`DRAFT` **no sale nunca** al público: `GET /promotions` la omite y
+`GET /promotions/{slug}` devuelve `PROMOTION_NOT_FOUND`. El resto de estados sí,
+`CANCELLED` incluido: una promoción que estuvo publicada y se canceló tiene que
+poder explicarse, y hacerla desaparecer dejaría un enlace roto sin motivo.
+
+El cursor de `GET /promotions` ordena por `slug`. Es opaco: no se interpreta.
+
+### Forma de `PromotionDetail`
+
+> **Modificado por §13.5 (DEC-052):** `PromotionDetail` publica además
+> `entry_offer` (tasas por tipo de producto, tope por participante, bonus
+> activo y próximos, resumen AMOE). **No existe `entry_pool`.**
+
+`PromotionSummary` más un objeto `rules_version`, que puede ser `null`:
+
+```json
+{
+  "rules_version": {
+    "id": "uuid",
+    "version": 1,
+    "effective_at": "2026-09-01T05:00:00.000Z",
+    "has_controlling_document": false
+  }
+}
+```
+
+`has_controlling_document` puede ser `false` con documentos publicados: el
+idioma controlante sigue en `TBD` (`docs/LEGAL_PENDING.md`) y el sistema no lo
+adivina.
+
+> **Añadido por DEC-065:** `media`, la fotografía del premio para el hero, o
+> `null` si la promoción no tiene. Es la forma que el frontend pidió en HO-039.
+
+```json
+{
+  "media": {
+    "hero_url": "/media/3f2b8c1e-5d4a-4b7e-9c2f-1a2b3c4d5e6f.jpg",
+    "square_url": null,
+    "alt": {
+      "en-US": "Red 2025 pickup truck",
+      "es-US": "Camioneta pickup 2025 roja"
+    }
+  }
+}
+```
+
+- `hero_url` es siempre una ruta del propio sitio (`/media/<id>.<ext>`), nunca
+  `https://`: el hero la pinta con `next/image`.
+- `square_url` es hoy siempre `null`: el panel sube una sola imagen.
+- `alt` `null` significa decorativa (`alt=""`). Llega con los dos idiomas o
+  `null`, nunca con uno solo.
+- `summary` (de `PromotionSummary`) es el lema que se edita en el panel
+  (`tagline`); `""` en un idioma sin lema.
+- **Añadido por DEC-066:** `media.gallery`, lista `[{ "url", "alt" }]` con TODAS
+  las fotos del carrusel en orden, empezando por la de `hero_url`. Con una sola
+  foto trae solo esa. Sin foto principal pero con adicionales, la primera
+  adicional ocupa `hero_url`.
+
+---
+
+## 4. Storefront: catálogo
+
+> **Modificado por §13.4 (DEC-052, DEC-053):** todo producto publica `kind`,
+> `category`, `image_url`, y cada variante `name`, `image_url` y un
+> `entry_offer` calculado por el backend. Filtros `?kind=&category=`.
+
+```text
+Method: GET
+Endpoint: /api/v1/products
+
+Purpose:
+Catálogo de mercancía elegible.
+
+Authentication: ninguna
+
+Request: ?cursor=<opaque>&limit=<1..100>&promotion_slug=<slug>
+
+Response: 200 { "items": [ProductSummary], "next_cursor": null }
+
+Cada producto trae `name` y `description` como contenido localizado (DEC-030) y
+sus variantes con precio en unidad menor.
+
+IMPORTANTE: el catálogo NO declara cuántas entries da un producto. La
+elegibilidad y la fórmula pertenecen a la `PromotionRulesVersion` (DEC-012). Si
+el número de entries viviera en el producto, editar el catálogo cambiaría
+retroactivamente lo que significó una compra pasada.
+
+Errors: VALIDATION_FAILED (422)
+
+Authorization: PUBLIC
+
+Owner: backend
+
+Status: IMPLEMENTED
+```
+
+```text
+Method: GET
+Endpoint: /api/v1/products/{slug}
+
+Purpose:
+Ficha de producto con sus variantes.
+
+Authentication: ninguna
+
+Request: `slug` en la ruta
+
+Response: 200 ProductDetail
+
+Errors: 404 PRODUCT_NOT_FOUND
+
+Authorization: PUBLIC
+
+Owner: backend
+
+Status: IMPLEMENTED
+```
+
+### Forma de `ProductSummary` y `ProductDetail`
+
+Son **la misma forma**. La ficha no devuelve nada que el listado no devuelva, y
+mantener dos formas casi iguales sólo produce que una se quede atrás:
+
+```json
+{
+  "id": "uuid",
+  "sku": "APP-TEE",
+  "slug": "example-tee",
+  "name": { "en-US": "...", "es-US": "..." },
+  "description": { "en-US": "...", "es-US": "..." },
+  "currency": "USD",
+  "variants": [
+    {
+      "id": "uuid",
+      "sku": "APP-TEE-M",
+      "price": { "amount_minor": "2500", "currency": "USD" },
+      "availability": { "status": "IN_STOCK" }
+    }
+  ]
+}
+```
+
+`description` puede ser `null`.
+
+**`availability` sustituye a `stock_quantity` (HO-017).** El catálogo ya **no
+publica el inventario exacto**. Estas dos rutas son **anónimas** y publicaban
+`stock_quantity` en crudo mientras el carrito —que va con sesión— deliberadamente
+no lo publicaba: una de las dos superficies estaba mal, y se resuelve hacia la
+que **no filtra** información de negocio, que es además lo que HO-017 pedía.
+
+Es **el mismo objeto** que la línea del carrito (sección 5): mismo enum estable
+de tres valores, misma columna `product_variants.stock_quantity` y **el mismo
+predicado**, el que decide el `409 INSUFFICIENT_STOCK` —`fitsStock`, hoy en
+`apps/api/src/services/availability.ts`, importado por el catálogo y por las dos
+mutaciones del carrito, para que no existan dos definiciones de "hay
+existencias"—. La única diferencia es **la cantidad por la que se pregunta**: en
+el carrito es la de la línea; aquí es **una unidad**, porque en la ficha nadie ha
+elegido todavía cuántas quiere. La pregunta del catálogo es, literalmente, "¿se
+puede comprar una unidad?":
+
+| stock de la variante   | `status`       | significado                                  |
+| ---------------------- | -------------- | -------------------------------------------- |
+| no gestionado (`null`) | `IN_STOCK`     | nada limita la compra; **`null` no es cero** |
+| `0` o menos            | `OUT_OF_STOCK` | añadir la primera unidad devolvería `409`    |
+| exactamente `1`        | `LOW_STOCK`    | queda justo la unidad por la que se pregunta |
+| mayor que `1`          | `IN_STOCK`     | queda margen                                 |
+
+`null` sigue significando "existencias no gestionadas": esa variante da
+`IN_STOCK` y se puede añadir al carrito en cualquier cantidad admitida. El
+umbral de `LOW_STOCK` **no es un número de negocio** —nadie ha aprobado ninguno
+y el principio 2 de `CLAUDE.md` prohíbe inventarlo—: es la cantidad preguntada,
+igual que en la sección 5.
+
+`availability` es un **objeto** y no una cadena, por el mismo motivo que allí:
+el día que se decida publicar la cantidad, el campo cabe dentro sin cambiar el
+tipo de lo ya publicado. Hoy **sólo** lleva `status`; `quantity_available` no se
+publica en ninguna de las dos superficies.
+
+`is_purchasable` —"¿está a la venta?", que no es la misma pregunta que "¿hay
+existencias?"— **sigue pendiente** (HO-017) y **no** se deduce de `availability`:
+una variante retirada o no publicada puede tener existencias de sobra. Cuando se
+decida, se documenta aquí antes de implementarse.
+
+Sólo salen productos y variantes en `ACTIVE`. El parámetro `promotion_slug` que
+figuraba en la propuesta **no está implementado**: la elegibilidad no vive en el
+catálogo (DEC-012), así que filtrar por promoción exigiría que el listado
+aplicase reglas legales, que es justo lo que este endpoint no debe hacer.
+
+Orden (DEC-064): mercancía antes que paquetes; dentro de cada tipo, con imagen
+antes que sin ella; después la `position` de la categoría (sin categoría, al
+final), el precio "desde" de menor a mayor y, por último, el `slug`. Así los
+paquetes salen Bronce, Plata, Gold, Diamante sin un campo de "rango". El cursor
+sigue siendo opaco y guarda esa clave de orden.
+
+---
+
+## 5. Carrito de servidor (DEC-023)
+
+**El carrito vive en el servidor.** La cotización de entries se calcula sobre
+el carrito del servidor, nunca sobre una lista de ítems enviada por el cliente:
+en un producto donde una cifra de entries mal calculada es un problema legal,
+la traza de qué se cotizó y cuándo vale más que la simplicidad.
+
+Todas las rutas de esta sección devuelven **`CartWithQuote`**:
+
+```json
+{
+  "id": "uuid",
+  "currency": "USD",
+  "updated_at": "2026-09-15T12:00:00.000Z",
+  "item_count": 2,
+  "lines": [
+    {
+      "id": "uuid",
+      "variant_id": "uuid",
+      "product_slug": "example-tee",
+      "sku": "APP-TEE-M",
+      "name": { "en-US": "...", "es-US": "..." },
+      "quantity": 2,
+      "unit_price": { "amount_minor": "2500", "currency": "USD" },
+      "line_subtotal": { "amount_minor": "5000", "currency": "USD" },
+      "image_url": null,
+      "availability": { "status": "IN_STOCK" }
+    }
+  ],
+  "subtotal": { "amount_minor": "5000", "currency": "USD" },
+  "shipping": {
+    "status": "CHARGED",
+    "amount": { "amount_minor": "799", "currency": "USD" }
+  },
+  "total": { "amount_minor": "5799", "currency": "USD" },
+  "entry_quote": null
+}
+```
+
+- `subtotal` es **dinero**; `entry_quote` son **entries**. No son lo mismo y no
+  se derivan uno del otro.
+- **`shipping` y `total` (DEC-079).** Envío con la **misma regla** con la que se
+  cobra al pagar: tarifa **fija por pedido** si el carrito lleva al menos una
+  línea de mercancía (`kind = MERCHANDISE`); los paquetes de participaciones no
+  se envían. Nunca es gratis.
+
+  | `shipping.status` | cuándo                                 | `shipping.amount` | `total`                   |
+  | ----------------- | -------------------------------------- | ----------------- | ------------------------- |
+  | `NOT_REQUIRED`    | solo paquetes, o carrito vacío         | `null`            | subtotal (o `null` vacío) |
+  | `CHARGED`         | lleva mercancía y hay tarifa vigente   | la tarifa         | subtotal + tarifa         |
+  | `NOT_CONFIGURED`  | lleva mercancía y no hay tarifa puesta | `null`            | `null`                    |
+
+  Con `NOT_CONFIGURED` el checkout responde `409 SHIPPING_NOT_CONFIGURED`: un
+  total sin el envío que se va a cobrar sería una cifra falsa. **Sin impuestos**
+  por ahora (pendiente legal, `docs/LEGAL_PENDING.md`). **El envío no genera
+  participaciones**: `entry_quote` se calcula sobre las líneas, que no lo
+  incluyen ("excluding taxes and shipping").
+
+- `entry_quote` es `null` cuando no hay promoción activa. Un carrito sigue
+  siendo válido en el periodo entre promociones: se puede comprar mercancía sin
+  que haya nada que cotizar, y hacer fallar `GET /cart` impediría hasta vaciarlo.
+- `currency` y `subtotal` son `null` en un carrito vacío: sin líneas no hay
+  moneda que declarar.
+- `id` es `00000000-0000-0000-0000-000000000000` cuando el solicitante no tiene
+  carrito. **Leer no crea nada**: un `GET` que insertara una fila haría que cada
+  rastreador dejara un carrito vacío en la base de datos.
+
+**`updated_at`, `item_count`, `image_url` y `availability` (HO-017).**
+
+- `updated_at` es el instante de la **última mutación del carrito, líneas
+  incluidas**. ISO-8601 UTC. Existe por el motivo que dio `frontend` y que no es
+  cosmético: comparado con `entry_quote.evaluated_at` es lo que permite saber
+  que la cifra de entries en pantalla **ya no corresponde al carrito**. Lo pone
+  el motor —`carts_set_updated_at` sobre la fila y `cart_items_touch_cart`
+  (migración `0025`) cuando cambian las líneas—, nunca el reloj del proceso que
+  responde. Vale `null` **sólo** en el carrito vacío sintético: ahí no existe
+  fila, y devolver `now()` sería afirmar que un carrito inexistente acaba de
+  cambiar.
+- `item_count` es la **suma de `quantity`** de las líneas, entero. No es el
+  número de líneas: dos unidades de la misma variante son una línea y cuentan
+  dos. Vale `0` —nunca `null`— en un carrito vacío: contar cero cosas es cero.
+  No entra en ninguna aritmética de entries; es una cuenta de mercancía.
+- `image_url` (desde 2026-10-13) es la foto de la **variante** si tiene una
+  propia y, si no, la del **producto**: la misma ruta que publica el catálogo
+  (`/media/...` o `https:`, ver §13.6). Vale `null` cuando el producto no tiene
+  foto, y la clave se publica igualmente. Su tipo es `string | null`.
+- `availability` es un **objeto**, no una cadena: `{ "status": ... }`. Hoy sólo
+  lleva `status`. **No publica la cantidad exacta de existencias**: HO-017 lo
+  pide expresamente y ninguna decisión de `docs/DECISIONS.md` autoriza lo
+  contrario. Que sea objeto y no cadena permite añadir el campo el día que se
+  decida, sin cambiar el tipo de lo ya publicado.
+
+`availability.status` sale de `product_variants.stock_quantity` —**la misma
+columna que decide el `409 INSUFFICIENT_STOCK`**, nunca de una segunda lectura
+del inventario— y de la cantidad de **esa** línea:
+
+| stock de la variante   | `status`       | significado                                               |
+| ---------------------- | -------------- | --------------------------------------------------------- |
+| no gestionado (`null`) | `IN_STOCK`     | nada limita esta línea; `null` no es cero                 |
+| menor que `quantity`   | `OUT_OF_STOCK` | la línea ya **no cabe**: pedir esa cantidad daría `409`   |
+| igual a `quantity`     | `LOW_STOCK`    | se lleva exactamente lo que queda; no cabe una unidad más |
+| mayor que `quantity`   | `IN_STOCK`     | queda margen                                              |
+
+El umbral de `LOW_STOCK` es **la propia línea** y no un número. Lo habitual
+sería "quedan menos de N", pero ese N es una constante de negocio que nadie ha
+aprobado, y el principio 2 de `CLAUDE.md` prohíbe inventarla. La definición de
+arriba no inventa nada: sale entera de la comparación que ya decide el `409`.
+
+`status` es un **enum estable**; el copy es de `frontend` (DEC-022).
+`OUT_OF_STOCK` significa "esta cantidad no se puede servir hoy", que puede
+querer decir "quedan 3 y pediste 5": la etiqueta que se enseñe es decisión de
+`frontend`, no de la API.
+
+`availability` **no** responde "¿está a la venta?". Una variante retirada o no
+publicada es otra pregunta —la que HO-017 llama `is_purchasable`—, sigue pedida
+para el catálogo (sección 4) y **no** se deduce de ésta.
+
+- Una variante aparece **como máximo una vez** por carrito. Añadir la misma
+  variante dos veces **suma cantidad**; no duplica la línea.
+- Un carrito tiene **una sola moneda**. Mezclarlas devuelve
+  `409 CART_CURRENCY_MISMATCH`; lo impone además un trigger.
+- `quantity` está acotada a `1..10000` por línea. No es un límite legal —los
+  topes de entries son otra cosa y viven en la `PromotionRulesVersion`—: es un
+  límite operativo.
+
+```text
+Method: GET
+Endpoint: /api/v1/cart
+
+Purpose:
+Carrito vigente de quien pregunta, con envío, total y cotización de entries.
+
+Authentication: opcional. Sesión de participante, sesión anónima de carrito
+(cookie `<SESSION_COOKIE_NAME>_cart`, DEC-079) o ninguna. Leer no emite sesión.
+
+Request: sin parámetros
+
+Response: 200 CartWithQuote
+
+Errors: ninguno propio; un carrito inexistente (o sin sesión) devuelve uno vacío
+
+Authorization: PUBLIC (DEC-079)
+
+Owner: backend
+
+Status: IMPLEMENTED
+```
+
+```text
+Method: POST
+Endpoint: /api/v1/cart/items
+
+Purpose:
+Añadir una variante al carrito.
+
+Authentication: opcional. Sin sesión de participante ni de carrito, la ruta
+EMITE la sesión anónima de carrito y responde con su `Set-Cookie`
+(`httpOnly`, `Secure`, `SameSite=Lax`, `Path=/`, 30 días; DEC-079). Se emite
+después de validar la variante: una petición rechazada no deja sesión.
+
+Request: { "variant_id": "uuid", "quantity": 1 }
+
+Response: 200 CartWithQuote
+
+Errors:
+404 PRODUCT_NOT_FOUND, 409 VARIANT_NOT_PURCHASABLE, 409 INSUFFICIENT_STOCK,
+422 VALIDATION_FAILED
+
+Authorization: PUBLIC (DEC-079)
+
+Owner: backend
+
+Status: IMPLEMENTED
+```
+
+```text
+Method: PATCH
+Endpoint: /api/v1/cart/items/{item_id}
+
+Purpose:
+Cambiar la cantidad de una línea.
+
+Authentication: opcional (DEC-079). Sin sesión no hay carrito: 404.
+
+Request: { "quantity": 3 }
+
+Response: 200 CartWithQuote
+
+Errors: 404 CART_ITEM_NOT_FOUND, 409 INSUFFICIENT_STOCK, 422 VALIDATION_FAILED
+
+Authorization: PUBLIC (DEC-079)
+
+Owner: backend
+
+Status: IMPLEMENTED
+```
+
+```text
+Method: DELETE
+Endpoint: /api/v1/cart/items/{item_id}
+
+Purpose:
+Quitar una línea.
+
+Authentication: opcional (DEC-079). Sin sesión no hay carrito: 404.
+
+Request: `item_id` en la ruta
+
+Response: 200 CartWithQuote
+
+Errors: 404 CART_ITEM_NOT_FOUND
+
+Authorization: PUBLIC (DEC-079)
+
+Owner: backend
+
+Status: IMPLEMENTED
+```
+
+```text
+Method: GET
+Endpoint: /api/v1/cart/entry-quote
+
+Purpose:
+Cotización de entries del carrito de servidor, con desglose auditable.
+
+Resuelve el conflicto de nombres de `HO-005`: `frontend` proponía
+`POST /entries/quote` y `backend` `POST /api/v1/entry-quotes/cart`. Gana un
+`GET` sobre el carrito, porque DEC-023 ya hace del carrito el recurso y una
+cotización es una LECTURA derivada de él. Un `POST` sugeriría que el cliente
+aporta los ítems, que es justo lo que DEC-023 descarta.
+
+Authentication: sesión
+
+Request: sin cuerpo
+
+Response: 200
+{
+  "promotion_id": "uuid",
+  "rules_version_id": "uuid",
+  "engine_version": 2,
+  "evaluated_at": "2026-09-15T12:00:00.000Z",
+  "eligible_subtotal": { "amount_minor": "3000", "currency": "USD" },
+  "entries_before_caps": 30,
+  "final_entries": 25,
+  "eligible_items": [
+    { "line_id": "...", "sku": "...", "quantity": 3, "multiplier_ids": ["labor-day-2x"] }
+  ],
+  "ineligible_items": [{ "line_id": "...", "sku": "...", "reason_key": "PRODUCT_NOT_ELIGIBLE" }],
+  "applied_multipliers": [
+    { "id": "labor-day-2x", "numerator": 2, "denominator": 1 }
+  ],
+  "applied_caps": [
+    { "kind": "PER_ORDER", "limit": 25, "entries_before": 30, "entries_after": 25 }
+  ]
+}
+
+`reason_key` y `kind` son enums estables; el copy es de `frontend` (DEC-022).
+
+Esta cifra es ORIENTATIVA hasta que la orden alcance el estado que las Official
+Rules definan como cualificante. Las entries las genera el backend al recibir
+la confirmación de pago, NUNCA cuando el frontend llega a la página de éxito.
+
+PRECISIONES DE LA IMPLEMENTACIÓN
+
+- `eligible_subtotal` es `null` cuando el carrito está vacío: sin líneas no hay
+  moneda que declarar. `entries_before_caps` y `final_entries` valen `0`.
+- `line_id` es el identificador de la línea del carrito de servidor
+  (`cart_items.id`), el mismo que devuelve `CartWithQuote`. Permite casar la
+  cotización con la línea sin que el cliente aporte nada.
+- Sin carrito, la respuesta es la cotización de un carrito vacío, no un 404: la
+  respuesta correcta a "cuántas entries genera mi carrito" cuando no hay carrito
+  es "cero", y así el frontend recibe igualmente la promoción y la versión de
+  reglas vigentes.
+- `applied_multipliers` sólo aparece con `entry_multipliers_enabled` encendido;
+  `applied_caps`, con `entry_caps_enabled` (DEC-032). Con los flags apagados
+  ambas listas van vacías.
+- `engine_version` es la versión del motor de cálculo, no la del paquete. Junto
+  con `rules_version_id` es lo que hace reproducible la cifra (DEC-007).
+
+**NO HAY FORMA DE ENVIAR ÍTEMS.** Es un `GET` sin cuerpo, y los parámetros de
+query se ignoran. Está cubierto por un test que lo intenta.
+
+Errors:
+409 NO_ACTIVE_PROMOTION, 409 CALCULATION_CONFIG_INVALID,
+409 MULTIPLIER_CONFLICT_UNRESOLVED, 409 CURRENCY_MISMATCH,
+409 RESULT_EXCEEDS_SAFE_RANGE
+
+Los tres últimos los emite el motor de cálculo y viajan con su propio `code`
+(DEC-031). `MULTIPLIER_CONFLICT_UNRESOLVED` significa que la configuración
+declara `EXCLUSIVE` y dos periodos se solapan: el motor **falla en vez de
+desempatar por su cuenta**, y eso se corrige en la configuración legal, no en el
+cliente.
+
+Sin sesión (DEC-079) cotiza un carrito vacío: 0 entries. Una sesión anónima se
+cotiza sin saldo previo del participante, porque no hay participante; la cifra
+definitiva la da el motor al pagar, ya con cuenta.
+
+Authorization: PUBLIC (DEC-079)
+
+Owner: backend
+
+Status: IMPLEMENTED
+```
+
+### Fórmulas de cálculo admitidas (motor `engine_version: 2`)
+
+> **Modificado por §13.1 (DEC-052):** el motor es `engine_version: 2` y admite
+> un quinto modo, `ENTRIES_PER_CURRENCY_UNIT_BY_PRODUCT_KIND`, con una tasa por
+> tipo de producto (`MERCHANDISE`, `ENTRY_PACKAGE`). Los periodos de
+> multiplicador llevan además `product_kind_scope`.
+
+La fórmula la fija `PromotionRulesVersion.purchase_entry_formula` (DEC-012). El
+motor admite cuatro modos y **cada uno declara su propia `rounding_policy`**
+(`FLOOR` | `CEIL` | `HALF_UP` | `HALF_DOWN` | `HALF_EVEN`), obligatoria y sin
+valor por defecto:
+
+| Modo                        | Campos                                               |
+| --------------------------- | ---------------------------------------------------- |
+| `FIXED_PER_ORDER`           | `entries`                                            |
+| `FIXED_PER_PRODUCT`         | `entries_per_unit`                                   |
+| `ENTRIES_PER_CURRENCY_UNIT` | `amount_unit_minor`, `entries_per_amount_unit`       |
+| `TIERED_BY_AMOUNT`          | `tiers[] { id, min_eligible_amount_minor, entries }` |
+
+`partial_refund_rounding_policy` es la política de **otra** operación —cómo se
+prorratea una devolución parcial— y ya no gobierna el cálculo base.
+
+`entries_per_amount_unit` es un par de enteros `{ numerator, denominator }`
+(DEC-010), nunca un decimal. `TIERED_BY_AMOUNT` aplica el escalón **más alto**
+cuyo umbral no supere el subtotal elegible, y los escalones **no se acumulan**;
+la traza lo registra en `tier_selection` y `applied_tier_id`.
+
+Esta tabla describe lo que el motor **puede** expresar. Cuál se usa lo decide el
+abogado del cliente: hoy `purchase_entry_formula` sigue en `TBD`
+(`docs/LEGAL_PENDING.md`) y ninguna promoción puede activarse sin resolverla.
+
+---
+
+## 6. Portal del participante
+
+```text
+Method: GET
+Endpoint: /api/v1/account/entry-summary
+
+Purpose:
+Saldo de entries del participante en una promoción, con su procedencia.
+
+Authentication: sesión de participante
+
+Request: ?promotion_id=<uuid>
+
+Response: 200
+{
+  "promotion_id": "uuid",
+  "active_entries": 15,
+  "purchase_entries": 12,
+  "amoe_entries": 3,
+  "as_of": "2026-09-15T12:00:00.000Z"
+}
+
+Compra y AMOE conviven en el MISMO universo elegible conservando su procedencia
+(principio 9). Nunca son dos saldos separados.
+
+El número sale de la vista SQL de saldo, que deriva del ledger. Nunca de un
+contador editable.
+
+Errors: 404 PROMOTION_NOT_FOUND
+
+Authorization: entry.self.read
+
+Owner: backend
+
+Status: PROPOSED
+```
+
+```text
+Method: GET
+Endpoint: /api/v1/account/entry-transactions
+
+Purpose:
+Historial del ledger del propio participante, incluidas las correcciones.
+
+Authentication: sesión de participante
+
+Request: ?promotion_id=<uuid>&cursor=<opaque>&limit=<1..100>
+
+Response: 200
+{
+  "items": [
+    {
+      "id": "uuid",
+      "type": "PURCHASE_EARNED",
+      "source_type": "PURCHASE",
+      "quantity_delta": 10,
+      "reason_key": "ORDER_QUALIFIED",
+      "effective_at": "2026-09-10T12:00:00.000Z",
+      "reverses_transaction_id": null
+    }
+  ],
+  "next_cursor": null
+}
+
+Una devolución aparece como una FILA NUEVA con delta negativo, no como la
+desaparición de la original. El participante puede ver qué pasó y cuándo.
+
+`reason_key` es un enum estable. NUNCA prosa: el copy es de `frontend`.
+
+Errors: 404 PROMOTION_NOT_FOUND
+
+Authorization: entry.self.read
+
+Owner: backend
+
+Status: PROPOSED
+```
+
+```text
+Method: GET
+Endpoint: /api/v1/account/entry-numbers
+
+Purpose:
+Números de participación del participante ("mis números"). Desde DEC-080 la
+forma vigente es la de la sección de implementación (un número por
+participación, paginado por números); este bloque queda como historia de la
+propuesta.
+
+Authentication: sesión de participante
+
+Request: ?promotion_id=<uuid>&cursor=<opaque>&limit=<1..1000>
+
+Response: 200 -> ver "GET /api/v1/account/entry-numbers" en la sección
+IMPLEMENTED.
+
+Los números viajan como CADENA, jamás como número (DEC-010).
+
+Detrás del flag `visible_entry_numbers_enabled`, apagado. Con el flag apagado
+devuelve 404: los números se asignan igual -para que sean reconstruibles hacia
+atrás y para que el export tenga universo- pero no se muestran.
+
+AVISO: la secuencia de números NO es el algoritmo del sorteo. Que existan
+números no autoriza a sortear sobre ellos (DEC-017).
+
+Errors: 404 NOT_FOUND cuando el flag está apagado
+
+Authorization: entry.self.read
+
+Owner: backend
+
+Status: PROPOSED
+```
+
+```text
+Method: GET
+Endpoint: /api/v1/account/orders
+
+Purpose:
+Pedidos del propio participante.
+
+Authentication: sesión de participante
+
+Request: ?cursor=<opaque>&limit=<1..100>
+
+Response: 200 { "items": [OrderSummary], "next_cursor": null }
+
+Errors: ninguno propio
+
+Authorization: order.self.read
+
+Owner: backend
+
+Status: PROPOSED
+```
+
+```text
+Method: GET
+Endpoint: /api/v1/account/orders/{order_id}
+
+Purpose:
+Detalle de un pedido, con la traza del cálculo de entries que produjo.
+
+Authentication: sesión de participante
+
+Request: `order_id` en la ruta
+
+Response: 200 OrderDetail, incluyendo `entry_calculation` con
+`rules_version_id`, `engine_version` y el desglose que se persistió en el
+`EntryCalculationSnapshot`.
+
+Es lo que permite responder "por qué esta compra generó 37 entries y no 36"
+meses después, cuando el catálogo y las reglas ya han cambiado.
+
+Errors: 404 ORDER_NOT_FOUND
+
+Authorization: order.self.read
+
+Owner: backend
+
+Status: PROPOSED
+```
+
+---
+
+## 7. AMOE
+
+Toda esta sección está detrás del flag `amoe_enabled`, apagado, y de una
+modalidad `amoe_mode` que sigue sin elegir (`docs/LEGAL_PENDING.md` →
+"AMOE mechanism"). Con el flag apagado, estos endpoints devuelven 404.
+
+```text
+Method: GET
+Endpoint: /api/v1/promotions/{slug}/amoe-config
+
+Purpose:
+Qué modalidad AMOE está vigente y qué exige, para decidir qué interfaz
+renderizar.
+
+Authentication: ninguna
+
+Request: `slug` en la ruta
+
+Response: 200
+{
+  "enabled": false,
+  "mode": null,
+  "submission_window": { "opens_at": null, "closes_at": null },
+  "instructions": { "en-US": "...", "es-US": "..." }
+}
+
+`mode` es un enum precisamente porque las cuatro modalidades exigen pantallas
+distintas; un booleano no permitiría decidir cuál renderizar.
+
+Las instrucciones son contenido legalmente controlante: se renderizan tal cual.
+
+Errors: 404 PROMOTION_NOT_FOUND, 404 NOT_FOUND si `amoe_enabled` está apagado
+
+Authorization: PUBLIC
+
+Owner: backend
+
+Status: PROPOSED
+```
+
+```text
+Method: POST
+Endpoint: /api/v1/promotions/{promotion_id}/amoe-submissions
+
+Purpose:
+Enviar una participación sin compra.
+
+Authentication: sesión de participante
+
+Request: forma dependiente de `amoe_mode`. Se cierra cuando el abogado fije la
+modalidad; documentarla ahora sería inventar un requisito legal.
+
+Response: 201 { "submission_id": "uuid", "status": "SUBMITTED" }
+
+Una participación aprobada genera entries del MISMO tipo que una compra, con
+`source_type: "AMOE"`. Un solo universo, con procedencia (principio 9).
+
+La aprobación crea una transacción del ledger. Nunca incrementa un contador.
+
+Errors:
+404 NOT_FOUND si `amoe_enabled` está apagado
+409 AMOE_WINDOW_CLOSED
+409 AMOE_LIMIT_REACHED
+409 AMOE_DUPLICATE_SUBMISSION
+422 VALIDATION_FAILED
+
+Authorization: amoe.self.submit
+
+Owner: backend
+
+Status: PROPOSED
+```
+
+---
+
+## 8. Admin
+
+Superficie aislada y protegida. Toda ruta exige sesión administrativa con MFA
+(DEC-006); las marcadas con step-up exigen además re-autenticación reciente.
+
+| Method | Endpoint                                                 | Authorization            | Status      |
+| ------ | -------------------------------------------------------- | ------------------------ | ----------- |
+| GET    | `/api/v1/admin/dashboard`                                | `dashboard.read`         | IMPLEMENTED |
+| GET    | `/api/v1/admin/promotions`                               | `promotion.read`         | PROPOSED    |
+| POST   | `/api/v1/admin/promotions`                               | `promotion.create`       | PROPOSED    |
+| PATCH  | `/api/v1/admin/promotions/{promotion_id}`                | `promotion.update`       | PROPOSED    |
+| POST   | `/api/v1/admin/promotions/{promotion_id}/activate`       | `promotion.activate`     | PROPOSED    |
+| POST   | `/api/v1/admin/promotions/{promotion_id}/close`          | `promotion.close`        | PROPOSED    |
+| GET    | `/api/v1/admin/promotions/{promotion_id}/rules-versions` | `rules.version.read`     | PROPOSED    |
+| POST   | `/api/v1/admin/promotions/{promotion_id}/rules-versions` | `rules.version.create`   | PROPOSED    |
+| POST   | `/api/v1/admin/rules-versions/{id}/activate`             | `rules.version.activate` | PROPOSED    |
+| GET    | `/api/v1/admin/products`                                 | `product.read`           | PROPOSED    |
+| POST   | `/api/v1/admin/products`                                 | `product.write`          | PROPOSED    |
+| POST   | `/api/v1/admin/products/{product_id}/publish`            | `product.publish`        | PROPOSED    |
+| GET    | `/api/v1/admin/participants`                             | `participant.list`       | IMPLEMENTED |
+| GET    | `/api/v1/admin/participants/{id}`                        | `participant.read`       | IMPLEMENTED |
+| POST   | `/api/v1/admin/participants/{id}/disqualify`             | `participant.disqualify` | PROPOSED    |
+| GET    | `/api/v1/admin/orders`                                   | `order.read`             | IMPLEMENTED |
+| POST   | `/api/v1/admin/orders/{id}/refund`                       | `order.refund.initiate`  | PROPOSED    |
+| GET    | `/api/v1/admin/entry-transactions`                       | `entry.ledger.read`      | PROPOSED    |
+| POST   | `/api/v1/admin/entry-adjustments`                        | `entry.adjust.create`    | PROPOSED    |
+| POST   | `/api/v1/admin/entry-adjustments/preview`                | `entry.adjust.create`    | IMPLEMENTED |
+| POST   | `/api/v1/admin/entry-adjustments/{id}/approve`           | `entry.adjust.approve`   | PROPOSED    |
+| GET    | `/api/v1/admin/amoe-submissions`                         | `amoe.review.read`       | PROPOSED    |
+| POST   | `/api/v1/admin/amoe-submissions/{id}/approve`            | `amoe.review.approve`    | PROPOSED    |
+| POST   | `/api/v1/admin/amoe-submissions/{id}/reject`             | `amoe.review.reject`     | PROPOSED    |
+| GET    | `/api/v1/admin/payment-webhooks`                         | `payment.webhook.read`   | PROPOSED    |
+| POST   | `/api/v1/admin/payment-webhooks/{id}/replay`             | `payment.webhook.replay` | PROPOSED    |
+| GET    | `/api/v1/admin/reconciliation`                           | `reconciliation.read`    | PROPOSED    |
+| GET    | `/api/v1/admin/feature-flags`                            | `flag.read`              | PROPOSED    |
+| PATCH  | `/api/v1/admin/feature-flags/{key}`                      | `flag.update`            | PROPOSED    |
+
+Notas que no caben en la tabla y que importan:
+
+- **Cambiar un flag legalmente material** exige además
+  `flag.update.legally_material`, step-up y **motivo obligatorio**. El motivo no
+  es documentación: la base de datos rechaza el cambio sin él.
+- **`entry.adjust.create` y `entry.adjust.approve` son capacidades distintas a
+  propósito.** Un ajuste que se aprueba a sí mismo es una edición del ledger con
+  otro nombre.
+- Ningún endpoint de admin edita ni borra una transacción del ledger. **No
+  existe tal endpoint y no puede existir**: el rol de base de datos de la
+  aplicación no tiene el privilegio, y un trigger lanza excepción aunque lo
+  tuviera (DEC-007). Una corrección es siempre una fila nueva.
+- El dominio de **exportación y sorteo** (`export.*`, `draw.*`, `winner.*`) es
+  de `security-integration` y se documentará en su propia sección cuando exista.
+  `backend` produce el dataset; el formato, la firma y la entrega son de
+  `security` (DEC-016). Ningún endpoint de sorteo se implementa sin las cinco
+  condiciones de DEC-017.
+
+---
+
+## 9. Webhooks de pago
+
+```text
+Method: POST
+Endpoint: /api/v1/webhooks/payments/{provider}
+
+Purpose:
+Recepción de eventos del proveedor de pago.
+
+Authentication:
+Verificación de FIRMA sobre el cuerpo crudo. No hay sesión. Es la razón por la
+que `apps/api` es un proceso Fastify separado (DEC-004): las API routes de Next
+no garantizan acceso al cuerpo sin parsear, y sin cuerpo crudo la firma no se
+puede verificar.
+
+Request: cuerpo crudo del proveedor + cabecera de firma
+
+Response: 200 { "received": true }
+
+El evento se persiste ANTES de procesarse, con `UNIQUE (provider,
+provider_event_id)`. Un reintento del proveedor choca contra esa restricción y
+es un no-op: no es un `if` en el código, que perdería bajo concurrencia.
+
+Las entries se generan al alcanzar el estado cualificante configurado, no
+cuando el frontend llega a una página de éxito.
+
+Errors: 401 cuando la firma no verifica; 202 cuando el evento ya se conocía
+
+Authorization: PUBLIC
+
+Justificación de que sea PUBLIC: el llamante es el proveedor de pago, que no
+tiene sesión. La autenticación es criptográfica, sobre la firma del cuerpo.
+
+Owner: backend
+
+Status: PROPOSED
+```
+
+---
+
+# Qué NO está en este contrato, y por qué
+
+- **Autenticación y sesión.** DEC-006 asigna ese diseño a `packages/security`.
+  Las rutas de login, MFA y step-up las documenta ese agente.
+- **Exportación al third-party administrator y sorteo.** DEC-016 y DEC-017.
+  Propiedad de `security-integration`.
+- **La forma exacta del envío AMOE.** Depende de la modalidad, que sigue en
+  `TBD`. Documentarla ahora sería inventar un requisito legal.
+- **Cualquier constante legal.** Edades mínimas, jurisdicciones, ratios,
+  deadlines y topes NO aparecen en este documento. Viajan como datos desde
+  `PromotionRulesVersion` (DEC-012).
+
+---
+
+## 10. Autenticación (DEC-006, DEC-045)
+
+**Estado:** `IMPLEMENTED` para las once rutas de abajo. Verificación de email
+y restablecimiento de contraseña llegaron con DEC-058 (proveedor: Resend);
+registro, inicio de sesión y recuperación con celular, con DEC-060 (Twilio
+Verify + Cloudflare Turnstile). Inscripción de MFA sigue en `TBD`.
+
+### Un solo sistema, dos políticas
+
+`CLAUDE.md` §4 prohíbe dos sistemas de autenticación y DEC-006 lo repite. **No
+existe `/admin/login`.** Participante y personal usan estas mismas rutas; lo
+que cambia es la política que decide `audienceForRoles` a partir de los roles:
+
+|              | `PARTICIPANT` | `STAFF`         |
+| ------------ | ------------- | --------------- |
+| Cookie       | `<base>`      | `<base>_staff`  |
+| `SameSite`   | `Lax`         | `Strict`        |
+| `Path`       | `/`           | `/admin`        |
+| TTL absoluto | 14 días       | 8 horas         |
+| Inactividad  | —             | 15 min          |
+| MFA          | no            | **obligatorio** |
+
+Los nombres llevan sufijo distinto para que una sesión de escaparate y una de
+panel coexistan en el mismo navegador. Sin eso, entrar al panel cerraría la
+sesión de la tienda y al revés, y el síntoma —"me desloguea solo"— sería muy
+difícil de atribuir.
+
+La fuente de esta tabla es `SESSION_POLICIES` en `packages/security`; aquí solo
+se refleja. Si divergen, manda el código.
+
+### El token es opaco
+
+43 caracteres `base64url` (`[A-Za-z0-9_-]`). **No es un JWT y no se decodifica:
+no lleva nada dentro.** Toda la información de la sesión vive en la fila de
+`sessions`, que es lo que la hace revocable de verdad. La base de datos guarda
+solo el hash SHA-256 del token.
+
+### `SessionState`
+
+```json
+{
+  "authenticated": true,
+  "state": "ACTIVE",
+  "scope": "STAFF",
+  "email": "persona@ejemplo.invalid",
+  "email_verified": true,
+  "roles": ["PROMOTION_MANAGER"],
+  "capabilities": ["dashboard.read", "product.read", "product.write", "..."]
+}
+```
+
+**`capabilities` son las capacidades EFECTIVAS de la sesión**, resueltas por el
+servidor con el mismo catálogo que usa el autorizador (DEC-027) y con los roles
+que el autorizador usaría: una sesión de escaparate publica solo las de
+`PARTICIPANT` aunque la persona tenga roles administrativos. Vacías mientras la
+sesión no autentique (`ANONYMOUS`, `MFA_PENDING`). El panel las usa para
+decidir **qué pinta**, nunca qué puede hacer: eso lo decide el backend en cada
+petición. Hasta este campo, el panel derivaba el menú de un espejo local de la
+matriz con un aviso en pantalla; el espejo sobra.
+
+`state` es `ANONYMOUS` o `ACTIVE`. **Plantilla:** el estado `MFA_PENDING` ya no
+existe; el personal entra con la contraseña y su sesión es `ACTIVE` en el acto.
+
+### `POST /api/v1/auth/register`
+
+`Authorization: PUBLIC` — es la ruta con la que se obtiene una cuenta. Owner:
+`backend`. Status: `IMPLEMENTED`.
+
+Alta de **participante**. Crea identidad, credencial Argon2id y perfil en una
+sola transacción, y **abre sesión de escaparate en el acto**: responde con el
+mismo `SessionState` que el login y emite la misma cookie. Nunca crea personal;
+los roles administrativos no se conceden por aquí.
+
+Cuerpo:
+
+```json
+{
+  "email": "persona@ejemplo.invalid",
+  "password": "una-frase-larga-de-ejemplo",
+  "display_name": "Persona de Ejemplo",
+  "language_preference": "es-US",
+  "consents": [
+    { "key": "OFFICIAL_RULES", "version": "2026-10-04" },
+    { "key": "TERMS", "version": "2026-09-30" },
+    { "key": "PRIVACY", "version": "2026-09-30" }
+  ],
+  "date_of_birth": "1990-05-05",
+  "residence_state": "TX"
+}
+```
+
+- `email` — se recorta; máximo 254 caracteres. La unicidad **no distingue
+  mayúsculas** (la decide el índice sobre `email_normalized`).
+- `password` — la política es de `packages/security`: mínimo 12 caracteres,
+  máximo 1024, **sin reglas de complejidad**. El frontend no la duplica.
+- `display_name` — opcional (`null` o ausente); 1 a 120 caracteres.
+- `language_preference` — etiqueta completa, `en-US` o `es-US` (DEC-029).
+  Obligatoria y sin valor por defecto (DEC-021).
+- `consents` (DEC-067) — obligatorios TODOS los de `required_consents` de
+  `GET /config`, con su versión vigente: hoy `OFFICIAL_RULES` (2026-10-04),
+  `TERMS` y `PRIVACY` (2026-09-30). Se guardan en `participant_consents` (0034)
+  con el idioma y el instante; una clave que no se pidió se ignora. Falta uno, o
+  llega con otra versión: `422 CONSENT_REQUIRED` con `details.missing`.
+- `date_of_birth` (DEC-067) — `YYYY-MM-DD`, ni futura ni anterior a 1900.
+- `residence_state` (DEC-067) — código USPS de los 50 estados o `DC`.
+  Fecha y estado se **declaran**, no se juzgan aquí: un menor o un residente de
+  un estado excluido puede darse de alta y comprar mercancía. Si con ellos se
+  participa se evalúa **al otorgar**, contra la versión de reglas de la
+  promoción (`minimum_age`, `allowed_jurisdictions.excluded_states`,
+  `age_of_majority_by_state`) y solo con `age_gate_enabled` /
+  `state_eligibility_enforcement_enabled` encendidos.
+
+Respuestas: `201` `SessionState` (`state: "ACTIVE"`, `scope: "PARTICIPANT"`,
+`email_verified: false`) · `409` `EMAIL_ALREADY_REGISTERED` · `422`
+`WEAK_PASSWORD`, con `details: { reason, minimum_length, maximum_length }` ·
+`422` `CONSENT_REQUIRED` · `422` `VALIDATION_FAILED`.
+
+**La cuenta nace `ACTIVE` con el correo SIN verificar.** El login exige
+`ACTIVE` y todavía no existe verificación de correo. Que un correo sin verificar
+tenga consecuencias sobre las participaciones sigue siendo una decisión legal
+pendiente (ver "Lo que NO está aquí").
+
+**Esta ruta SÍ revela si un correo está registrado, y el login no.** Es una
+concesión declarada, no un descuido: el alta abre sesión en el acto, así que
+"ya existe" y "cuenta creada" no pueden responder igual sin entregar la cuenta a
+quien no es su dueño. La alternativa que no enumera —responder siempre "revisa
+tu correo"— exige un proveedor de email que no está decidido (`CLAUDE.md` §7).
+El `409` no lleva `details`.
+
+**Un correo con expediente postal no se "reclama" aquí.** La transcripción de
+fichas AMOE (§13.10) crea identidades `PENDING_VERIFICATION` sin credenciales.
+Registrarse con ese correo responde `409` como cualquier otro ya existente: sin
+verificación de correo, bastaría con teclear la dirección de otra persona para
+quedarse con sus participaciones. El flujo de reclamación llega con la
+verificación de email.
+
+### `POST /api/v1/auth/login`
+
+`Authorization: PUBLIC` — es la ruta que se usa antes de tener sesión.
+
+Cuerpo: `{ "email": string, "password": string }`.
+
+Respuestas: `200` `SessionState` · `401` credenciales inválidas · `423` cuenta
+bloqueada, con `retry_after_seconds` · `422` cuerpo inválido.
+
+**No distingue "no existe" de "contraseña incorrecta".** Ambos devuelven `401`
+y consumen el mismo trabajo criptográfico, porque la diferencia de tiempo sería
+medible desde fuera y convertiría el login en un enumerador de correos
+registrados —que en un sweepstakes es una lista de participantes.
+
+Cinco fallos consecutivos bloquean 15 minutos. El bloqueo es **temporal** a
+propósito: uno permanente convertiría el formulario en una forma de dejar fuera
+a cualquiera cuyo correo se conozca.
+
+### El carrito sin cuenta pasa a la cuenta (DEC-079)
+
+`POST /auth/register` y `POST /auth/login` (este, solo con sesión de
+**participante**; una de personal no adopta nada), si la petición trae la cookie
+de la sesión anónima de carrito (`<SESSION_COOKIE_NAME>_cart`):
+
+1. suman sus líneas al carrito de la cuenta —mismo tope de 10 000 por línea; una
+   línea en otra moneda se queda fuera—, en una transacción;
+2. revocan la sesión anónima (`revocation_reason = adopted_by_account`);
+3. responden con un `Set-Cookie` que borra la cookie de carrito.
+
+La sesión de participante es **nueva**: la anónima nunca se promueve, así que
+un token de carrito capturado antes de iniciar sesión no da acceso a la cuenta.
+Si la adopción falla, se registra en el log y el alta o el login **siguen**: la
+persona ya demostró quién es, y su carrito anónimo sigue donde estaba.
+
+### `POST /api/v1/auth/mfa/verify` (RETIRADA en la plantilla)
+
+`Authorization: PUBLIC` — la sesión existe pero está en `MFA_PENDING`, así que
+exigir sesión válida aquí sería circular.
+
+Cuerpo: `{ "code": string }` (seis dígitos; se aceptan espacios).
+
+Respuestas: `200` `SessionState` con `state: "ACTIVE"` · `401` código inválido,
+caducado o **ya usado**.
+
+**Un código no vale dos veces**, ni siquiera dentro de su ventana de 30
+segundos. El consumo de la ventana es atómico en el motor.
+
+### `GET /api/v1/auth/session`
+
+`Authorization: PUBLIC`. **Sin sesión devuelve `200` con `ANONYMOUS`, no
+`401`**: es lo que consulta el frontend en cada render y un 401 ahí obligaría a
+tratar el caso normal como error.
+
+### `POST /api/v1/auth/logout`
+
+`Authorization: PUBLIC`. Idempotente: siempre `200 { "ok": true }`, haya sesión
+o no. Un 401 al cerrar sesión no le sirve a nadie y además revelaría si la
+cookie presentada era válida.
+
+**Revoca en base de datos además de borrar la cookie.** Borrar solo la cookie
+dejaría el token vivo para quien lo hubiera copiado.
+
+### Enlaces por correo (DEC-058)
+
+Las cuatro rutas siguientes usan **enlaces de un solo uso** que viajan por
+correo. Reglas comunes:
+
+- El token tiene la misma forma que el de sesión (43 caracteres `base64url`) y
+  **la base de datos guarda solo su SHA-256** (`identity_email_tokens`).
+- Cada enlace vale **una vez** y para **un propósito**: uno de verificación no
+  restablece contraseñas. Verificación: 48 horas. Restablecimiento: 1 hora.
+- El enlace apunta al **portal**, no a la API:
+  `{WEB_PUBLIC_URL}/{en|es}/account/verify-email?token=…` y
+  `…/account/reset-password?token=…`. El idioma sale de `language_preference`
+  en el alta y de `Accept-Language` en el resto.
+- **Tope por identidad:** como mucho 3 enlaces del mismo propósito cada 15
+  minutos. Pasado el tope la respuesta es idéntica, pero no se envía nada. Es
+  por identidad y no por IP porque la API ve la IP del servidor de `apps/web`
+  (DEC-057).
+- Respuesta de éxito de las cuatro: `200 { "acknowledged": true }`.
+
+`POST /auth/register` envía además el primer enlace de verificación, **en
+segundo plano**: un proveedor lento o caído no impide crear la cuenta, y la
+persona puede pedir otro.
+
+### `POST /api/v1/auth/verify-email` (RETIRADA en la plantilla)
+
+`Authorization: PUBLIC` — el token del enlace es la prueba; exigir sesión
+impediría verificar desde el teléfono un alta hecha en el ordenador.
+
+Cuerpo: `{ "token": string }`.
+
+Respuestas: `200` · `410` `VERIFICATION_TOKEN_EXPIRED` · `422`
+`VERIFICATION_TOKEN_INVALID` (inexistente, ya usado, de otro propósito, o
+enviado a una dirección que la cuenta ya no tiene).
+
+Fija `email_verified_at` **solo si la identidad sigue teniendo la dirección a la
+que se envió el enlace**. Si ya estaba verificado conserva el instante original.
+
+### `POST /api/v1/auth/verify-email/resend` (RETIRADA en la plantilla)
+
+`Authorization: PARTICIPANT_SELF`. Sin cuerpo.
+
+Envía un enlace nuevo a la dirección **de la cuenta de la sesión**, nunca a
+otra. Si el correo ya está verificado, o se alcanzó el tope, responde `200` sin
+enviar. Respuestas: `200` · `401` · `503` `SERVICE_UNAVAILABLE` si el proveedor
+rechaza el envío: aquí sí hay a quién decírselo, y un "enviado" falso dejaría a
+la persona esperando.
+
+### `POST /api/v1/auth/password/forgot` (RETIRADA en la plantilla)
+
+`Authorization: PUBLIC`.
+
+Cuerpo: `{ "email": string }`.
+
+Respuesta: **siempre `200 { "acknowledged": true }`**, exista o no la cuenta, y
+**antes de buscarla**: la búsqueda y el envío corren en segundo plano, así que
+ni el cuerpo ni el tiempo de respuesta dicen si el correo está registrado. Solo
+reciben enlace las cuentas `ACTIVE` con contraseña; un expediente postal sin
+credencial o una cuenta suspendida no reciben nada.
+
+### `POST /api/v1/auth/password/reset` (RETIRADA en la plantilla)
+
+`Authorization: PUBLIC`.
+
+Cuerpo: `{ "token": string, "password": string }`.
+
+Respuestas: `200` · `410` `RESET_TOKEN_EXPIRED` · `422` `RESET_TOKEN_INVALID` ·
+`422` `WEAK_PASSWORD` (misma forma que en el alta).
+
+La política de contraseña se comprueba **antes** de gastar el enlace: una
+contraseña corta no lo quema. Al fijarla: levanta el bloqueo por intentos,
+**invalida los demás enlaces de restablecimiento vivos y revoca todas las
+sesiones abiertas** de la cuenta. El personal sigue necesitando su segundo
+factor para entrar.
+
+### Celular verificado por SMS (DEC-060)
+
+Una cuenta se identifica con **correo o con celular**. El celular solo cuenta
+si se verificó con un código SMS de Twilio Verify; este proceso nunca ve el
+código. Solo números de EE. UU. (+1); se acepta como lo teclea la gente y se
+guarda en E.164. Si `SMS_PROVIDER=none`, las rutas de celular responden `503
+SMS_NOT_CONFIGURED`.
+
+`SessionState` lleva además **`phone`**: el celular verificado de la cuenta en
+E.164, o `null`. En una cuenta creada con celular, `email` es `null`.
+
+Cambios en rutas existentes:
+
+- **`POST /auth/register`** acepta `email` **o** `phone` + `sms_code`
+  (exactamente uno de `email`/`phone`). Con celular: `422 SMS_CODE_INVALID` si el
+  código no vale, `409 PHONE_ALREADY_REGISTERED` si el número ya tiene cuenta.
+  La política de contraseña se comprueba antes de gastar el código.
+- **`POST /auth/login`** acepta `email` **o** `phone`. Un número sin cuenta o
+  con forma imposible responde `401`, igual que un correo inexistente.
+
+### `POST /api/v1/auth/phone/start` (RETIRADA en la plantilla)
+
+`Authorization: PUBLIC`. Cuerpo: `{ "phone", "purpose": "REGISTER" |
+"PASSWORD_RESET", "bot_check_token"? }`.
+
+- `bot_check_token` es el token del widget de Cloudflare Turnstile. Obligatorio
+  si la API tiene `TURNSTILE_SECRET_KEY` (en producción lo tiene siempre que
+  haya SMS): sin él, `422 BOT_CHECK_FAILED`.
+- `REGISTER`: `409 PHONE_ALREADY_REGISTERED` **antes** de enviar, para no cobrar
+  un código inútil. `422 PHONE_INVALID` si Twilio no acepta el número, `429
+RATE_LIMITED` si se alcanzó su límite para ese número.
+- `PASSWORD_RESET`: **siempre `200`**, y el envío va en segundo plano. Solo se
+  envía si el número es el celular verificado de una cuenta `ACTIVE`.
+
+### `POST /api/v1/auth/password/reset-sms` (RETIRADA en la plantilla)
+
+`Authorization: PUBLIC`. Cuerpo: `{ "phone", "code", "password" }`.
+
+Respuestas: `200` · `422 SMS_CODE_INVALID` (código incorrecto **o** número sin
+cuenta; no se distinguen) · `422 WEAK_PASSWORD` · `503 SMS_NOT_CONFIGURED`. Al
+fijar la contraseña levanta el bloqueo por intentos y revoca todas las sesiones.
+
+### La cabecera `Cookie` que reenvía `apps/web`
+
+`apps/web` no es un navegador: es un segundo proceso (DEC-004) que reenvía la
+sesión del visitante. Lo hace con `cookies().toString()` de Next, que **no
+produce una cabecera `Cookie` de RFC 6265**, sino algo con forma de
+`Set-Cookie`:
+
+    app_session=<token>; Path=/; app_dev_staff_actor=compliance%40example.com; Path=/
+
+Dos rarezas: pseudo-cookies `Path=/` intercaladas —atributos que solo
+pertenecen a `Set-Cookie`— y valores percent-encoded.
+
+**La API acepta esa forma** (HO-035, opción b; DEC-050). No porque sea la
+preferida ni porque no pudiera rechazarla —un 400 ante una `Cookie` que no
+cumple RFC 6265 sería legítimo—, sino porque rechazarla rompería a un cliente
+que controlamos, la forma es demostrablemente inocua, y declarar y vigilar lo
+que se acepta cuesta menos que obligar a cada cliente a normalizar. Es una
+tolerancia medida, con un test que la fija; no una renuncia a imponer. Lo fija
+`apps/api/test/cookie-header-contract.test.ts`, que levanta la app real y
+comprueba, sobre la cabecera literal: que ambas cookies de sesión se encuentran
+entre las pseudo-cookies, que el token sobrevive intacto —lo exige
+`looksLikeSessionToken`—, que los valores se decodifican, que las
+pseudo-cookies no desplazan a ninguna cookie real y que un `;` codificado no
+inyecta una cookie extra. Sin ese test, una actualización de `@fastify/cookie`
+respondería 401 a una sesión válida, o peor, devolvería un valor a medio
+decodificar y atendería a la persona equivocada: ese segundo síntoma ya ocurrió
+una vez, en el mock de desarrollo de `apps/web`, y es indistinguible de "esa
+persona no tiene ese permiso".
+
+**La forma normativa sigue siendo la del navegador** —`name=value`, sin
+atributos— y está cubierta por el mismo test con las mismas afirmaciones. Si
+`apps/web` pasa a construir la cabecera desde `cookies().getAll()`, no rompe
+nada. Lo que **no** cambia con ello es la dependencia del decodificador:
+`getAll()` devuelve valores decodificados y reenviarlos exige
+`encodeURIComponent`, así que el percent-decoding se ejerce igual. Esa
+codificación en origen no es opcional: sin ella, un valor de cookie con `;`
+partiría la cabecera e inyectaría cookies que nadie envió.
+
+### Lo que NO está aquí, y por qué
+
+- **Inscripción de MFA.** Fase siguiente.
+- **Reclamación de un expediente postal por su dueño** (ver `POST
+/auth/register`). La verificación de correo ya existe (DEC-058) y es la pieza
+  que lo hace posible, pero el flujo de reclamación en sí no está hecho.
+- **Persistencia de consentimientos del alta.** No hay tabla ni lista
+  publicada; depende de `docs/LEGAL_PENDING.md`.
+- **Si la verificación de email condiciona ganar participaciones.** Depende de
+  `docs/LEGAL_PENDING.md` ("Email verification before earning entries", `TBD`).
+  El campo `email_verified` se publica como dato; **que ese dato tenga
+  consecuencias es una decisión legal que aún no existe**.
+
+---
+
+# 11. Comercio, Portal, AMOE, Ajustes, Sorteo y Exportación (hito B5)
+
+> **Cómo llegó esta sección aquí.** El reparto pedía que `backend` entregara
+> estas secciones como texto para que el Team Lead las pegara. No fue posible
+> dejarlas fuera del documento: el gate de DEC-015
+> (`tests/security/src/contract/api-contract.test.ts`) exige que **toda** ruta
+> del manifiesto aparezca aquí, así que con las rutas en código y las entradas
+> fuera, el workspace queda en rojo. Se añaden **al final**, en bloque, para no
+> tocar la sección 10, que edita la sesión paralela. Si el Lead prefiere pegarlas
+> él, `git checkout docs/API_CONTRACT.md` revierte este bloque entero.
+
+## Índice de rutas de este hito
+
+Con el camino tal y como lo declara el código (`:slug`, no `{slug}`), que es lo
+que compara el test de contrato contra `apps/api/openapi/route-manifest.json`.
+
+| Método | Camino                                                                              | Authorization                |
+| ------ | ----------------------------------------------------------------------------------- | ---------------------------- |
+| POST   | /api/v1/checkout/session                                                            | `PARTICIPANT_SELF`           |
+| GET    | /api/v1/checkout/sessions/:order_draft_id                                           | `PARTICIPANT_SELF`           |
+| POST   | /api/v1/checkout/cash-order                                                         | `PARTICIPANT_SELF`           |
+| GET    | /api/v1/account/orders                                                              | `order.self.read`            |
+| GET    | /api/v1/account/orders/:order_id                                                    | `order.self.read`            |
+| POST   | /api/v1/webhooks/payments/:provider                                                 | `PUBLIC`                     |
+| GET    | /api/v1/account/entry-summary                                                       | `entry.self.read`            |
+| GET    | /api/v1/account/entry-transactions                                                  | `entry.self.read`            |
+| GET    | /api/v1/account/entry-numbers                                                       | `entry.self.read`            |
+| GET    | /api/v1/account/award-holds                                                         | `entry.self.read`            |
+| GET    | /api/v1/me                                                                          | `participant.self.read`      |
+| PATCH  | /api/v1/me                                                                          | `participant.self.update`    |
+| GET    | /api/v1/promotions/:slug/amoe-config                                                | `PUBLIC`                     |
+| POST   | /api/v1/promotions/:promotion_id/amoe-submissions                                   | `amoe.self.submit`           |
+| GET    | /api/v1/account/amoe-submissions                                                    | `PARTICIPANT_SELF`           |
+| GET    | /api/v1/admin/amoe-submissions                                                      | `amoe.review.read`           |
+| POST   | /api/v1/admin/amoe-submissions/:submission_id/approve                               | `amoe.review.approve`        |
+| POST   | /api/v1/admin/amoe-submissions/:submission_id/reject                                | `amoe.review.reject`         |
+| GET    | /api/v1/admin/entry-adjustments                                                     | `entry.ledger.read`          |
+| POST   | /api/v1/admin/entry-adjustments                                                     | `entry.adjust.create`        |
+| POST   | /api/v1/admin/entry-adjustments/preview                                             | `entry.adjust.create`        |
+| POST   | /api/v1/admin/entry-adjustments/:adjustment_id/approve                              | `entry.adjust.approve`       |
+| POST   | /api/v1/admin/entry-adjustments/:adjustment_id/reject                               | `entry.adjust.approve`       |
+| POST   | /api/v1/admin/participants/:participant_id/disqualify                               | `participant.disqualify`     |
+| POST   | /api/v1/admin/orders/:order_id/refund                                               | `order.refund.initiate`      |
+| GET    | /api/v1/admin/payment-webhooks                                                      | `payment.webhook.read`       |
+| POST   | /api/v1/admin/payment-webhooks/:event_id/replay                                     | `payment.webhook.replay`     |
+| GET    | /api/v1/admin/promotions/:promotion_id/draw-authorizations                          | `draw.result.read`           |
+| POST   | /api/v1/admin/promotions/:promotion_id/draw-authorizations                          | `draw.authorization.create`  |
+| POST   | /api/v1/admin/promotions/:promotion_id/draw-authorizations/:authorization_id/revoke | `draw.authorization.create`  |
+| POST   | /api/v1/admin/draws                                                                 | `draw.initiate`              |
+| GET    | /api/v1/admin/draws                                                                 | `draw.result.read`           |
+| GET    | /api/v1/admin/promotions/:promotion_id/potential-winners                            | `winner.workflow.read`       |
+| POST   | /api/v1/admin/potential-winners/:potential_winner_id/status                         | `winner.status.update`       |
+| POST   | /api/v1/admin/promotions/:promotion_id/export-snapshots                             | `export.snapshot.create`     |
+| GET    | /api/v1/admin/promotions/:promotion_id/export-snapshots                             | `export.snapshot.read`       |
+| GET    | /api/v1/admin/export-snapshots/:snapshot_id                                         | `export.snapshot.read`       |
+| POST   | /api/v1/admin/export-snapshots/:snapshot_id/validate                                | `export.snapshot.validate`   |
+| POST   | /api/v1/admin/export-snapshots/:snapshot_id/finalize                                | `export.finalize`            |
+| GET    | /api/v1/admin/export-snapshots/:snapshot_id/download                                | `export.download`            |
+| POST   | /api/v1/admin/export-snapshots/:snapshot_id/deliver                                 | `export.deliver`             |
+| POST   | /api/v1/admin/export-snapshots/:snapshot_id/results                                 | `winner.status.update`       |
+| GET    | /api/v1/admin/dashboard                                                             | `dashboard.read`             |
+| GET    | /api/v1/admin/orders                                                                | `order.read`                 |
+| GET    | /api/v1/admin/orders/:order_id                                                      | `order.read`                 |
+| GET    | /api/v1/admin/orders/:order_id/cash-payment                                         | `order.read`                 |
+| POST   | /api/v1/admin/orders/:order_id/cash-payment/confirm                                 | `order.cash.confirm`         |
+| POST   | /api/v1/admin/orders/:order_id/cash-payment/entries                                 | `order.cash.confirm`         |
+| POST   | /api/v1/admin/orders/:order_id/cancel                                               | `order.cancel`               |
+| POST   | /api/v1/admin/orders/:order_id/fulfillment                                          | `order.fulfillment.update`   |
+| GET    | /api/v1/admin/reports/daily-cut                                                     | `order.read`                 |
+| GET    | /api/v1/admin/participants                                                          | `participant.list`           |
+| GET    | /api/v1/admin/participants/:participant_id                                          | `participant.read`           |
+| GET    | /api/v1/admin/participants/:participant_id/pii                                      | `pii.view.full`              |
+| POST   | /api/v1/admin/participants/:participant_id/password                                 | `participant.password.reset` |
+| GET    | /api/v1/admin/audit-events                                                          | `audit.read`                 |
+
+**Todas están `IMPLEMENTED`**, con dos matices que importan y que se detallan en
+cada bloque: las rutas de comercio dependen de un proveedor de pago que sigue sin
+elegir (`CLAUDE.md` §7) y responden `503 PAYMENT_PROVIDER_NOT_CONFIGURED`; las de
+sorteo y de finalización de export dependen de `@app/tpa` y `@app/audit`, que
+`apps/api` todavía no tiene como dependencia, y responden `409` con código propio
+en vez de improvisar.
+
+---
+
+## 11.1 Comercio
+
+```text
+Method: POST
+Endpoint: /api/v1/checkout/session
+
+Purpose:
+Congelar el carrito de servidor en un pedido DRAFT y abrir una sesión de pago.
+
+Authentication: sesión de participante
+
+Request:
+{
+  "shipping_address": {
+    "full_name": "...", "line1": "...", "line2": null,
+    "city": "...", "region": "...", "postal_code": "...", "country": "US"
+  },
+  "return_url": "https://example.test/checkout/return"
+}
+
+`region`, no `state`: el nombre del campo no debe presuponer que la subdivisión
+territorial se llama estado en toda jurisdicción cubierta. NO hay validación de
+jurisdicción: la elegibilidad territorial la fijan las Official Rules y sigue en
+docs/LEGAL_PENDING.md.
+
+Response: 201
+{
+  "provider": "mock",
+  "mode": "hosted_redirect",
+  "client_config": { "redirect_url": "https://..." },
+  "order_draft_id": "uuid"
+}
+
+`client_config` es DELIBERADAMENTE OPACO: cada proveedor necesita cosas distintas
+y tiparlo obligaría a elegir proveedor, que es la decisión que no está tomada.
+`mode` es `hosted_redirect` o `embedded_component`.
+
+El pedido se crea en DRAFT ANTES de llamar al proveedor: es lo que da el
+`order_draft_id` y lo que permite reintentar sin duplicar el cobro. Las líneas se
+congelan aquí -SKU, nombre, precio y elegibilidad-: el precio que vale es el que
+el participante vio al pulsar, no el que hubiera cuando el proveedor liquide.
+
+DEC-079: también se congela el ENVÍO. Con mercancía, `shipping_total_minor` es
+la tarifa fija vigente y `total_minor` = subtotal + envío; sin mercancía (solo
+paquetes), `shipping_total_minor` es `null`. `tax_total_minor` sigue `null`
+(pendiente legal). La pasarela cobra el envío como una línea aparte marcada
+como envío; no es una línea del pedido y no genera participaciones. Lo mismo
+vale para `POST /checkout/cash-order` con `fulfillment_method = DELIVERY`; con
+`PICKUP` (lo recoge en el punto de venta) no hay envío. Con tarjeta siempre es
+`DELIVERY`.
+
+Errors:
+409 CART_EMPTY
+409 SHIPPING_NOT_CONFIGURED (DEC-079: el carrito lleva mercancía y no hay tarifa
+de envío puesta. Nunca se envía gratis por omisión; se pone en el panel)
+503 PAYMENT_PROVIDER_NOT_CONFIGURED (`PAYMENT_PROVIDER=none`)
+503 PAYMENT_PROVIDER_UNAVAILABLE (el proveedor rechazó abrir el cobro: cuenta sin
+métodos de pago activos, clave revocada, caída. No se cobró nada y el borrador
+pasa a CANCELLED para no quedar como "pendiente de pago" en la cuenta)
+422 VALIDATION_FAILED
+
+Authorization: PARTICIPANT_SELF
+
+Owner: backend
+
+Status: IMPLEMENTED
+```
+
+```text
+Method: GET
+Endpoint: /api/v1/checkout/sessions/{order_draft_id}
+
+Purpose:
+Estado de una sesión de pago.
+
+Authentication: sesión de participante
+
+Request: `order_draft_id` en la ruta
+
+Response: 200
+{ "order_draft_id": "uuid", "status": "PENDING", "order_id": null }
+
+LA INTERFAZ NO DECIDE SI SE HA PAGADO. La página de retorno recibe del proveedor
+unos parámetros en la URL y no se los cree: pregunta aquí, que es donde se ha
+recibido -o no- el webhook firmado. Un `?outcome=paid` lo escribe cualquiera.
+
+`order_id` es null mientras el pedido siga en DRAFT: hasta entonces no hay nada
+que enseñar en el historial.
+
+Errors: 404 ORDER_NOT_FOUND
+
+Authorization: PARTICIPANT_SELF
+
+Owner: backend
+
+Status: IMPLEMENTED
+```
+
+```text
+Method: POST
+Endpoint: /api/v1/checkout/cash-order
+
+Purpose:
+DEC-078. Pedido para pagar EN EFECTIVO en un punto de venta físico. Es la otra
+opción del checkout, junto a la sesión con tarjeta.
+
+Authentication: sesión de participante
+
+Request:
+{ "fulfillment_method": "PICKUP" }
+o
+{
+  "fulfillment_method": "DELIVERY",
+  "shipping_address": {
+    "full_name": "...", "line1": "...", "line2": null,
+    "city": "...", "region": "...", "postal_code": "...", "country": "US"
+  }
+}
+
+Sin `return_url`: no hay pasarela a la que ir y de la que volver.
+
+DEC-079, `fulfillment_method` (opcional; ausente = `DELIVERY`, lo que existía
+antes):
+
+| Valor      | Qué significa                                           | Dirección   | Envío                       | Se cobra en caja   |
+| ---------- | ------------------------------------------------------- | ----------- | --------------------------- | ------------------ |
+| `PICKUP`   | Se entrega en el mismo punto de venta donde se paga     | No (se ignora) | No (`shipping_total` null), ni hace falta tarifa | Subtotal           |
+| `DELIVERY` | Se envía a la dirección                                 | Obligatoria | Tarifa fija si hay mercancía | Subtotal + envío   |
+
+`DELIVERY` sin `shipping_address` responde 422 `VALIDATION_FAILED` con
+`issues: [{ "path": "shipping_address", "code": "required" }]`. El valor queda en
+`orders.fulfillment_method`, no se cambia después, y la ficha del pedido lo
+publica (`OrderDetail.fulfillment_method`). El motor impide un `PICKUP` con
+tarjeta o con envío (CHECK).
+
+Response: 201 (pedido creado) | 200 (ese carrito ya tenía pedido en efectivo)
+`OrderSummary`, con `status: "PENDING_PAYMENT"`, `payment_method: "CASH"`,
+`entry_state: "PENDING_QUALIFICATION"` y `entries_granted: null`.
+
+El carrito se congela con la MISMA función que la sesión con tarjeta -SKU,
+nombre, precio, tipo de producto y elegibilidad bajo la versión de reglas
+vigente- y el pedido sale de la misma secuencia de números (`APP-00001234`). El
+carrito queda cerrado: lo que había dentro ya es un pedido.
+
+NO GENERA PARTICIPACIONES. No hay cobro hasta que una persona con
+`order.cash.confirm` lo confirma en el panel (§11.7, cobro en efectivo). Un
+pedido pendiente no aparece en el universo del export.
+
+Idempotente por carrito: el índice único parcial
+`orders_one_cash_order_per_cart` hace que dos envíos simultáneos del mismo
+checkout produzcan UN pedido. Un envío posterior, con el carrito ya cerrado,
+responde 409 CART_EMPTY.
+
+Errors:
+409 CART_EMPTY
+409 SHIPPING_NOT_CONFIGURED (DEC-079, solo con `DELIVERY`: igual que con tarjeta)
+422 VALIDATION_FAILED
+
+Authorization: PARTICIPANT_SELF
+
+Owner: backend
+
+Status: IMPLEMENTED
+```
+
+```text
+Method: POST
+Endpoint: /api/v1/webhooks/payments/{provider}
+
+Purpose:
+Recepción de eventos del proveedor de pago.
+
+Authentication:
+Verificación de FIRMA sobre el cuerpo CRUDO, antes de parsear. `apps/api`
+instala un parser que entrega el Buffer intacto solo en esta ruta: un JSON
+reserializado -aunque sea equivalente- ya no coincide con la firma.
+
+Request: cuerpo crudo del proveedor + cabecera de firma
+
+Response: 200 { "received": true } | 202 { "received": true }
+
+202 significa que ese evento ya estaba procesado o lo está procesando otra
+entrega simultánea. Es 2xx a propósito: un 4xx haría que el proveedor
+reintentara en bucle.
+
+Un manejador que falla también devuelve 200: el evento queda persistido en FAILED
+y visible en GET /admin/payment-webhooks. Un 5xx solo conseguiría que el
+proveedor reintentara contra el mismo fallo.
+
+Errors:
+401 UNAUTHENTICATED (firma inválida, o proveedor distinto del montado)
+409 WEBHOOK_DIGEST_MISMATCH (mismo provider_event_id, cuerpo distinto)
+
+Authorization: PUBLIC
+
+Justificación de que sea PUBLIC: el llamante es el proveedor de pago, que no
+tiene sesión. La autenticación es criptográfica, sobre la firma del cuerpo.
+
+Owner: backend
+
+Status: IMPLEMENTED
+```
+
+---
+
+## 11.2 Portal del participante
+
+Las rutas de esta sección se sirven **del ledger**, nunca de un contador.
+`GET /account/entry-summary` devuelve un solo saldo con desglose por procedencia
+-compra, AMOE, ajuste, sistema- porque compra y AMOE conviven en el MISMO
+universo elegible (principio 9). Dos saldos separados dejarían de sumar en cuanto
+hubiera una devolución.
+
+```text
+Method: GET
+Endpoint: /api/v1/account/entry-summary
+
+Purpose: saldo del participante en una promoción, con procedencia.
+
+Authentication: sesión de participante
+
+Request: ?promotion_id=<uuid>
+
+Response: 200
+{
+  "promotion_id": "uuid",
+  "active_entries": 15, "purchase_entries": 12, "amoe_entries": 3,
+  "admin_entries": 0, "system_entries": 0,
+  "as_of": "2026-09-15T12:00:00.000Z"
+}
+
+Errors: 404 PROMOTION_NOT_FOUND; 409 PROMOTION_NOT_OPERATIONAL
+
+PROMOTION_NOT_OPERATIONAL distingue "no existe" de "existe pero no tiene versión
+de reglas activa o ventana": son informaciones distintas y la segunda es
+accionable para operaciones.
+
+Authorization: entry.self.read
+
+Owner: backend
+
+Status: IMPLEMENTED
+```
+
+```text
+Method: GET
+Endpoint: /api/v1/account/entry-transactions
+
+Purpose: historial del ledger propio, correcciones incluidas.
+
+Request: ?promotion_id=<uuid>&cursor=<opaque>&limit=<1..100>
+
+Response: 200
+{ "items": [ { "id", "type", "source_type", "quantity_delta", "reason_key",
+              "effective_at", "expires_at", "reverses_transaction_id" } ],
+  "next_cursor": null }
+
+Una devolución aparece como FILA NUEVA con delta negativo, no como la
+desaparición de la original.
+
+Errors: 404 PROMOTION_NOT_FOUND; 409 PROMOTION_NOT_OPERATIONAL
+
+Authorization: entry.self.read
+
+Owner: backend
+
+Status: IMPLEMENTED
+```
+
+```text
+Method: GET
+Endpoint: /api/v1/account/entry-numbers
+
+Purpose: números de participación del participante ("mis números"), uno por
+participación (DEC-080).
+
+Request: ?promotion_id=<uuid>&cursor=<opaque>&limit=<1..1000, 500 por defecto>
+
+Response: 200
+{ "promotion_id", "digits": 8, "active_numbers", "void_numbers",
+  "items": [ { "batch_id", "source_type", "awarded_at", "quantity",
+               "active_quantity",
+               "numbers": [ { "number": "04669096", "active": true } ] } ],
+  "next_cursor": null }
+
+Pagina por NÚMEROS: un lote largo sigue en la página siguiente con el mismo
+batch_id. Cada número es el ordinal interno de la participación pasado por la
+permutación con clave de la promoción (sin repetidos por construcción).
+`active: false` = anulado por devolución, contracargo, descalificación o
+ajuste, con la MISMA regla que el congelado del export
+(`computeEntryNumberActivity`).
+
+Los números viajan como CADENA, jamás como número (DEC-010).
+
+Detrás del flag visible_entry_numbers_enabled: con el flag apagado devuelve 404
+(los números existen igual desde DEC-080). 409
+ENTRY_NUMBER_FORMAT_NOT_CONFIGURED solo si hubiera lotes sin secuencia, que la
+migración 0037 hace imposible. 422 VALIDATION_FAILED con un cursor que no es de
+un lote propio.
+
+AVISO: los números NO son el sorteo (DEC-017): el ganador lo elige el
+Administrador sobre el universo exportado.
+
+Errors: 404 NOT_FOUND; 409 ENTRY_NUMBER_FORMAT_NOT_CONFIGURED; 422 VALIDATION_FAILED
+
+Authorization: entry.self.read
+
+Owner: backend
+
+Status: IMPLEMENTED
+```
+
+```text
+Method: GET
+Endpoint: /api/v1/account/award-holds
+
+Purpose:
+Concesiones RETENIDAS: pedidos que ya calificaron y cuyas participaciones esperan
+a que se cumpla una condición del participante -hoy, la verificación del correo,
+y solo si las Official Rules la exigen-.
+
+Request: ?promotion_id=<uuid>
+
+Response: 200
+{ "items": [ { "id", "order_id", "promotion_id", "reason",
+              "qualified_at", "held_at" } ], "next_cursor": null }
+
+Es lo que explica un entry_state PENDING_QUALIFICATION que no avanza. Se sirve
+aparte y no como un sexto valor del enum: frontend declara cinco y añadir uno
+sería un cambio de contrato.
+
+Errors: 404 PROMOTION_NOT_FOUND; 409 PROMOTION_NOT_OPERATIONAL
+
+Authorization: entry.self.read
+
+Owner: backend
+
+Status: IMPLEMENTED
+```
+
+```text
+Method: GET
+Endpoint: /api/v1/account/orders
+
+Purpose: pedidos del propio participante.
+
+Request: ?cursor=<opaque>&limit=<1..100>
+
+Response: 200 { "items": [OrderSummary], "next_cursor": null }
+
+OrderSummary = { id, order_number, status, placed_at, total, item_count,
+promotion_id, entry_state, entries_granted }.
+
+`status` es la PROYECCIÓN del vocabulario de frontend
+(PENDING_PAYMENT | PAID | FULFILLED | CANCELLED | REFUNDED |
+PARTIALLY_REFUNDED | CHARGEBACK) derivada de las cuatro máquinas internas.
+`entry_state` es un campo APARTE
+(NOT_APPLICABLE | PENDING_QUALIFICATION | GRANTED | PARTIALLY_REVERSED |
+REVERSED) y se DERIVA del ledger en cada lectura: no hay columna que lo guarde.
+
+`entries_granted` es null -no 0- mientras no haya cifra.
+
+Authorization: order.self.read
+
+Owner: backend
+
+Status: IMPLEMENTED
+```
+
+```text
+Method: GET
+Endpoint: /api/v1/account/orders/{order_id}
+
+Purpose: detalle de un pedido, con la traza del cálculo de entries.
+
+Response: 200 OrderDetail = OrderSummary + { items, subtotal, shipping_total,
+tax_total, shipping_address, fulfillment_method, entry_calculation }.
+
+`fulfillment_method` (DEC-079): `DELIVERY` (se envía a `shipping_address`) o
+`PICKUP` (pagado en efectivo y entregado en el punto de venta; `shipping_total`
+y `shipping_address` son `null` porque no hay envío).
+
+`entry_calculation` es { rules_version_id, engine_version, evaluated_at,
+final_entries, trace } leído del EntryCalculationSnapshot persistido, con la
+versión de motor de ESE movimiento y no la vigente hoy.
+
+Errors: 404 ORDER_NOT_FOUND
+
+Authorization: order.self.read
+
+Owner: backend
+
+Status: IMPLEMENTED
+```
+
+```text
+Method: GET
+Endpoint: /api/v1/me
+
+Purpose: perfil del participante autenticado.
+
+Response: 200 { id, email, display_name, email_verified, language_preference,
+created_at }
+
+SIN fecha de nacimiento ni estado de residencia: lo declarado para la
+elegibilidad (DEC-067) no se devuelve en el perfil. Si la cuenta ya declaró lo
+dice GET /api/v1/me/eligibility.
+
+Authorization: participant.self.read
+
+Owner: backend
+
+Status: IMPLEMENTED
+```
+
+```text
+Method: GET
+Endpoint: /api/v1/me/eligibility
+
+Purpose: GET /api/v1/me/eligibility dice si el participante ya declaró fecha de
+nacimiento y estado (DEC-067).
+
+Response: 200 { "declared": boolean, "declared_at": "ISO-8601" | null }
+
+Solo dice SI declaró y cuándo, nunca lo declarado. Si es elegible no se responde
+aquí: depende de las reglas de cada promoción y se evalúa al otorgar.
+
+Authorization: participant.self.read
+
+Owner: backend
+
+Status: IMPLEMENTED
+```
+
+```text
+Method: PUT
+Endpoint: /api/v1/me/eligibility
+
+Purpose: con PUT /api/v1/me/eligibility, una cuenta anterior a DEC-067 declara
+fecha de nacimiento y estado.
+
+Request: { "date_of_birth": "YYYY-MM-DD", "residence_state": "TX",
+           "consents": [{ "key": "...", "version": "..." }],
+           "language": "en-US" | "es-US" }
+
+Una sola vez: una declaración existente no se reescribe, porque cambiar la fecha
+o el estado después de comprar sería volverse elegible a posteriori. Exige los
+mismos consentimientos que el alta. La web la pide en el checkout cuando la
+promoción comprueba edad o estado.
+
+Response: 200 { "declared": true, "declared_at": "ISO-8601" }
+
+Errors: 409 ELIGIBILITY_ALREADY_DECLARED, 422 CONSENT_REQUIRED,
+422 VALIDATION_FAILED
+
+Authorization: participant.self.update
+
+Owner: backend
+
+Status: IMPLEMENTED
+```
+
+```text
+Method: PATCH
+Endpoint: /api/v1/me
+
+Purpose: cambiar nombre para mostrar e idioma preferido.
+
+Request: { "display_name": "..." | null, "language_preference": "es-US" }
+
+Solo esos dos campos. El correo NO se cambia por aquí: cambiarlo invalida la
+verificación, y la verificación puede ser condición para acumular
+participaciones. `language_preference` está acotado a en-US | es-US (DEC-021);
+la RESPUESTA lo declara string porque el backend podría soportar un idioma que la
+interfaz aún no tenga.
+
+Response: 200 ParticipantProfile
+
+Errors: 422 VALIDATION_FAILED
+
+Authorization: participant.self.update
+
+Owner: backend
+
+Status: IMPLEMENTED
+```
+
+---
+
+## 11.3 AMOE
+
+```text
+Method: GET
+Endpoint: /api/v1/promotions/{slug}/amoe-config
+
+Purpose: qué modalidad AMOE está vigente y qué exige.
+
+Response: 200
+{
+  "enabled": false, "promotion_id": "<uuid>", "mode": null,
+  "submission_window": { "opens_at": null, "closes_at": null },
+  "identity_requirements": [],
+  "required_fields": null,
+  "instructions": null,
+  "external_url": null,
+  "entries_per_approved_submission": null, "requires_review": null,
+  "max_per_participant_per_period": null, "limit_period": null
+}
+
+Con la vía encendida, los cuatro campos nuevos:
+
+  promotion_id      la promoción por la que se preguntó. VIAJA TAMBIÉN CON LA VÍA
+                    APAGADA: no es un parámetro de AMOE, es el dato con el que se
+                    preguntó. La ruta se pide por slug y el envío se dirige por
+                    identificador.
+
+  required_fields   [{ key, type, required, label_key, max_length }] o null.
+                    Se deriva UNA A UNA de identity_requirements, en ese orden.
+                    ES LA PIEZA QUE IMPIDE QUE EL FRONTEND INVENTE EL FORMULARIO:
+                    la interfaz pinta exactamente esos campos y ni uno más. Uno de
+                    más es recogida de datos personales que nadie autorizó; uno de
+                    menos, un envío que el backend rechaza con AMOE_PAYLOAD_INVALID.
+                    type: TEXT | EMAIL | TEL | TEXTAREA | DATE | CODE. Gobierna qué
+                    control se pinta; ninguna validación legal. label_key es una
+                    clave de copy del frontend (DEC-022), sin namespace, no prosa
+                    del backend. Se sirve en LAS CUATRO modalidades: el dominio
+                    exige esas claves en cualquier envío que entre por la API.
+
+  instructions      { "en-US", "es-US" } o null. EXCEPCIÓN CONSCIENTE A DEC-022:
+                    aquí el backend SÍ publica prosa, porque es texto LEGALMENTE
+                    CONTROLANTE (dirección postal, formato del sobre, plazos) que
+                    escribe el abogado en PromotionRulesVersion.config. Se renderiza
+                    tal cual, como las Reglas Oficiales. Los DOS locales son
+                    obligatorios (DEC-021). null = no publicadas: la pantalla remite
+                    al documento; nadie rellena ese hueco.
+
+  external_url      destino de EXTERNAL_INSTRUCTIONS, o null. SOLO https:, validado
+                    al leer la configuración. Un javascript: escrito en la
+                    configuración rompe la promoción (409 AMOE_CONFIG_INVALID) en vez
+                    de llegar a un navegador.
+
+Origen: PromotionRulesVersion.config.amoe (DEC-012). Bloque opcional
+identity_fields: { "<clave>": { type?, label_key?, max_length? } }, solo
+presentación. Sin descriptor: type TEXT, label_key = la clave del payload,
+max_length 500. Un descriptor de una clave que NO está en identity_requirements
+no añade ningún campo.
+
+Con el flag apagado responde enabled: false y NADA MÁS salvo promotion_id: si la
+vía no existe, sus parámetros tampoco son asunto de nadie.
+
+Errors: 404 PROMOTION_NOT_FOUND; 409 AMOE_CONFIG_INVALID
+
+Authorization: PUBLIC
+
+Justificación de que sea PUBLIC: la vía SIN COMPRA tiene que ser visible sin
+cuenta. Exigir sesión para saber cómo participar gratis convertiría la cuenta en
+un requisito de participación, que es justo lo que AMOE existe para evitar.
+
+Owner: backend
+
+Status: IMPLEMENTED
+```
+
+```text
+Method: POST
+Endpoint: /api/v1/promotions/{promotion_id}/amoe-submissions
+
+Purpose: enviar una participación sin compra.
+
+Request: { "payload": { "<clave>": "<texto>" } }
+
+`payload` es un mapa de clave a TEXTO: las cuatro modalidades piden datos
+distintos y cuál aplica lo dirá el abogado. Las claves obligatorias las declara
+identity_requirements.
+
+Response: 201
+{ "submission_id", "promotion_id", "status", "mode", "submitted_at",
+  "entries_awarded" }
+
+Una participación aprobada genera entries del MISMO tipo que una compra, con
+source_type AMOE. La aprobación crea una transacción del ledger; nunca incrementa
+un contador.
+
+Errors:
+404 NOT_FOUND (flag apagado)
+409 AMOE_WINDOW_CLOSED
+409 AMOE_LIMIT_REACHED
+409 AMOE_DUPLICATE_SUBMISSION
+409 AMOE_CONFIG_INVALID
+422 VALIDATION_FAILED
+
+Authorization: amoe.self.submit
+
+Owner: backend
+
+Status: IMPLEMENTED
+```
+
+```text
+Method: GET
+Endpoint: /api/v1/account/amoe-submissions
+
+Purpose: envíos AMOE del propio participante.
+
+Request: ?promotion_id=<uuid>
+
+Response: 200 { "items": [AmoeSubmission], "next_cursor": null }
+
+NO devuelve el payload: contiene datos personales y el participante ya sabe lo
+que envió. Lo que necesita es el ESTADO.
+
+Authorization: PARTICIPANT_SELF
+
+No existe capacidad de LECTURA de los envíos propios en el catálogo
+(amoe.self.submit es de escritura). Se declara como recurso propio del
+participante -que es lo que es- en vez de reutilizar una capacidad de escritura
+para leer, o de inventar una que nadie podría conceder.
+
+Owner: backend
+
+Status: IMPLEMENTED
+```
+
+| Método | Endpoint                                               | Authorization                | Notas                                                                                                                                       |
+| ------ | ------------------------------------------------------ | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET    | `/api/v1/admin/amoe-submissions?promotion_id=&status=` | `amoe.review.read`           | Cola de revisión. `promotion_id` obligatorio; `status` opcional. Nunca el payload. Forma completa de la fila más abajo.                     |
+| POST   | `/api/v1/admin/amoe-submissions`                       | `amoe.submission.transcribe` | Transcripción de una ficha postal (§13.10).                                                                                                 |
+| POST   | `/api/v1/admin/amoe-submissions/{id}/approve`          | `amoe.review.approve`        | Cuerpo `{ reason_key, notes? }`; `reason_key` obligatorio (HO-034.1). Cantidad según la versión de reglas **del envío**, no la vigente hoy. |
+| POST   | `/api/v1/admin/amoe-submissions/{id}/reject`           | `amoe.review.reject`         | Cuerpo `{ reason_key, notes? }`; `reason_key` obligatorio. Un rechazo NO consume cuota del límite.                                          |
+
+---
+
+### `?status=` en la cola: por qué existe y qué devuelve cada valor
+
+`status` es **opcional**, enum cerrado
+`PENDING_REVIEW | SUBMITTED | APPROVED | REJECTED | CANCELLED`, y su valor por
+defecto es `PENDING_REVIEW`. Un valor fuera del enum es **422**, no una lista
+vacía: una lista vacía sería indistinguible de "no hay envíos en ese estado".
+
+- **Sin el parámetro —y con `PENDING_REVIEW`, que es lo mismo— la respuesta es
+  la COLA DE TRABAJO**: lo que espera decisión, es decir `SUBMITTED` y
+  `PENDING_REVIEW` juntos. Un envío recién registrado también espera, aunque
+  nadie lo haya mirado todavía. **Ningún cliente cambia de comportamiento por
+  este añadido**: sin `status`, la respuesta es exactamente la de antes de que
+  el filtro existiera.
+- **Con cualquier otro valor, la consulta es de ESE estado exacto.** Es la
+  única forma de volver a mirar un envío ya decidido: al aprobarlo salía de la
+  cola, y con él se iban `granted_entries` y `applied_cap`, que son lo único que
+  explica por qué una aprobación concedió menos de lo anunciado. Un registro
+  promocional que no se puede volver a leer no es auditable.
+- **`promotion_id` sigue siendo obligatorio.** La cola es de UNA promoción:
+  sin ella, una misma pantalla mezclaría expedientes de sorteos distintos.
+- **La capacidad no cambia con el filtro.** `amoe.review.read` se comprueba
+  antes de mirar el parámetro: un parámetro de consulta no puede ser la
+  diferencia entre pedir permiso y no pedirlo.
+
+---
+
+- **La cola proyecta el efecto de la decisión, calculado por el motor.** Quien
+  aprueba tiene que ver antes, cambio y después, y el panel no puede producir
+  ninguna de las tres: el saldo está en el ledger y la cantidad la fija la versión
+  de reglas DEL ENVÍO. Restar en el cliente sería una segunda implementación del
+  motor. `entries_before` siempre trae número (cero es un saldo conocido);
+  `entries_if_approved` y `entries_after_if_approved` son `null` cuando esa versión
+  de reglas ya no declara AMOE legible: la aprobación fallaría, y una cifra que no
+  se va a cumplir es peor que ninguna. NO son acumulativas entre filas: cada una
+  contesta "si apruebo ESTA".
+- **El campo de participaciones se llama `entries_awarded` en las TRES formas
+  AMOE** (respuesta de envío, listado del participante y cola de revisión). No es
+  `entries` ni `entries_granted`; `entries_granted` es de `OrderSummary` y ahí se
+  queda.
+- **El identificador del envío se llama `submission_id`, en las tres formas.**
+  No `id`. Lo publica así `amoeSubmissionSchema`, del que la fila de la cola es
+  una extensión, y por tanto también las respuestas de aprobar, rechazar y
+  transcribir. Zanjado tras HO-041: `frontend` puede retirar el ayudante de
+  tolerancia.
+
+### Forma completa de la fila de la cola (`AmoeReviewItem`)
+
+Es `AmoeSubmission` —`submission_id`, `promotion_id`, `status`, `mode`,
+`submitted_at`, `entries_awarded`— más lo siguiente. Se documenta entero porque
+hasta HO-041 la mitad se publicaba sin estar descrita:
+
+| Campo                           | Tipo             | Qué es                                                                                         |
+| ------------------------------- | ---------------- | ---------------------------------------------------------------------------------------------- |
+| `participant_id`                | `uuid`           | Identificador interno. Nunca el payload del envío.                                             |
+| `participant_email`             | `string \| null` | **Enmascarado** (dominio entero, inicial de la parte local). Ver la nota de abajo.             |
+| `period_bucket`                 | `string`         | La ventana en la que cuenta este envío para el límite por periodo, en la zona legal (DEC-011). |
+| `flagged_duplicate`             | `boolean`        | La huella coincide con otro envío de la misma promoción (`duplicate_policy: FLAG_FOR_REVIEW`). |
+| `flagged_envelope`              | `boolean`        | El sobre traía más fichas de las que admite `mail_in.max_cards_per_envelope` (§13.10).         |
+| `transcribed_by_admin_user_id`  | `uuid \| null`   | Quién tecleó la ficha postal; `null` si la envió su titular (§13.10).                          |
+| `transcribed_by_me`             | `boolean`        | `true` si la tecleó quien está mirando. Ver la nota de abajo.                                  |
+| `entries_before`                | `number`         | Saldo activo antes de decidir. Siempre número: cero es un saldo conocido.                      |
+| `entries_if_approved`           | `number \| null` | Lo que otorgaría según la versión de reglas **del envío**, antes del tope.                     |
+| `entries_after_if_approved`     | `number \| null` | `entries_before + entries_if_approved`.                                                        |
+| `cap_applies`                   | `boolean`        | El tope por participante gobierna esta aprobación (§13.3).                                     |
+| `entries_if_approved_after_cap` | `number \| null` | Lo que otorgaría **después** del tope. Es la única cifra que promete algo.                     |
+| `granted_entries`               | `number \| null` | Lo que la aprobación concedió de verdad, leído del ledger. `null` sin aprobación.              |
+| `applied_cap`                   | objeto \| `null` | `{ kind, limit, requested, granted }` si hubo recorte; `null` si no lo hubo.                   |
+
+- **Por qué el correo sale, y por qué sale enmascarado.** `amoe.review.read`
+  declara `touchesPii` en el catálogo de `@app/security`: una cola de revisión
+  mira expedientes de personas por definición, y sin nada legible el revisor solo
+  puede distinguir filas por UUID. Sale **enmascarado** porque ver el dato
+  completo es `pii.view.full`, que es otra capacidad y exige motivo; lo que aquí
+  hace falta es distinguir filas y reconocer un dominio desechable, no leer la
+  dirección. El enmascarado ocurre en la frontera HTTP (`http/pii.ts`): el dato
+  que no se puede ver **no se envía**. El `payload` del envío sigue sin salir por
+  esta ruta.
+- **Por qué `transcribed_by_me` es un booleano y no el actor de la sesión.** El
+  panel solo necesita saber si puede aprobar ESTA fila. Publicar el
+  identificador de la cuenta administrativa que mira —o repartir el de cada una—
+  sería regalar el mapa del equipo por una respuesta de listado. El control
+  sigue siendo el 409 `SEPARATION_OF_DUTIES`; el booleano evita el rechazo.
+
+## 11.4 Ajustes, descalificación, devoluciones y webhooks
+
+| Método | Endpoint                                       | Authorization            | Step-up |
+| ------ | ---------------------------------------------- | ------------------------ | ------- |
+| GET    | `/api/v1/admin/entry-adjustments`              | `entry.ledger.read`      | no      |
+| POST   | `/api/v1/admin/entry-adjustments`              | `entry.adjust.create`    | sí      |
+| POST   | `/api/v1/admin/entry-adjustments/{id}/approve` | `entry.adjust.approve`   | sí      |
+| POST   | `/api/v1/admin/entry-adjustments/{id}/reject`  | `entry.adjust.approve`   | sí      |
+| POST   | `/api/v1/admin/participants/{id}/disqualify`   | `participant.disqualify` | sí      |
+| POST   | `/api/v1/admin/orders/{id}/refund`             | `order.refund.initiate`  | sí      |
+| GET    | `/api/v1/admin/payment-webhooks`               | `payment.webhook.read`   | no      |
+| POST   | `/api/v1/admin/payment-webhooks/{id}/replay`   | `payment.webhook.replay` | sí      |
+
+Notas que no caben en la tabla y que importan:
+
+- **`entry.adjust.create` y `entry.adjust.approve` se comprueban tres veces**: el
+  autorizador de la ruta, `AdjustmentService.approve` y el CHECK
+  `adjustments_approver_differs` de la migración 0022. Las dos primeras se pueden
+  saltar cambiando código; la tercera no.
+- **Aprobar un ajuste lleva cuerpo, como rechazarlo**:
+  `{ reason_key, notes? }`, con `reason_key` en la forma
+  `^[A-Z][A-Z0-9_]{2,63}$`. Es el motivo **del aprobador**, distinto del motivo
+  del ajuste; queda en `audit_events` (`metadata.approval_reason_key`) porque
+  aprobar toca el ledger y merece la misma explicación que rechazar. Sin él,
+  **403**: lo exige el autorizador antes del handler (HO-034.1).
+- **Crear un ajuste devuelve `PENDING_APPROVAL`** mientras
+  `dual_approval_for_sensitive_actions_enabled` esté encendido, que es su valor
+  de arranque y el único flag que arranca así (DEC-032).
+- **Descalificar emite una fila NEGATIVA por cohorte** `(procedencia,
+caducidad)`, con `source_ref = disqualification:<decision_id>:<expiry_key>`
+  (DEC-047). Nunca borra al participante ni sus filas. `reason_detail` es
+  obligatorio: descalificar sin explicar por qué es un borrado con formulario.
+  Respuesta: `{ id, promotion_id, participant_id, decision_id, reason_key,
+decided_at, entries_removed, cohort_count }`.
+- **La devolución administrativa** llama al proveedor y, con el abono confirmado,
+  pide el movimiento de reversal. El importe de mercancía ELEGIBLE lo calcula
+  `@app/commerce` sobre la elegibilidad CONGELADA de cada línea. Devuelve
+  `{ order_id, provider_refund_id, amount, entry_transaction_id,
+entries_reversed }`. Hoy responde `503 PAYMENT_PROVIDER_NOT_CONFIGURED`.
+- **`replay` NO reprocesa el evento**: el cuerpo original no se guarda -contiene
+  datos de tarjeta y PII- y sin él no se puede verificar la firma. Lo que hace es
+  dejarlo visible para que el proveedor lo reintente. Un evento ya `PROCESSED`
+  devuelve `404 PAYMENT_EVENT_NOT_REPLAYABLE`: repetir su efecto es exactamente
+  lo que la idempotencia del ledger existe para impedir.
+- Ningún endpoint de esta sección edita ni borra una transacción del ledger. **No
+  existe tal endpoint y no puede existir** (DEC-007).
+
+---
+
+- **`preview` NO escribe nada.** Dado
+  `{ promotion_id, participant_id, direction, quantity }` devuelve
+  `{ before, proposed_delta, after, would_make_balance_negative,
+requires_second_approval, as_of }`. Es una LECTURA: ni fila de ledger, ni
+  expediente, ni evento de auditoría. `would_make_balance_negative` es
+  literalmente la misma función que rechaza el ajuste al aplicarlo, no una
+  reimplementación, para que no exista una previsualización en verde seguida de
+  un rechazo. `as_of` viaja porque un saldo es una foto: entre la previsualización
+  y la solicitud puede entrar una compra o una descalificación. Exige
+  `entry.adjust.create` y no `entry.ledger.read`: quien no puede pedir un ajuste
+  no tiene por qué poder simularlo sobre un participante concreto. Es POST y no
+  GET porque el cuerpo lleva un identificador de participante, y en un GET
+  viajaría en la URL. Con `manual_adjustments_enabled` apagado responde 404, igual
+  que crear. Errores: 401, 403, 404, 422.
+
+## 11.5 Sorteo (DEC-017)
+
+| Método | Endpoint                                                                       | Authorization               | Step-up |
+| ------ | ------------------------------------------------------------------------------ | --------------------------- | ------- |
+| GET    | `/api/v1/admin/promotions/{promotion_id}/draw-authorizations`                  | `draw.result.read`          | no      |
+| POST   | `/api/v1/admin/promotions/{promotion_id}/draw-authorizations`                  | `draw.authorization.create` | sí      |
+| POST   | `/api/v1/admin/promotions/{promotion_id}/draw-authorizations/{auth_id}/revoke` | `draw.authorization.create` | sí      |
+| POST   | `/api/v1/admin/draws`                                                          | `draw.initiate`             | sí      |
+| GET    | `/api/v1/admin/draws?promotion_id=`                                            | `draw.result.read`          | no      |
+| GET    | `/api/v1/admin/promotions/{promotion_id}/potential-winners`                    | `winner.workflow.read`      | no      |
+| POST   | `/api/v1/admin/potential-winners/{id}/status`                                  | `winner.status.update`      | sí      |
+
+- **`POST /admin/draws` llama a `initiateDraw()` de `@app/tpa`** con los puertos
+  reales: flag persistido (`ConfigRepository`, nunca entorno), `authorize()` de
+  `@app/security`, repositorios de PostgreSQL, CSPRNG del sistema (el rechazo de
+  muestreo vive en `@app/tpa/random`) y la cadena de `@app/audit`. Consulta los
+  cinco cerrojos y se niega en el primero que no pasa, dejando `AuditEvent`
+  `draw.rejected` de la negativa.
+  - Cerrojo 1 (flag apagado o no evaluado): `409 INTERNAL_DRAW_DISABLED`.
+  - Cerrojos 2-5: `409 DRAW_REFUSED`.
+  - En los dos casos, `details.reason` lleva el **`reason_code` estable del
+    dominio** (`draw.refused.*`) y `details` el contexto. Nunca viaja prosa
+    (DEC-031).
+    Hoy el cerrojo 1 está cerrado por defecto, y aunque se encendiera el cerrojo 3
+    se niega con `draw.refused.second_approval_missing` mientras no exista la ruta
+    de segunda aprobación (`draw.approve`, sesión paralela). Sin transacción
+    envolvente a propósito: cada negativa escribe su evento antes de lanzar, y una
+    transacción lo retrocedería. `DRAW_ENGINE_NOT_WIRED` deja de existir.
+- **Éxito**: `201` con el `DrawingEvent` encadenado (`record_hash`,
+  `previous_record_hash`) y el expediente de `PotentialWinner` en `SELECTED`
+  persistido en su propia transacción (si el proceso muriera en medio, sobrevive
+  el `DrawingEvent`, que es la evidencia). Tres hechos auditables:
+  `draw.initiated`, `draw.completed`, `winner.selected`.
+- **`POST /potential-winners/{id}/status`** aplica la transición con
+  `transitionPotentialWinner` de `@app/tpa`; aquí no se replica la máquina, se
+  llama. Una transición no permitida responde `409 WINNER_TRANSITION_NOT_ALLOWED`
+  con `details: { reason, from, to, allowed[] }` (los destinos salen de la misma
+  máquina, para que el panel no lleve su propia tabla). Dos transiciones
+  concurrentes desde el mismo estado: `409 WINNER_TRANSITION_CONFLICT`, solo se
+  aplica una. Emite `winner.status_changed`. `WINNER_WORKFLOW_NOT_WIRED` deja de
+  existir.
+
+## 11.6 Exportación al third-party administrator (DEC-016)
+
+| Método | Endpoint                                                   | Authorization              | Step-up |
+| ------ | ---------------------------------------------------------- | -------------------------- | ------- |
+| POST   | `/api/v1/admin/promotions/{promotion_id}/export-snapshots` | `export.snapshot.create`   | no      |
+| GET    | `/api/v1/admin/promotions/{promotion_id}/export-snapshots` | `export.snapshot.read`     | no      |
+| GET    | `/api/v1/admin/export-snapshots/{id}`                      | `export.snapshot.read`     | no      |
+| POST   | `/api/v1/admin/export-snapshots/{id}/validate`             | `export.snapshot.validate` | no      |
+| POST   | `/api/v1/admin/export-snapshots/{id}/finalize`             | `export.finalize`          | sí      |
+| GET    | `/api/v1/admin/export-snapshots/{id}/download`             | `export.download`          | sí      |
+| POST   | `/api/v1/admin/export-snapshots/{id}/deliver`              | `export.deliver`           | sí      |
+| POST   | `/api/v1/admin/export-snapshots/{id}/results`              | `winner.status.update`     | sí      |
+
+- **Crear** fija la tupla de DEC-016 -promoción, `cutoff_at`, `rules_version_id`,
+  `ledger_high_water_mark` y las tres versiones- y nada más. El corte se pide
+  EXPLÍCITO y no se toma del reloj: es una decisión de operaciones, no el
+  instante en que alguien pulsó el botón.
+- **La marca de agua no es redundante con el corte.** `effective_at` puede ser
+  anterior al corte en una fila escrita DESPUÉS -un pago que liquida tarde-, y
+  sin el tope de secuencia esa fila entraría en un recálculo posterior y
+  cambiaría un digest ya firmado.
+- **Formas que cambian respecto a la propuesta**: `GET .../download` exige
+  `?reason=` (3..2000 caracteres) y responde `200 application/octet-stream` (ZIP
+  determinista) con `Content-Disposition: attachment`, `X-Content-Type-Options:
+nosniff`, `Cache-Control: no-store` y `X-APP-Artifact-Sha256`. El body de
+  `POST .../results` sustituye `reason_code` por `external_reference` (1..200).
+- **Validar** congela el universo elegible en tramos de ordinales, reúne los
+  números del ledger y ejecuta `runReconciliationChecks` de `@app/tpa`, incluida
+  la verificación REAL de la hash chain de la promoción con `@app/audit`.
+  Devuelve `{ snapshot_id, passed, checks[] }`: cada `check.id` es un código
+  estable `reconciliation.*` y `check.detail` lleva severidad y contexto; ningún
+  `check` lleva prosa (DEC-031). `passed` solo si nada `CRITICAL` bloquea. La
+  línea de caducidad aparece SIEMPRE, valga cero o no (DEC-033/034), y la cadena
+  aparece como `reconciliation.chain_not_sealed` (AVISO) mientras no haya almacén
+  write-once (DEC-037). Escribe la transición `VALIDATING` solo al pasar de
+  `DRAFT`; revalidar es una lectura.
+- **Finalizar** reconcilia; si algo crítico bloquea responde
+  `409 EXPORT_RECONCILIATION_BLOCKED` con
+  `details: { reason: "tpa.reconciliation_blocked", failed_checks[] }`. Si no,
+  calcula `content_digest` y `merkle_root` con `buildExportArtifact` desde el
+  ORIGEN y los escribe en una FILA NUEVA de `export_snapshot_states`, con las
+  MISMAS cifras con las que se calculó el digest. `200` con el manifiesto. Sobre
+  un snapshot que no está en `DRAFT`/`VALIDATING`:
+  `409 EXPORT_SNAPSHOT_NOT_FINALIZABLE`. `artifact_sha256` NO se escribe al
+  finalizar: es el hash del paquete, que incluye la procedencia, que incluye
+  `finalized_at`. Los códigos `EXPORT_DIGEST_CALCULATOR_NOT_CONFIGURED`,
+  `EXPORT_FINALIZATION_NOT_WIRED` y `EXPORT_ARTIFACT_NOT_AVAILABLE` dejan de
+  existir.
+- **Descargar** sirve el paquete ZIP determinista con `200`. Descarga DIRECTA y
+  no enlace efímero: `export.download` ya exige step-up, así que la autenticación
+  fuerte va en la petición en vez de en una URL que se puede reenviar. Exige
+  `?reason=` escrito (es el fichero con más datos de participantes del sistema y
+  toda descarga deja constancia de quién, cuándo y POR QUÉ) y emite
+  `export.downloaded` con `artifact_sha256`.
+- **Entregar** distingue dos cosas que no son la misma:
+  - ENVIAR por un canal (`SFTP`, `HTTPS_API`, `SIGNED_URL`) se niega con
+    `409 EXPORT_DELIVERY_NOT_CONFIGURED` y `details.reason = "tpa.dry_run"`. La
+    negativa la produce el adaptador con el paquete real, así que deja
+    `export.delivery_failed`. Falta el administrador externo y su canal
+    (`docs/LEGAL_PENDING.md`); pasar a `LIVE` exige modo explícito Y canal.
+  - REGISTRAR EL ACUSE de una entrega hecha por descarga manual autenticada
+    (`MANUAL_DOWNLOAD`) sí funciona: pasa por `recordDeliveryReceipt` del
+    adaptador, deja `export.delivery_acknowledged` y escribe la transición
+    `DELIVERED` con método, referencia y `artifact_sha256`. Si el
+    `acknowledged_sha256` no coincide con el hash reconstruido:
+    `409 EXPORT_ACKNOWLEDGEMENT_MISMATCH`.
+- **Resultados** pasa por el adaptador: `ingestPotentialWinnerResult` deja
+  `tpa.result_ingested` y `toPotentialWinners` construye los expedientes con
+  `source: EXTERNAL_ADMINISTRATOR` y sin `drawing_event_id`. Solo se acepta sobre
+  un snapshot en `DELIVERED`. El motivo del expediente lo fija `@app/tpa`
+  (`winner.selected_by_external_administrator`, DEC-022); `external_reference`
+  ata el expediente al envío del que salió.
+
+## 11.7 Lecturas del panel: dashboard, pedidos, participantes y auditoría (HO-034 punto 5)
+
+Siete rutas de **solo lectura**. Ninguna escribe, ninguna configura y ninguna
+toca el ledger: una corrección es siempre una fila nueva y eso vive en §11.4.
+Frontera con §12 (sesión paralela): la escritura de `entry_pool_cap` y de toda
+la configuración de promoción vive allí; aquí solo se lee.
+
+Todas exigen sesión de personal con MFA (DEC-006) además de su capacidad.
+Todas paginan con el cursor opaco de §Paginación (`?cursor=&limit=1..100`).
+
+### GET /api/v1/admin/dashboard
+
+    Authorization: dashboard.read
+
+Agregados de cabecera, todos referidos al **mismo instante** (`as_of`). Se
+calculan sobre la promoción `ACTIVE`; si no hay ninguna, `promotion_id` y
+`promotion_status` son `null` y los conteos no se acotan por promoción.
+
+`active_entries` y `participants` son **cifras del ledger**, y el catálogo dice
+que `dashboard.read` no las cubre ("la reconciliación vive detrás de
+`reconciliation.read`"). Se pueblan solo si el actor tiene **además**
+`entry.ledger.read`; en caso contrario llegan `null`, que significa _no
+publicado_ y no _cero_. Salen de `app_entry_balances_at` (DEC-007), nunca de una
+suma escrita en la aplicación.
+
+`participants` = participantes con **saldo activo distinto de cero** en la
+promoción. No es el censo de cuentas registradas.
+
+```json
+{
+  "promotion_id": "3f1c…",
+  "promotion_status": "ACTIVE",
+  "active_entries": 1234,
+  "participants": 56,
+  "orders_last_24h": 7,
+  "amoe_pending_review": 3,
+  "adjustments_pending_approval": 1,
+  "as_of": "2026-09-15T12:00:00.000Z"
+}
+```
+
+401 sin sesión · 403 sin la capacidad.
+
+### GET /api/v1/admin/orders
+
+    Authorization: order.read
+
+Pedidos de cualquier participante, más recientes primero. Filtro opcional
+`?promotion_id=`. El cursor va por `order_number`, que es único y monótono con
+la creación: con `created_at`, dos pedidos del mismo milisegundo se solaparían
+entre páginas.
+
+DEC-078 añade tres filtros opcionales, combinables con el cursor:
+
+- `q` (1–120 caracteres): busca por **número de orden** -completo, una parte o
+  dictado como `APP-1234`- o por **cliente**: correo de la cuenta, nombre de la
+  cuenta o nombre de la dirección del pedido. Subcadena, sin distinguir
+  mayúsculas. Lo que se busca NO vuelve en la respuesta: el correo sigue
+  enmascarado.
+- `payment_method`: `CARD` o `CASH`.
+- `awaiting_payment=true`: solo los que siguen esperando el cobro. Con
+  `payment_method=CASH` es la cola de la caja.
+
+Cada fila lleva además `payment_method` (`CARD` | `CASH`).
+
+**El correo del comprador viaja siempre enmascarado** (`a***@dominio`).
+`order.read` es "ver pedidos", no una capacidad de PII. La fila no publica
+líneas ni dirección de envío: repartir PII a granel para pintar una tabla que no
+la usa no es aceptable, y DEC-014 lo impide por construcción — no está declarada
+en el esquema, así que no puede salir.
+
+```json
+{
+  "items": [
+    {
+      "id": "…",
+      "order_number": "APP-00000042",
+      "status": "PAID",
+      "entry_state": "GRANTED",
+      "placed_at": "2026-09-10T10:00:00.000Z",
+      "total": { "amount_minor": "5000", "currency": "USD" },
+      "participant_email": "a***@example.test",
+      "participant_id": "…",
+      "payment_method": "CARD"
+    }
+  ],
+  "next_cursor": null
+}
+```
+
+401 · 403 · 422 (cursor inválido: falla, no devuelve la primera página).
+
+### GET /api/v1/admin/orders/:order_id
+
+    Authorization: order.read
+
+**Misma forma que `GET /api/v1/account/orders/:order_id`** y construida por el
+mismo presentador, para que soporte y participante lean lo mismo por teléfono.
+Incluye `entry_calculation` con `rules_version_id`, `engine_version`,
+`evaluated_at`, `final_entries` y la `trace` que se persistió en el
+`EntryCalculationSnapshot` — es lo que permite contestar meses después por qué
+esta compra generó 37 participaciones y no 36.
+
+No lleva correo: el pedido trae `participant_id`, y esa pregunta tiene su propia
+capacidad en la ficha del participante.
+
+401 · 403 · 404.
+
+### Cobro en efectivo en un punto de venta físico (DEC-078)
+
+`OrderSummary` y `OrderDetail` -en el portal y en el panel- llevan
+`payment_method`: `CARD` (pasarela) o `CASH` (efectivo en caja). El recorrido de
+un pedido `CASH` es **Pendiente de pago en efectivo → Pagado → Participaciones
+generadas**:
+
+1. El participante crea el pedido (`POST /api/v1/checkout/cash-order`, §11.1).
+   Queda `PENDING_PAYMENT` y sin participaciones.
+2. Quien recibe el dinero lo confirma. En UNA transacción: cerrojo
+   `SELECT … FOR UPDATE` sobre el pedido, una fila en
+   `cash_payment_confirmations` (quién, cuándo, motivo, número de orden e
+   importe), el pedido a PAID y un `AuditEvent` `order.cash_payment.confirmed`.
+3. En OTRA transacción, el pedido se califica y se otorga con el MISMO código que
+   el webhook de la tarjeta: mismo estado cualificante de la versión de reglas,
+   misma elegibilidad (DEC-067), mismo periodo, mismo `AwardService`, mismo
+   `source_ref = order:<id>`, mismos números visibles. El instante del pago es el
+   de la confirmación. El desenlace queda en `cash_payment_entry_outcomes`.
+
+Si el paso 3 falla, el cobro **sigue confirmado**: la respuesta dice
+`entries_error_code`, el pedido queda pagado con `entries.status: "PENDING"` y
+`can_generate_entries: true`, y la generación se reintenta sin registrar otro
+cobro. El export al administrador externo cuenta estas participaciones como
+`PURCHASE`, igual que las de tarjeta; un pedido pendiente no aparece.
+
+#### Forma `CashPayment`
+
+```json
+{
+  "order_id": "…",
+  "order_number": "APP-00001234",
+  "stage": "PENDING_CASH_PAYMENT | PAID | ENTRIES_GENERATED | CANCELLED",
+  "amount": { "amount_minor": "5000", "currency": "USD" },
+  "customer_email": "c***@example.test",
+  "confirmation": null,
+  "entries": {
+    "status": "AWAITING_PAYMENT | PENDING | GENERATED | HELD | NO_ENTRIES | NOT_APPLICABLE",
+    "not_applicable_reason": "NO_PROMOTION | NOT_ELIGIBLE | OUTSIDE_PROMOTION_WINDOW | null",
+    "entries_granted": null,
+    "resolved_at": null
+  },
+  "can_confirm": true,
+  "can_generate_entries": false,
+  "confirmation_created": null,
+  "entries_error_code": null
+}
+```
+
+`confirmation`, cuando existe: `{ confirmed_at, confirmed_by_admin_user_id,
+confirmed_by_name, reason_code, notes }`. `entries_granted` es la cifra del
+LEDGER, nunca una columna de estas tablas. `can_confirm` y `can_generate_entries`
+los calcula el backend; las acciones lo vuelven a comprobar con el pedido
+bloqueado. `confirmation_created` y `entries_error_code` solo tienen valor en las
+respuestas de las dos acciones.
+
+### GET /api/v1/admin/orders/:order_id/cash-payment
+
+    Authorization: order.read
+
+El estado del cobro en efectivo de un pedido, con la forma `CashPayment`.
+
+401 · 403 · 404 ORDER_NOT_FOUND · 409 ORDER_NOT_CASH_PAYMENT (se paga con
+tarjeta).
+
+### POST /api/v1/admin/orders/:order_id/cash-payment/confirm
+
+    Authorization: order.cash.confirm
+
+Cuerpo: `{ "reason_code": "CASH_RECEIVED_AT_STORE", "notes": "Recibo 0001" }`.
+`reason_code` lo exige la capacidad (motivo obligatorio, sin step-up: es trabajo
+de mostrador); `notes` es opcional (≤ 2000).
+
+Confirma el cobro y genera las participaciones (pasos 2 y 3). **Idempotente**: un
+doble clic, un reintento de red o dos personas confirmando a la vez registran UN
+cobro; las que llegan tarde responden 200 con `confirmation_created: false`. Si
+el cobro ya constaba y el paso 3 había fallado, esta llamada lo reintenta.
+
+200 `CashPayment` · 401 · 403 (sin la capacidad o sin motivo) · 404 ·
+409 ORDER_NOT_CASH_PAYMENT · 409 CASH_PAYMENT_NOT_PENDING (`details.status`: el
+pedido está cancelado) · 422.
+
+### POST /api/v1/admin/orders/:order_id/cash-payment/entries
+
+    Authorization: order.cash.confirm
+
+Cuerpo: `{ "reason_code": "RETRY_ENTRY_GENERATION" }`.
+
+Reintenta SOLO el paso 3 de un cobro ya confirmado. **No registra otro cobro.**
+Si el paso ya terminó, responde el estado actual sin hacer nada.
+
+200 `CashPayment` · 401 · 403 · 404 · 409 ORDER_NOT_CASH_PAYMENT ·
+409 CASH_PAYMENT_NOT_CONFIRMED (nadie lo ha cobrado) · 422.
+
+### POST /api/v1/admin/orders/:order_id/cancel
+
+    Authorization: order.cancel
+
+DEC-085. Cuerpo: `{ "reason_code": "DUPLICATE_ORDER", "notes": "..." }`.
+
+Cancela un pedido que **nunca se cobró** (sin `paid_at`, en DRAFT o
+PENDING_PAYMENT), en efectivo o con tarjeta, y lo saca de la cola de pendientes.
+No se borra: queda CANCELLED, con un `AuditEvent` `order.cancelled` que guarda
+quién, por qué, el estado anterior y el importe. Con tarjeta, **antes** se
+caduca la sesión de pago del proveedor para que nadie pueda pagarlo después; si
+el proveedor dice que el pago ya se completó o está en curso, no se cancela.
+Cancelar uno ya cancelado responde la ficha sin hacer nada.
+
+200 `OrderDetail` · 401 · 403 (sin la capacidad o sin motivo) · 404 ·
+409 ORDER_NOT_CANCELLABLE (`details.status`; cobrado: eso es un reembolso) ·
+409 ORDER_PAYMENT_IN_PROGRESS · 409 ORDER_PROVIDER_MISMATCH · 422 ·
+503 PAYMENT_PROVIDER_UNAVAILABLE / PAYMENT_PROVIDER_NOT_CONFIGURED.
+
+### POST /api/v1/admin/orders/:order_id/fulfillment
+
+    Authorization: order.fulfillment.update
+
+DEC-085. Cuerpo: `{ "delivered": true, "carrier": "USPS", "tracking_number": "9400…" }`
+o `{ "delivered": false }`.
+
+`true` marca la mercancía como enviada (o entregada en mano si se recoge en el
+punto de venta): `fulfillment.state = FULFILLED`, `delivered_at` y, solo si se
+envía, transportista y guía, que son texto libre (no hay integración con
+paquetería). Corregir la guía de un pedido ya enviado no mueve la fecha.
+`false` lo devuelve a pendiente y borra los tres datos. `AuditEvent`
+`order.fulfillment.updated`. No toca importes, pago ni participaciones.
+
+200 `OrderDetail` · 401 · 403 · 404 · 409 ORDER_NOT_FULFILLABLE (sin cobrar,
+cancelado o reembolsado entero) · 409 ORDER_HAS_NO_MERCHANDISE · 422
+(`pickup_is_not_shipped`: transportista o guía en un pedido que se recoge).
+
+`OrderDetail` lleva desde DEC-085 `fulfillment: { state, delivered_at, carrier,
+tracking_number }`, también en `GET /account/orders/:order_id`: quien compró ve
+si su pedido salió y con qué guía. Cada línea lleva además `product_kind`
+(`MERCHANDISE` o `ENTRY_PACKAGE`, congelado en la compra): solo la mercancía se
+envía.
+
+### GET /api/v1/admin/reports/daily-cut
+
+    Authorization: order.read
+
+DEC-085. `?date=YYYY-MM-DD` (sin él, hoy). Corte de caja de ese día de
+**12:00 a. m. a 11:59 p. m. en `America/Denver`** (Nuevo México), que es la
+hora del punto de venta y no la zona legal de la promoción.
+
+- `cash`, `card`, `total`: `{ orders, amount }`, pedidos con `paid_at` dentro
+  del día por medio de pago (efectivo = `provider = 'cash'`). Lo cobrado ese
+  día, aunque después se haya reembolsado.
+- `refunds`: reembolsos con tarjeta hechos ese día, de pedidos de cualquier día.
+- `merchandise.lines`: una fila por línea de mercancía de esos pedidos, con
+  número de pedido, cliente (nombre y correo enmascarado), dirección o recogida
+  en el punto de venta, estado de envío, producto y cantidad.
+- `merchandise.products`: unidades por producto.
+
+Sin desglose de paquetes ni de participaciones. Una moneda distinta de la de la
+tienda no se suma: se registra en el log y queda fuera.
+
+200 · 401 · 403 · 422 (fecha imposible).
+
+### GET /api/v1/admin/participants
+
+    Authorization: participant.list
+
+Participantes, más recientes primero, cursor por `created_at`. **PII siempre
+enmascarada**, y la respuesta lo dice: `pii_masked` es un dato, no una deducción
+de la interfaz — un correo a medias sin él parece un dato corrupto.
+
+`email` es `""` cuando la cuenta está anonimizada y no tiene correo. `""` (no
+hay) y `a***@dominio` (hay y está oculto) son afirmaciones distintas.
+
+`disqualified` se resuelve con `EXISTS` sobre `disqualifications`, no con una
+columna: una columna sería una segunda fuente de verdad sobre un hecho que ya
+está registrado con su motivo, su actor y su instante.
+
+```json
+{
+  "items": [
+    {
+      "id": "…",
+      "email": "a***@example.test",
+      "display_name": "Ada",
+      "created_at": "2026-09-01T05:00:00.000Z",
+      "disqualified": false,
+      "pii_masked": true
+    }
+  ],
+  "next_cursor": null
+}
+```
+
+401 · 403 · 422.
+
+### GET /api/v1/admin/participants/:participant_id
+
+    Authorization: participant.read
+
+La misma fila más `phone` (enmascarado: `***34`), `preferred_locale`, `status` y
+`review_state`. `pii_masked` es `true`. No lleva pedidos ni cifras del ledger:
+para eso están `order.read` y `entry.ledger.read`, con sus propias rutas.
+
+401 · 403 · 404.
+
+### GET /api/v1/admin/participants/:participant_id/pii
+
+    Authorization: pii.view.full
+
+Misma ficha **sin enmascarar**, con `pii_masked: false`.
+
+**Es una ruta aparte y no un `?pii=full`, a propósito.** El registro de DEC-015
+declara la capacidad por (método, camino) y el autorizador corre antes del
+handler: un parámetro que cambiara la capacidad exigida dejaría al cliente elegir
+con qué permiso se le juzga. Tampoco se desenmascara "si el actor tiene la
+capacidad": `pii.view.full` exige segundo factor reciente y motivo (DEC-006,
+DEC-027), y comprobarla dentro del handler saltaría las dos condiciones.
+
+**Cómo viaja el motivo (HO-034.1).** Esta ruta exige motivo, y es un `GET` sin
+cuerpo donde ponerlo. Se manda en la cabecera:
+
+    X-APP-Reason-Code: participant_support_case
+
+La forma es la misma que la del `reason_code` que se persiste en `audit_events`
+(`^[a-zA-Z][a-zA-Z0-9_.]{2,63}$`), de modo que **lo que abre la puerta es
+exactamente lo que queda escrito en la traza**. Sin cabecera, o con una que no
+respete la forma, la respuesta sigue siendo **403**: eso no es un fallo, es el
+control funcionando. Hace falta además segundo factor reciente.
+
+Durante un tiempo esta ruta respondió 403 siempre, porque el autorizador pasaba
+`reasonProvided: false` como constante. Ya no.
+
+Plantilla: ya no se exige segundo factor reciente (no hay MFA); el motivo sí.
+
+401 · 403 · 404.
+
+### POST /api/v1/admin/participants/:participant_id/password
+
+    Authorization: participant.password.reset
+
+Plantilla: no hay recuperación de contraseña por correo, así que quien la
+olvida la pide al administrador. Cuerpo `{ "password": "..." }`; aplica la
+misma política que el alta (mínimo 8 caracteres), levanta el bloqueo por
+intentos y **cierra todas las sesiones** abiertas del participante. La
+contraseña no se guarda en la auditoría: el evento `participant.password.reset`
+solo registra quién la cambió y a quién.
+
+200 `{ "ok": true }` · 401 · 403 · 404 (participante inexistente o sin
+credencial) · 422 `WEAK_PASSWORD` (con `minimum_length` y `maximum_length`).
+
+### GET /api/v1/admin/audit-events
+
+    Authorization: audit.read
+
+Traza de auditoría, la más reciente primero. Filtros opcionales
+`?promotion_id=`, `?actor_id=`, `?action=`.
+
+**Solo lectura, y no por convención**: no existe endpoint que edite o borre una
+fila, el rol de base de datos de la aplicación no tiene el privilegio y un
+trigger lanza excepción aunque lo tuviera (DEC-007, DEC-008). La verificación de
+la cadena de hashes **no** está aquí: es `audit.integrity.verify`, otra capacidad
+y otra ruta.
+
+**Qué no se publica.** `before`, `after`, `reason_text`, `source_ip` y
+`user_agent` ni siquiera se seleccionan en la consulta: los tres primeros son
+material interno y los dos últimos huella de conexión. `actor_email` viaja
+**siempre `null`** — la tabla guarda `actor_id`, un identificador interno, y su
+propia documentación dice "nunca un correo ni un nombre"; resolverlo en la
+lectura metería en la traza justo el dato que la escritura decidió no guardar.
+Publicar el nombre de la persona sería un DEC con su capacidad, no un `JOIN`
+añadido de paso.
+
+El orden y el cursor van por `sequence_no`, el orden **total** de escritura que
+asigna el motor. Con `occurred_at` habría empates y la paginación se saltaría uno
+de los dos hechos: en una traza de auditoría, un hecho que nadie llega a ver es
+exactamente el fallo que la traza existe para impedir.
+
+```json
+{
+  "items": [
+    {
+      "id": "…",
+      "occurred_at": "2026-09-14T09:00:00.000Z",
+      "actor_type": "HUMAN",
+      "actor_id": "…",
+      "actor_email": null,
+      "actor_roles": ["COMPLIANCE_OFFICER"],
+      "action": "entry.adjust.approve",
+      "entity_type": "adjustment",
+      "entity_id": "…",
+      "promotion_id": "…",
+      "reason_key": "SUPPORT_CORRECTION",
+      "request_id": "…"
+    }
+  ],
+  "next_cursor": null
+}
+```
+
+401 · 403 · 422 (`action` con forma inválida se rechaza antes de la consulta).
+
+---
+
+## 12. Altas del panel: catálogo y promociones (DEC-010, DEC-011, DEC-012)
+
+Hasta esta sección el catálogo era **de solo lectura**. El escaparate leía
+productos y promociones, el panel las listaba, y no existía ninguna forma de
+crear una: el panel enseñaba listas vacías y llenarlas exigía SQL a mano contra
+producción. Ésta es la puerta que faltaba.
+
+**Nada de lo que hay aquí concede participaciones.** Un producto es
+**mercancía** (`CLAUDE.md` §1): tiene SKU, precio, nombre y existencias, y
+ninguna columna suya dice cuántas participaciones otorga, porque eso lo dice la
+`PromotionRulesVersion` (DEC-012). Crear un producto y publicarlo **no** lo
+convierte en elegible para nada.
+
+**Publicar es una ruta aparte y no un `PATCH { status }`.** El catálogo de
+DEC-027 separa `product.write` de `product.publish`, y el registro de DEC-015
+declara la capacidad por (método, camino). Si el estado viajara en el cuerpo, la
+capacidad exigida la elegiría el cliente al decidir qué campos manda, y el
+autorizador —que corre **antes** del handler— no puede juzgar una decisión que
+todavía no se ha tomado. Lo mismo vale para activar y cerrar una promoción.
+
+**Los dos idiomas son obligatorios en el alta.** No hay `optional` ni fallback de
+uno al otro (principio 4). Un producto con nombre solo en inglés no es bilingüe a
+medias: es un producto que en media tienda aparece sin nombre.
+
+### GET /api/v1/admin/products
+
+    Authorization: product.read
+
+Catálogo completo, `DRAFT` y `ARCHIVED` incluidos —a diferencia de
+`GET /products`, que solo sirve lo publicado—. Paginación con `?cursor=`.
+
+`price_amount_minor` es **cadena**, no número: un importe en unidad menor puede
+superar el entero seguro de JavaScript. `null` significa que el producto aún no
+tiene variante, **no** que sea gratis.
+
+401 · 403.
+
+### POST /api/v1/admin/products
+
+    Authorization: product.write
+
+```json
+{
+  "sku": "GORRA-001",
+  "slug": "gorra-clasica",
+  "currency": "USD",
+  "name": { "es-US": "Gorra clásica", "en-US": "Classic Cap" },
+  "description": { "es-US": null, "en-US": null },
+  "price_amount_minor": 2500,
+  "stock_quantity": 100
+}
+```
+
+Crea producto, sus dos traducciones y su primera variante con precio, **todo en
+la misma transacción**: un producto sin variante no tiene precio y uno sin
+traducciones no tiene nombre, y cualquiera de las mitades sin la otra deja en el
+catálogo una fila que el escaparate no puede pintar.
+
+**Nace en `DRAFT` siempre.** `price_amount_minor` va en la **unidad menor** de la
+moneda como entero (DEC-010): 2500 son 25,00 USD. `stock_quantity: null` es
+"existencias no gestionadas", que no es lo mismo que cero.
+
+**201** con el producto · 409 `CATALOG_CONFLICT` si el SKU o el slug ya existen,
+con el mensaje del motor en `details.engine` · 422 · 401 · 403.
+
+### GET /api/v1/admin/products/:product_id
+
+    Authorization: product.read
+
+401 · 403 · 404.
+
+### PATCH /api/v1/admin/products/:product_id
+
+    Authorization: product.write
+
+Campos opcionales: `name`, `price_amount_minor`, `stock_quantity`. Un `PATCH` sin
+ningún campo es 422: no es una edición.
+
+**No cambia el estado**, a propósito. Ver la ruta siguiente.
+
+200 · 401 · 403 · 404 · 409 · 422.
+
+### POST /api/v1/admin/products/:product_id/publish
+
+    Authorization: product.publish
+
+```json
+{ "published": true }
+```
+
+`true` lo pone `ACTIVE` y visible en la tienda; `false` lo archiva. La variante
+sigue al producto: una variante `ACTIVE` bajo un producto `ARCHIVED` seguiría
+siendo comprable por su identificador aunque no aparezca en ningún listado.
+
+200 · 401 · 403 · 404 · 422.
+
+### GET /api/v1/admin/promotions
+
+    Authorization: promotion.read
+
+Promociones para el panel, borradores incluidos. Paginación con `?cursor=`.
+
+401 · 403.
+
+### POST /api/v1/admin/promotions
+
+    Authorization: promotion.create
+
+```json
+{
+  "slug": "camioneta-2025",
+  "internal_name": "Camioneta 2025",
+  "legal_timezone": "America/Chicago",
+  "public_name": {
+    "es-US": "Gana una camioneta 2025",
+    "en-US": "Win a 2025 pickup truck"
+  },
+  "starts_at": null,
+  "ends_at": null
+}
+```
+
+**`legal_timezone` es obligatoria y no tiene valor por defecto** (DEC-011). Todos
+los plazos se evalúan contra ella, nunca contra la del navegador ni la del
+contenedor. Un valor por defecto —aunque fuera `America/Chicago`, que es la de
+las Official Rules— convertiría una decisión legal en un descuido. Que la zona
+exista lo comprueba PostgreSQL contra su propio catálogo.
+
+**Nace en `DRAFT` y todavía no puede activarse**: le falta la
+`PromotionRulesVersion` (DEC-012).
+
+**201** · 409 `CATALOG_CONFLICT` si el slug existe, o `LIFECYCLE_REFUSED` si la
+zona horaria no la conoce el servidor · 422 · 401 · 403.
+
+### GET /api/v1/admin/promotions/:promotion_id
+
+    Authorization: promotion.read
+
+401 · 403 · 404.
+
+### PATCH /api/v1/admin/promotions/:promotion_id
+
+    Authorization: promotion.update
+
+Campos opcionales: `internal_name`, `public_name`, `starts_at`, `ends_at`, y
+desde DEC-065:
+
+- `tagline`: `{ "es-US", "en-US" }` (1-300 caracteres cada uno) o `null`. Lema
+  bajo el titular del hero; se publica como `summary`.
+- `hero_image_url`: ruta del propio sitio (la `url` que devuelve
+  `POST /admin/media`) o `null`. `https://` y `//host` se rechazan con 422.
+- `hero_image_alt`: `{ "es-US", "en-US" }` (1-300) o `null` (decorativa). Los
+  dos idiomas o ninguno.
+
+En los tres, `null` borra y la clave ausente no toca el valor. La respuesta
+(`AdminPromotion`) incluye `tagline`, `hero_image_url` y `hero_image_alt`.
+
+- `hero_gallery` (DEC-066): lista de hasta 5 `{ "image_url", "alt" }` con las
+  fotos ADICIONALES del carrusel, en orden, con las mismas reglas que
+  `hero_image_url` y `hero_image_alt`. Sustituye la lista entera; `[]` la vacía
+  y la clave ausente no la toca. Más de 5 → 422. La respuesta incluye
+  `hero_gallery` siempre (lista, quizá vacía).
+
+**La zona horaria legal no se edita**, a propósito: cambiarla después de haber
+evaluado plazos contra ella movería retroactivamente el momento en que la
+promoción abrió o cerró.
+
+200 · 401 · 403 · 404 · 409 · 422.
+
+### POST /api/v1/admin/promotions/:promotion_id/schedule
+
+    Authorization: promotion.update
+
+Sin cuerpo. Pasa la promoción de `DRAFT` a `SCHEDULED`, que es **la antesala
+obligatoria de `ACTIVE`**: el motor no admite `DRAFT → ACTIVE` directamente
+(`promotion_status_transitions`). Primero se publica la ventana y después, con
+la versión de reglas activa, se activa.
+
+Exige `starts_at` y `ends_at`; si faltan, **409 `LIFECYCLE_REFUSED`** con el
+mensaje del motor. Es reversible (`SCHEDULED → DRAFT` existe en la tabla) y por
+eso va con `promotion.update` y sin motivo: no cambia el universo de
+participaciones.
+
+200 · 401 · 403 · 404 · 409.
+
+### POST /api/v1/admin/promotions/:promotion_id/unschedule
+
+    Authorization: promotion.update
+
+Sin cuerpo. El reverso de `schedule` (DEC-070): `SCHEDULED → DRAFT`. La
+promoción deja de ser pública -`DRAFT` no está entre los estados que lista la
+tienda- y se puede volver a programar. Desde cualquier otro estado, **409
+`LIFECYCLE_REFUSED`** con el mensaje del motor. Misma capacidad que `schedule` y
+sin motivo: antes de abrir no hay participaciones que proteger.
+
+200 · 401 · 403 · 404 · 409.
+
+### POST /api/v1/admin/promotions/:promotion_id/activate
+
+    Authorization: promotion.activate   (motivo obligatorio + step-up)
+
+```json
+{ "reason_code": "promotion_launch_approved", "reason_text": null }
+```
+
+El `reason_code` lo lee el **autorizador**, antes del handler, con la misma forma
+que se persiste en `audit_events.reason_code` (`^[a-zA-Z][a-zA-Z0-9_.]{2,63}$`):
+lo que abre la puerta es exactamente lo que queda escrito en la traza.
+
+**El motivo viaja en el cuerpo, pero el esquema lo declara OPCIONAL, y los dos
+fallos tienen códigos distintos porque son cosas distintas:**
+
+| Cuerpo                    | Respuesta | Quién lo decide                            |
+| ------------------------- | --------- | ------------------------------------------ |
+| sin `reason_code`         | **403**   | el autorizador: la capacidad exige motivo. |
+| `reason_code` mal formado | **422**   | el esquema: no cabe en la traza.           |
+
+Declarar `reason_code` obligatorio en el esquema rompía esa distinción: Fastify
+valida el cuerpo **antes** del `preHandler`, así que una petición sin motivo
+moría con 422 `VALIDATION_FAILED` y nunca llegaba al control que la deniega —un
+fallo de autorización presentado como un cuerpo mal formado—. Corregido en
+HO-041 con el mismo criterio que las rutas de §13 (ver §13.12 nota 19). La
+exigencia no se relaja en ningún momento: `promotion.activate` y
+`promotion.close` siguen marcadas `requiresReason` en el catálogo de
+`@app/security`, y sin motivo la operación no ocurre.
+
+**Los cerrojos los impone PostgreSQL**, no la API
+(`app_promotions_enforce_lifecycle`):
+
+1. La transición tiene que figurar en `promotion_status_transitions`.
+2. Ventana explícita: `starts_at` y `ends_at` no pueden ser `null`.
+3. `active_rules_version_id` no puede ser `null`, la versión tiene que
+   pertenecer a esta promoción y estar en `ACTIVE`.
+4. Esa versión no puede tener **claves legales sin resolver**
+   (`unresolved_required_keys` vacío). Es una columna **generada** por el motor:
+   la aplicación no puede escribirla, luego no puede declarar resuelto lo que no
+   lo está. Ver `docs/LEGAL_PENDING.md`.
+
+Si alguno salta: **409 `LIFECYCLE_REFUSED`** con el mensaje del motor en
+`details.engine`. Ese texto llega al panel a propósito —quien no puede activar
+necesita saber cuál de los cuatro cerrojos saltó, y el único que lo sabe con
+certeza es el que lo comprobó—. El texto **no** es contrato estable; el código
+sí.
+
+200 · 401 · 403 · 404 · 409 · 422.
+
+### POST /api/v1/admin/promotions/:promotion_id/close
+
+    Authorization: promotion.close   (motivo obligatorio + step-up)
+
+Mismo cuerpo que `activate`, y **la misma tabla de 403 y 422**: sin motivo
+responde 403 y no cambia el estado. Cerrar detiene la entrada de
+participaciones, así que la operación que no se puede explicar es exactamente la
+que no debe ocurrir.
+
+200 · 401 · 403 · 404 · 409 · 422.
+
+---
+
+## 13. Paquetes de participaciones, catálogo ampliado, versiones de reglas y flags (DEC-052, DEC-053, DEC-054)
+
+Esta sección es el contrato de la ronda abierta por HO-041 (segundo borrador de
+las Official Rules, 2026-08-29). Lo que aquí se declara **modifica** §3, §4, §5
+y §12; donde haya conflicto manda esta sección. Todo lo que depende de la
+`PromotionRulesVersion` sigue siendo configuración (DEC-012): los ejemplos
+llevan los valores del borrador v2 y son `PROVISIONAL`.
+
+Owner de todas las rutas de esta sección: **backend**. Estado: **`IMPLEMENTED`**
+— las 21 rutas del índice de §13.11 están registradas, emitidas en
+`apps/api/openapi/route-manifest.json` y cubiertas por tests. Las desviaciones y
+precisiones respecto de lo que este texto declaraba están en **§13.12**, y
+**§13.9 quedó reescrito** por la resolución del Team Lead a los hallazgos de
+security (fase 1): el control de flags legalmente materiales pasa a ser dual.
+
+### 13.1 Tipo de producto (`kind`) y motor con tasa por tipo
+
+Enum `ProductKind = "MERCHANDISE" | "ENTRY_PACKAGE"`.
+
+- Todo producto lleva `kind`. Un paquete de participaciones es un producto
+  `ENTRY_PACKAGE`: mismo carrito, checkout, pedido y reembolso.
+- `order_items.product_kind` se congela al crear el pedido, como `sku`.
+- El motor de cálculo (`engine_version: 2`) recibe `productKind` por línea y
+  admite un quinto modo de fórmula:
+
+| Modo                                        | Campos                                                                                                        |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `ENTRIES_PER_CURRENCY_UNIT_BY_PRODUCT_KIND` | `rates: { MERCHANDISE: Rate \| null, ENTRY_PACKAGE: Rate \| null }` (al menos una no nula), `rounding_policy` |
+
+`Rate = { amount_unit_minor: "100", entries_per_amount_unit: { numerator, denominator } }`.
+Una línea cuyo tipo no tiene tasa es inelegible con `reason_key: "PRODUCT_KIND_NOT_RATED"`.
+El redondeo sigue siendo **uno solo** al final, sobre la fracción exacta
+acumulada del pedido.
+
+Los periodos de multiplicador (`multipliers.periods[]`) ganan
+`product_kind_scope: ProductKind[] | null` (obligatorio, nullable) junto a
+`sku_scope`. `null` = todos los tipos. Con ambos presentes, aplica la
+intersección.
+
+Clave opcional `bonus_rules` de la versión de reglas (techo legal, no valor del
+motor):
+
+```json
+{
+  "bonus_rules": {
+    "max_multiplier": { "numerator": 10, "denominator": 1 },
+    "applies_to_product_kinds": ["MERCHANDISE", "ENTRY_PACKAGE"],
+    "applies_to_amoe": false
+  }
+}
+```
+
+### 13.2 Configuración objetivo de la promoción (PROVISIONAL — DRAFT v2)
+
+Es la forma que el panel debe poder redactar y la API validar. Las claves
+marcadas `TBD` siguen bloqueando la activación (DEC-012).
+
+```json
+{
+  "eligibility": "DRAFT v2 §1 — residente legal de EE. UU. (50 estados + D.C.) salvo AK, FL, HI, NY; 18+ y mayoría de edad; excluidos empleados/afiliados y convivientes; cribado BIS/SDN/TDO",
+  "allowed_jurisdictions": {
+    "mode": "DENY_LIST",
+    "regions": ["US-AK", "US-FL", "US-HI", "US-NY"]
+  },
+  "minimum_age": 18,
+  "promotion_start_end_rules": "DRAFT v2 §2 — 12:00:00 a.m. CT [START DATE] a 11:59:59 p.m. CT [END DATE]",
+  "entry_limits": { "per_order_max": null, "per_participant_max": 10000 },
+  "product_eligibility": { "mode": "ALL_PRODUCTS" },
+  "purchase_entry_formula": {
+    "mode": "ENTRIES_PER_CURRENCY_UNIT_BY_PRODUCT_KIND",
+    "rates": {
+      "MERCHANDISE": {
+        "amount_unit_minor": "100",
+        "entries_per_amount_unit": { "numerator": 1, "denominator": 1 }
+      },
+      "ENTRY_PACKAGE": {
+        "amount_unit_minor": "100",
+        "entries_per_amount_unit": { "numerator": 2, "denominator": 1 }
+      }
+    },
+    "rounding_policy": "FLOOR"
+  },
+  "partial_refund_rounding_policy": "TBD",
+  "entry_expiration": "TBD",
+  "official_rules_document": "TBD",
+  "controlling_language": "TBD",
+  "winner_drawing_method": "DRAFT v2 §7 — sorteo aleatorio por el Administrador 14 días tras el cierre, RNG auditado, 3 sorteos alternos",
+  "multipliers": { "conflict_strategy": "HIGHEST_WINS", "periods": [] },
+  "bonus_rules": {
+    "max_multiplier": { "numerator": 10, "denominator": 1 },
+    "applies_to_product_kinds": ["MERCHANDISE", "ENTRY_PACKAGE"],
+    "applies_to_amoe": false
+  },
+  "amoe": {
+    "mode": "MAIL_IN_REVIEW",
+    "submission_window": {
+      "starts_at": "<inicio de la promoción>",
+      "ends_at": "<fin de la promoción + 7 días>"
+    },
+    "entries_per_approved_submission": 2000,
+    "requires_review": true,
+    "limit": { "max_per_participant_per_period": 5, "period": "PROMOTION" },
+    "duplicate_policy": "FLAG_FOR_REVIEW",
+    "identity_requirements": [
+      "full_name",
+      "mailing_address",
+      "email",
+      "phone",
+      "date_of_birth",
+      "signature_present",
+      "postmark_date"
+    ],
+    "identity_fields": {
+      "full_name": {
+        "type": "TEXT",
+        "label_key": "fullName",
+        "max_length": 120
+      },
+      "mailing_address": {
+        "type": "TEXTAREA",
+        "label_key": "mailingAddress",
+        "max_length": 400
+      },
+      "email": { "type": "EMAIL", "label_key": "email", "max_length": 254 },
+      "phone": { "type": "TEL", "label_key": "phone", "max_length": 40 },
+      "date_of_birth": {
+        "type": "DATE",
+        "label_key": "dateOfBirth",
+        "max_length": 10
+      },
+      "signature_present": {
+        "type": "TEXT",
+        "label_key": "signaturePresent",
+        "max_length": 3
+      },
+      "postmark_date": {
+        "type": "DATE",
+        "label_key": "postmarkDate",
+        "max_length": 10
+      }
+    },
+    "mail_in": {
+      "max_cards_per_envelope": 2,
+      "postmark_by": "<fin de la promoción>",
+      "received_by": "<fin + 7 días>"
+    },
+    "instructions": {
+      "en-US": "<texto del abogado con la dirección postal>",
+      "es-US": "<texto del abogado en español>"
+    }
+  }
+}
+```
+
+`mail_in` es un bloque **opcional** de `amoeConfigSchema`; se publica en
+`GET /promotions/{slug}/amoe-config` (§11.3) como `mail_in` y lo ve el
+revisor en la cola. Es informativo: el sistema no cuenta sobres.
+
+### 13.3 Concesión AMOE con tope (DEC-052 punto 5)
+
+Al aprobar (o auto-aprobar) un envío, si `entry_caps_enabled` está encendido
+y la versión de reglas **del envío** declara `entry_limits.per_participant_max`:
+
+- `espacio = max(0, per_participant_max − saldo activo del participante)`;
+- se concede `min(entries_per_approved_submission, espacio)`; si hubo recorte,
+  la transacción lleva `metadata.applied_cap = { kind: "PER_PARTICIPANT", limit, requested, granted }`;
+- con `espacio = 0`: **409 `AMOE_ENTRY_CAP_REACHED`** y el envío queda en
+  `PENDING_REVIEW` (no se rechaza solo: el revisor decide).
+
+`GET /admin/amoe-submissions` (§11.3) añade a la proyección
+`entries_if_approved_after_cap: number | null` y `cap_applies: boolean`.
+
+### 13.4 Escaparate: catálogo (modifica §4)
+
+`ProductSummary` y `ProductDetail`:
+
+```json
+{
+  "id": "uuid",
+  "slug": "paquete-20",
+  "kind": "ENTRY_PACKAGE",
+  "category": {
+    "key": "entry-packages",
+    "name": {
+      "en-US": "Entry packages",
+      "es-US": "Paquetes de participaciones"
+    }
+  },
+  "name": { "en-US": "...", "es-US": "..." },
+  "description": { "en-US": "...", "es-US": "..." },
+  "sku": "PKG-20",
+  "currency": "USD",
+  "image_url": "/products/pkg-20.jpg",
+  "variants": [
+    {
+      "id": "uuid",
+      "sku": "PKG-20-1",
+      "name": null,
+      "price": { "amount_minor": "2000", "currency": "USD" },
+      "availability": { "status": "IN_STOCK" },
+      "image_url": null,
+      "entry_offer": {
+        "base_entries": 40,
+        "entries_now": 200,
+        "multiplier_ids": ["bonus-5x-2026-09-12"],
+        "evaluated_at": "2026-09-12T18:00:00.000Z",
+        "rules_version_id": "uuid"
+      }
+    }
+  ]
+}
+```
+
+- `category` es `null` si el producto no tiene categoría. `name` de variante
+  es `LocalizedText | null` (`null` = variante única sin nombre).
+- `image_url` (producto y variante): `string | null`. Solo `https:` o rutas
+  raíz `/…`; la API rechaza cualquier otra cosa al escribir (422) y el
+  frontend vuelve a comprobarlo antes de pintar.
+- **`entry_offer` lo calcula el backend** con `calculateEntries` para
+  **una unidad** de la variante contra la promoción `ACTIVE` y su versión de
+  reglas activa, sin topes y con `participantEntriesBefore = 0`.
+  `base_entries` se evalúa con multiplicadores apagados; `entries_now` con el
+  flag real `entry_multipliers_enabled`. **`null`** si no hay promoción activa,
+  versión activa, tasa para el tipo, el producto no es elegible, o la
+  configuración no parsea. El frontend **no multiplica ni suma**: pinta los dos
+  números.
+- Filtros: `GET /products?kind=ENTRY_PACKAGE&category=caps&cursor=&limit=`.
+  `kind` y `category` opcionales; valores desconocidos → 422.
+- `GET /product-categories` (PUBLIC): `{ "items": [{ key, name, position }] }`,
+  solo categorías con al menos un producto `ACTIVE`.
+
+### 13.5 Escaparate: promoción (modifica §3 `PromotionDetail`)
+
+`PromotionDetail` publica `entry_offer` (o `null` sin versión de reglas
+activa) y **deja de existir `entry_pool`** (DEC-052 punto 6):
+
+```json
+{
+  "entry_offer": {
+    "rules_version_id": "uuid",
+    "rates": [
+      {
+        "product_kind": "MERCHANDISE",
+        "entries_per_amount_unit": { "numerator": 1, "denominator": 1 },
+        "amount_unit": { "amount_minor": "100", "currency": "USD" }
+      },
+      {
+        "product_kind": "ENTRY_PACKAGE",
+        "entries_per_amount_unit": { "numerator": 2, "denominator": 1 },
+        "amount_unit": { "amount_minor": "100", "currency": "USD" }
+      }
+    ],
+    "per_participant_max": 10000,
+    "per_order_max": null,
+    "caps_enabled": true,
+    "multipliers_enabled": true,
+    "active_bonus": {
+      "id": "bonus-5x-2026-09-12",
+      "multiplier": { "numerator": 5, "denominator": 1 },
+      "starts_at": "2026-09-12T12:00:00.000Z",
+      "ends_at": "2026-09-13T00:00:00.000Z",
+      "product_kind_scope": ["ENTRY_PACKAGE"],
+      "sku_scope": null
+    },
+    "bonus_periods": [
+      "…todos los periodos de la versión activa con ends_at > ahora, ordenados por starts_at…"
+    ],
+    "amoe": {
+      "enabled": true,
+      "mode": "MAIL_IN_REVIEW",
+      "entries_per_approved_submission": 2000,
+      "max_per_participant_per_period": 5,
+      "limit_period": "PROMOTION"
+    }
+  }
+}
+```
+
+- `rates` deriva de `purchase_entry_formula`: con el modo por tipo, una
+  entrada por tipo con tasa; con `ENTRIES_PER_CURRENCY_UNIT`, una sola entrada
+  con `product_kind: null`; con los otros modos, `rates: []`.
+- `per_participant_max` se publica siempre que la versión lo declare; el
+  frontend lo muestra como "máximo N participaciones por persona" y **nunca**
+  como restantes ni emitidas.
+- `active_bonus` es el periodo vigente de mayor valor (mismo criterio que el
+  motor con la estrategia declarada); `null` si no hay ninguno o el flag está
+  apagado. `bonus_periods` sirve para el anuncio previo que exigen las Reglas.
+- `amoe` es un resumen de `GET …/amoe-config` para la portada; la fuente
+  completa sigue siendo aquella ruta.
+
+### 13.6 Admin: catálogo (modifica §12)
+
+`POST /api/v1/admin/products` (`product.write`) acepta además:
+
+```json
+{
+  "kind": "ENTRY_PACKAGE",
+  "category_key": "entry-packages",
+  "image_url": null,
+  "variants": [
+    {
+      "sku": "CAP-TX-RED",
+      "name": { "es-US": "Rojo", "en-US": "Red" },
+      "price_amount_minor": 3500,
+      "stock_quantity": 25,
+      "image_url": "/products/cap-tx-red.jpg"
+    }
+  ]
+}
+```
+
+`kind` obligatorio. `variants` opcional: si falta, una variante `<sku>-1` sin
+nombre con `price_amount_minor` y `stock_quantity` del cuerpo, como hoy. Si
+viene, `price_amount_minor`/`stock_quantity` del nivel producto se ignoran y
+cada variante lleva los suyos; `sku` de variante opcional (`<sku>-<n>` si
+falta). `PATCH /admin/products/:id` acepta `kind`, `category_key`, `image_url`.
+
+Variantes:
+
+- `GET /api/v1/admin/products/:product_id/variants` (`product.read`).
+- `POST /api/v1/admin/products/:product_id/variants` (`product.write`):
+  `{ sku?, name, price_amount_minor, stock_quantity, image_url?, position? }` → 201.
+- `PATCH /api/v1/admin/products/:product_id/variants/:variant_id`
+  (`product.write`): mismos campos opcionales más `status` (`ACTIVE` |
+  `ARCHIVED`). No hay DELETE: se archiva.
+
+`AdminProductRow` publica `kind`, `category_key`, `image_url` y
+`variants[]` (`{ id, sku, name, price_amount_minor, stock_quantity, status, image_url, position }`);
+`price_amount_minor`, `stock_quantity` y `variant_id` de nivel producto se
+mantienen como **la primera variante** por compatibilidad con el panel actual.
+
+Categorías:
+
+- `GET /api/v1/admin/product-categories` (`product.read`).
+- `POST /api/v1/admin/product-categories` (`product.write`):
+  `{ key: "^[a-z0-9]+(-[a-z0-9]+)*$", name: LocalizedText, position }` → 201; 409 si existe.
+- `PATCH /api/v1/admin/product-categories/:key` (`product.write`): `name`, `position`.
+
+Categorías sembradas por la migración `0026` (datos, no código): `airtag-holders`,
+`phone-holders`, `power-banks`, `notebooks`, `neck-lights`, `tumblers`,
+`caps`, `entry-packages`.
+
+### 13.7 Admin: versiones de reglas (DEC-054)
+
+Todas bajo `/api/v1/admin/promotions/:promotion_id/rules-versions`.
+
+| Método | Ruta                                   | Capacidad                | Motivo + step-up |
+| ------ | -------------------------------------- | ------------------------ | ---------------- |
+| GET    | `/`                                    | `rules.version.read`     | no               |
+| POST   | `/`                                    | `rules.version.create`   | no               |
+| GET    | `/:rules_version_id`                   | `rules.version.read`     | no               |
+| PATCH  | `/:rules_version_id`                   | `rules.version.create`   | no               |
+| PUT    | `/:rules_version_id/documents/:locale` | `rules.version.create`   | no               |
+| POST   | `/:rules_version_id/activate`          | `rules.version.activate` | **sí**           |
+
+Forma de `RulesVersionRow`:
+
+```json
+{
+  "id": "uuid",
+  "promotion_id": "uuid",
+  "version": 3,
+  "status": "DRAFT",
+  "config": { "…": "…" },
+  "unresolved_required_keys": ["partial_refund_rounding_policy", "entry_expiration"],
+  "activatable": false,
+  "validation": { "calculation": "OK" | "INVALID" | "UNRESOLVED", "amoe": "OK" | "INVALID" | "ABSENT", "bonus_rules": "OK" | "INVALID" | "ABSENT", "issues": [{ "path": "amoe.limit.period", "code": "…" }] },
+  "attorney_approval_reference": null,
+  "effective_at": null,
+  "created_at": "…",
+  "created_by_admin_user_id": "uuid",
+  "activated_at": null,
+  "archived_at": null,
+  "documents": [
+    { "locale": "en-US", "title": "…", "body": "…", "is_legally_controlling": false, "is_informational_translation": false }
+  ]
+}
+```
+
+- `unresolved_required_keys` es **el nombre**; no existe `missing_keys`. Es una
+  columna GENERADA por PostgreSQL a partir de `config`, así que la aplicación no
+  puede escribirla y por tanto no puede declarar "resuelto" nada que no lo esté.
+- `activatable` es un **atajo de presentación** y exige las TRES cosas a la vez:
+  `unresolved_required_keys` vacía, ninguna rebanada `INVALID` en `validation`, y
+  `status === "DRAFT"` —una `ACTIVE` ya lo está y una `ARCHIVED` no vuelve—.
+  **No es el control.** Quien impide activar de verdad sigue siendo el trigger de
+  DEC-012: el panel puede fiarse de este campo para pintar un botón, nunca para
+  dar por hecho el resultado. Si la versión cambia entre la lectura y la
+  pulsación, manda el motor.
+- `POST /` cuerpo: `{ clone_from_rules_version_id?: uuid, config?: object, attorney_approval_reference?: string }`.
+  Con `clone_from_…` se copian `config` y documentos de esa versión (de la
+  misma promoción; 404 si no). Sin nada: `config` = plantilla con todas las
+  claves requeridas en `"TBD"` (es el estado honesto, no un valor). `version`
+  = máximo + 1. Nace `DRAFT`. 201.
+- `PATCH /:id` cuerpo: `{ config?, attorney_approval_reference?, effective_at? }`.
+  Solo `DRAFT` (409 `LIFECYCLE_REFUSED` con el mensaje del trigger si no).
+  `config` se valida **por rebanadas** con los esquemas del dominio cuando las
+  claves de esa rebanada están presentes y no son `TBD`: 422 con `path` por
+  cada problema. La API **no** completa claves ausentes.
+- `PUT …/documents/:locale` cuerpo: `{ title, body, is_legally_controlling, is_informational_translation }`.
+  Crea o reemplaza el documento de ese locale. Solo `DRAFT`. 200.
+- `POST …/activate` cuerpo: `{ reason_code, reason_text }`. En una
+  transacción: archiva la versión `ACTIVE` anterior de la promoción (si la
+  hay), pone esta en `ACTIVE` con `activated_at`/`activated_by`, fija
+  `effective_at = now()` si venía `null`, y escribe
+  `promotions.active_rules_version_id`. 409 `LIFECYCLE_REFUSED` con
+  `details.engine` si el trigger de DEC-012 se niega (claves sin resolver).
+  **No** cambia el estado de la promoción: activar la promoción sigue siendo
+  `POST /admin/promotions/:id/activate` (§12).
+
+### 13.8 Admin: atajo "periodo bonus" (DEC-054 punto 2)
+
+`POST /api/v1/admin/promotions/:promotion_id/bonus-periods`
+(`rules.version.activate`, motivo + step-up):
+
+```json
+{
+  "multiplier": { "numerator": 5, "denominator": 1 },
+  "starts_at": "2026-09-12T12:00:00.000Z",
+  "ends_at": "2026-09-13T00:00:00.000Z",
+  "product_kind_scope": ["ENTRY_PACKAGE"],
+  "sku_scope": null,
+  "conflict_strategy": null,
+  "reason_code": "bonus_5x_weekend",
+  "reason_text": null
+}
+```
+
+Efecto: clona la versión `ACTIVE` de la promoción (409 `RULES_VERSION_NOT_ACTIVE`
+si no hay), añade a `multipliers.periods` un periodo con `id =
+"bonus-<n>-<starts_at ISO fecha>"`, `priority` = siguiente entero libre, y
+**activa** la versión nueva en la misma transacción. Respuesta 201 con
+`RulesVersionRow` de la nueva versión y `warnings: ["entry_multipliers_enabled is off"]`
+cuando el flag esté apagado (el bonus existe pero no aplica hasta encenderlo).
+
+Rechazos (422): `multiplier` > `bonus_rules.max_multiplier`;
+`product_kind_scope` fuera de `bonus_rules.applies_to_product_kinds`;
+`ends_at <= starts_at`; `conflict_strategy` nula cuando la versión activa no
+declara `multipliers` (hay que decirla; no se asume).
+
+**Extender un periodo (DEC-084).**
+`POST /api/v1/admin/promotions/:promotion_id/bonus-periods/:period_id/extend`
+(`rules.version.activate`, motivo + step-up), cuerpo
+`{ ends_at, reason_code, reason_text }`. Clona la versión `ACTIVE`, cambia
+**solo** el `ends_at` del periodo `period_id` (conserva su `id`, `priority`,
+multiplicador y alcance) y activa la versión nueva en la misma transacción,
+auditando `bonus.period.extended` con el fin anterior y el nuevo. Respuesta 201
+igual que el alta. 404 si el periodo no existe en la versión activa; 422
+`must_extend_the_period` si `ends_at` no es posterior al fin actual y a ahora, y
+`after_promotion_closes` si pasa del cierre de la promoción. Solo alarga: para
+acortar o quitar un periodo sigue haciendo falta una versión de reglas nueva.
+
+### 13.9 Admin: feature flags y control dual de ajustes materiales (DEC-032, DEC-054 punto 3)
+
+> **Reescrito por la resolución del Team Lead a los hallazgos de security
+> (fase 1), HO-041.** La versión anterior de este apartado declaraba
+> `PATCH /admin/settings/amoe-mode` y un solo `PATCH /admin/feature-flags/:key`
+> para todas las claves. Los dos hallazgos eran correctos:
+> `flag.update.legally_material` declara `requiresSecondApproval` en el catálogo
+> de `@app/security` —una capacidad así se **deniega en la puerta** salvo que la
+> ruta nombre dónde se impone la segunda aprobación— y la capacidad de una ruta
+> es **estática**, así que no puede depender de la clave que venga en la url.
+>
+> Se resuelve construyendo el control, no rebajando la capacidad.
+
+**Dos caminos, uno por capacidad.**
+
+| Qué se cambia                           | Camino                                              | Capacidad                                         |
+| --------------------------------------- | --------------------------------------------------- | ------------------------------------------------- |
+| Flag **no** legalmente material         | `PATCH /admin/feature-flags/{key}`                  | `flag.update` (motivo, sin step-up)               |
+| Flag legalmente material, y `amoe_mode` | `POST /admin/settings/change-requests` + aprobación | `flag.update.legally_material` (motivo + step-up) |
+
+- `GET /api/v1/admin/feature-flags` (`flag.read`):
+
+  ```json
+  {
+    "items": [
+      {
+        "key": "amoe_enabled",
+        "enabled": false,
+        "is_legally_material": true,
+        "dec032_default": false,
+        "legal_dependency": "AMOE",
+        "updated_at": "2026-08-29T00:00:00.000Z",
+        "pending_change_request_id": null
+      }
+    ],
+    "amoe_mode": null,
+    "amoe_mode_pending_change_request_id": null
+  }
+  ```
+
+  `pending_change_request_id` es la solicitud **sin decidir** que afecta a esa
+  clave, o `null`. El panel la necesita para no ofrecer un interruptor que va a
+  chocar con una solicitud ya abierta. `amoe_mode_pending_change_request_id` es
+  lo mismo para el ajuste `amoe_mode`, que no es un flag.
+
+- `PATCH /api/v1/admin/feature-flags/{key}` (`flag.update`), cuerpo
+  `{ enabled, reason_code, reason_text }`. **Solo flags que NO exigen control
+  dual.** Si lo exigen, la ruta responde **409 `FLAG_REQUIRES_CHANGE_REQUEST`**
+  con `details.use = "POST /admin/settings/change-requests"` y **no toca nada**.
+  `audit_events`: `flag.updated` con `{ key, before, after }`.
+
+  Exigen control dual **dos** clases de clave, y la segunda es la que cierra el
+  agujero que encontró la fase 2 de la revisión:
+
+  1. las legalmente materiales, que lo decide `capabilityForFlagUpdate(key)`
+     con el catálogo de `@app/security` —no una copia local de la lista—;
+  2. **`dual_approval_for_sensitive_actions_enabled`**. No es legalmente
+     material, pero es el interruptor que arma el control dual de todo lo
+     demás: si se pudiera apagar con un PATCH y `flag.update`, una persona lo
+     apagaría y otra cambiaría después un flag material sin que nadie aprobara
+     a nadie. **Desarmar el control dual cuesta control dual.**
+
+  > El código se llamaba `FLAG_LEGALLY_MATERIAL` y el nombre se quedó corto en
+  > cuanto la clase 2 entró: describía la clasificación del flag y no la
+  > consecuencia, que es lo que el frontend traduce. `FLAG_REQUIRES_CHANGE_REQUEST`
+  > dice lo que pasa. **`tests/security` tiene que actualizar la lista de
+  > `SECTION_13_ERROR_CODES`.**
+
+- `POST /api/v1/admin/settings/change-requests`
+  (`flag.update.legally_material`, motivo + step-up; la ruta declara
+  `secondApprovalEnforcedBy`), cuerpo:
+
+  ```json
+  {
+    "setting_kind": "FEATURE_FLAG",
+    "setting_key": "amoe_enabled",
+    "enabled": true,
+    "reason_code": "enable_amoe",
+    "reason_text": null
+  }
+  ```
+
+  Para `setting_kind: "AMOE_MODE"`, `setting_key` es literalmente `amoe_mode` y
+  el valor viaja en `amoe_mode: AmoeMode | null`.
+
+  Responde **siempre 201 con `status: "PENDING_APPROVAL"` y sin efecto**, con
+  `dual_approval_for_sensitive_actions_enabled` encendido o apagado.
+
+  > **Corregido por la security review, fase 2 (S-02).** La primera versión
+  > hacía nacer la solicitud `APPLIED` cuando ese flag estaba apagado, y
+  > aplicaba el cambio en el acto mientras la ruta declaraba
+  > `secondApprovalEnforcedBy` —con lo que `authorize()` recibía
+  > `secondApprovalGranted: true`—. `flag.update.legally_material` es CRITICAL
+  > con `requiresSecondApproval`, y `packages/security/src/flags.ts` dice de ese
+  > flag, literalmente, que **apagarlo no relaja `requiresSecondApproval` de las
+  > capacidades CRITICAL: solo puede AÑADIR la exigencia**. El flag ya no se
+  > consulta aquí.
+
+  **422** si `setting_key` no exige control dual (para esos existe el PATCH) o
+  el valor no encaja con el `setting_kind`.
+
+- `GET /api/v1/admin/settings/change-requests?status=&cursor=&limit=`
+  (`flag.read`): página de `SettingChangeRequest`.
+
+- `POST /api/v1/admin/settings/change-requests/{id}/approve` y `/reject`
+  (`flag.update.legally_material`, motivo + step-up), cuerpo
+  `{ reason_code, reason_text, notes }`.
+
+  Decidir la **propia** solicitud responde **409
+  `SETTING_CHANGE_SELF_APPROVAL_FORBIDDEN`**; una solicitud ya decidida responde
+  **409 `SETTING_CHANGE_NOT_PENDING`**. Aprobar aplica el cambio y deja
+  `audit_events` `setting.change.applied` con `before`/`after`. Para
+  `amoe_mode`, la modalidad se valida contra la versión de reglas **activa en el
+  momento de aplicar** (409 `AMOE_CONFIG_INVALID` si discrepa): entre solicitar
+  y aprobar puede publicarse una versión nueva.
+
+Forma de `SettingChangeRequest`:
+
+```json
+{
+  "id": "uuid",
+  "setting_kind": "FEATURE_FLAG",
+  "setting_key": "amoe_enabled",
+  "requested_value": { "enabled": true },
+  "status": "PENDING_APPROVAL",
+  "reason_code": "enable_amoe",
+  "reason_text": null,
+  "requested_by_admin_user_id": "uuid",
+  "requested_by_me": false,
+  "requested_at": "2026-08-29T00:00:00.000Z",
+  "decided_by_admin_user_id": null,
+  "decided_at": null,
+  "decision_notes": null,
+  "applied_before": null,
+  "applied_after": null
+}
+```
+
+**`PATCH /api/v1/admin/settings/amoe-mode` no existe.** Cambiar la modalidad AMOE
+es un cambio legalmente material y va por `settings/change-requests`.
+
+Los dos cerrojos de la separación de funciones, para poder auditarlos leyéndolos:
+
+- `apps/api/src/routes/admin-rules.ts`, handler de `/approve`: rechaza si el
+  aprobador es quien solicitó;
+- `packages/database/drizzle/0028_setting_change_requests.sql`,
+  `CONSTRAINT setting_change_requests_approver_differs`: lo impide aunque la
+  aplicación fallara.
+
+### 13.10 Admin: transcripción de fichas postales (DEC-054 punto 4)
+
+`POST /api/v1/admin/amoe-submissions` (`amoe.submission.transcribe`; sin
+step-up, con `X-APP-Reason-Code` opcional):
+
+```json
+{
+  "promotion_id": "uuid",
+  "participant_email": "persona@example.com",
+  "payload": {
+    "full_name": "…",
+    "mailing_address": "…",
+    "email": "persona@example.com",
+    "phone": "…",
+    "date_of_birth": "1990-01-01",
+    "signature_present": "yes",
+    "postmark_date": "2026-09-10"
+  },
+  "envelope_reference": "SOBRE-0012",
+  "cards_in_envelope": 2
+}
+```
+
+- El participante se resuelve por `participant_email` (normalizado como en el
+  registro). Si no existe: se crea `identity` (`PENDING_VERIFICATION`, sin
+  credenciales) + `participant` (`preferred_locale` = locale de la petición).
+  La respuesta lo dice: `participant_created: true`.
+- Pasa por `AmoeService.submit` con el **mismo** control de ventana, huella,
+  límite (5 por `PROMOTION`) y política de duplicados; `metadata` añade
+  `{ transcribed_by_admin_user_id, envelope_reference, cards_in_envelope }`.
+  Si `cards_in_envelope > mail_in.max_cards_per_envelope`, el envío entra
+  **marcado** (`metadata.flag: "ENVELOPE_LIMIT_EXCEEDED"`) y va a revisión; no
+  se rechaza solo.
+- `POST /admin/amoe-submissions/:id/approve` responde **409
+  `SEPARATION_OF_DUTIES`** si el aprobador es quien transcribió.
+- 201 `{ submission_id, status: "PENDING_REVIEW", participant_id, participant_created, flagged_envelope }`.
+- La fila que esa ficha produce en `GET /admin/amoe-submissions` lleva
+  `transcribed_by_admin_user_id`, `transcribed_by_me` y `flagged_envelope`; la
+  forma completa está en §11.3. `transcribed_by_me` es lo que permite al panel
+  deshabilitar el botón de aprobar con conocimiento de causa en vez de mandar a
+  alguien contra un 409 evitable.
+
+### 13.11 Índice de rutas nuevas de esta sección
+
+Todas `IMPLEMENTED`: registradas en `apps/api/src/http/route-registry.ts`,
+emitidas en `apps/api/openapi/route-manifest.json` y con test en
+`apps/api/test`. Owner: **backend**.
+
+| Método | Ruta                                                                                           | Capacidad                                                                        | Status        |
+| ------ | ---------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- | ------------- |
+| GET    | `/api/v1/product-categories`                                                                   | PUBLIC                                                                           | `IMPLEMENTED` |
+| GET    | `/api/v1/admin/product-categories`                                                             | `product.read`                                                                   | `IMPLEMENTED` |
+| POST   | `/api/v1/admin/product-categories`                                                             | `product.write`                                                                  | `IMPLEMENTED` |
+| PATCH  | `/api/v1/admin/product-categories/{category_key}`                                              | `product.write`                                                                  | `IMPLEMENTED` |
+| GET    | `/api/v1/admin/products/{product_id}/variants`                                                 | `product.read`                                                                   | `IMPLEMENTED` |
+| POST   | `/api/v1/admin/products/{product_id}/variants`                                                 | `product.write`                                                                  | `IMPLEMENTED` |
+| PATCH  | `/api/v1/admin/products/{product_id}/variants/{variant_id}`                                    | `product.write`                                                                  | `IMPLEMENTED` |
+| GET    | `/api/v1/admin/promotions/{promotion_id}/rules-versions`                                       | `rules.version.read`                                                             | `IMPLEMENTED` |
+| POST   | `/api/v1/admin/promotions/{promotion_id}/rules-versions`                                       | `rules.version.create`                                                           | `IMPLEMENTED` |
+| GET    | `/api/v1/admin/promotions/{promotion_id}/rules-versions/{rules_version_id}`                    | `rules.version.read`                                                             | `IMPLEMENTED` |
+| PATCH  | `/api/v1/admin/promotions/{promotion_id}/rules-versions/{rules_version_id}`                    | `rules.version.create`                                                           | `IMPLEMENTED` |
+| PUT    | `/api/v1/admin/promotions/{promotion_id}/rules-versions/{rules_version_id}/documents/{locale}` | `rules.version.create`                                                           | `IMPLEMENTED` |
+| POST   | `/api/v1/admin/promotions/{promotion_id}/rules-versions/{rules_version_id}/activate`           | `rules.version.activate` (+ motivo, step-up)                                     | `IMPLEMENTED` |
+| POST   | `/api/v1/admin/promotions/{promotion_id}/bonus-periods`                                        | `rules.version.activate` (+ motivo, step-up)                                     | `IMPLEMENTED` |
+| POST   | `/api/v1/admin/promotions/{promotion_id}/bonus-periods/{period_id}/extend`                     | `rules.version.activate` (+ motivo, step-up)                                     | `IMPLEMENTED` |
+| GET    | `/api/v1/admin/feature-flags`                                                                  | `flag.read`                                                                      | `IMPLEMENTED` |
+| PATCH  | `/api/v1/admin/feature-flags/{key}`                                                            | `flag.update` (motivo; 409 `FLAG_REQUIRES_CHANGE_REQUEST` si exige control dual) | `IMPLEMENTED` |
+| POST   | `/api/v1/admin/settings/change-requests`                                                       | `flag.update.legally_material` (+ motivo, step-up, `secondApprovalEnforcedBy`)   | `IMPLEMENTED` |
+| GET    | `/api/v1/admin/settings/change-requests`                                                       | `flag.read`                                                                      | `IMPLEMENTED` |
+| POST   | `/api/v1/admin/settings/change-requests/{change_request_id}/approve`                           | `flag.update.legally_material` (+ motivo, step-up)                               | `IMPLEMENTED` |
+| POST   | `/api/v1/admin/settings/change-requests/{change_request_id}/reject`                            | `flag.update.legally_material` (+ motivo, step-up)                               | `IMPLEMENTED` |
+| POST   | `/api/v1/admin/amoe-submissions`                                                               | `amoe.submission.transcribe`                                                     | `IMPLEMENTED` |
+
+`PATCH /api/v1/admin/settings/amoe-mode` **se retira** del contrato: era la
+segunda mitad de un control dual que no existía. Ver §13.9.
+
+Rutas ya existentes que esta sección **modifica** (todas `IMPLEMENTED`):
+`GET /products`, `GET /products/{slug}`, `GET /promotions/{slug}`,
+`GET /cart`, `GET /cart/entry-quote`, `GET /promotions/{slug}/amoe-config`,
+`GET /admin/amoe-submissions`, `GET /account/entry-transactions`,
+`GET /admin/products`, `POST /admin/products`, `GET /admin/products/{id}`,
+`PATCH /admin/products/{id}`.
+
+---
+
+### 13.12 Notas de implementación (backend)
+
+> Cada nota es una desviación o una precisión respecto de lo que §13 declaraba,
+> escrita al implementarlo. Ninguna cambia una capacidad ni una ruta.
+
+**1. `entry_offer.rates[].amount_unit.currency` se resuelve en dos pasos y solo
+es `null` en el caso imposible.**
+`promotions` no tiene columna de moneda y `purchase_entry_formula` tampoco la
+declara, así que se usa (1) `config.currency` de la versión de reglas —la misma
+fuente de la que `promotion-context-repository` construye
+`PromotionContext.currency`— y, si la versión no la declara, (2) la moneda de
+arranque de la API (`COMMERCE_DEFAULT_CURRENCY`), que es con la que este
+despliegue ya crea productos y cobra pedidos.
+
+Solo queda `null` si no existe ninguna de las dos, cosa que el entorno impide:
+`DEFAULT_CURRENCY` es una variable **obligatoria** y validada como ISO-4217 en
+`config/env.ts`. El tipo la declara nulable de todos modos para que el frontend
+no tenga que asumir que siempre habrá una.
+
+La primera implementación publicaba `null` en cuanto la versión de reglas no
+traía `currency` —el caso de la semilla real—, y eso obligaba a la interfaz a
+inventarse el símbolo, que es exactamente lo que DEC-010 prohíbe. Corregido tras
+la verificación del Team Lead contra PostgreSQL real.
+
+**2. `variants[].entry_offer` es `null` también cuando la línea resulta
+inelegible.** §13.4 enumera cuatro casos; el quinto es el mismo por otro
+camino: si el motor marca la línea como inelegible —tipo sin tasa,
+`ALLOW_LIST` que no la incluye— no hay oferta que anunciar. `0` diría "esta
+variante no genera participaciones", que es una afirmación distinta.
+
+**3. `GET /promotions/{slug}/amoe-config` publica `mail_in`.** §13.2 lo declara
+como bloque de la configuración; la vista pública lo expone como
+`mail_in: { max_cards_per_envelope, postmark_by, received_by } | null`. `null`
+significa "la versión de reglas no declara bloque postal", nunca "no hay
+plazos".
+
+**4. `GET /admin/amoe-submissions` publica cuatro campos más de los que §13.3
+enumeraba.** Además de `entries_if_approved_after_cap` y `cap_applies`:
+`granted_entries` y `applied_cap` para los envíos `APPROVED` —leídos de la
+transacción del ledger enlazada—, y `transcribed_by_admin_user_id` y
+`flagged_envelope`, que son lo que permite al revisor saber que la ficha la
+tecleó alguien y que no puede aprobarla si fue él.
+
+**5. `GET /account/entry-transactions` publica `applied_cap`.** Misma forma. No
+es PII ni información de negocio: es el dato del propio participante, y es lo
+único que explica por qué recibió menos de lo anunciado.
+
+**6. La vía AMOE en línea se cierra con AMOE postal.**
+`POST /promotions/{id}/amoe-submissions` responde **409 `AMOE_MODE_NOT_ONLINE`**
+cuando la modalidad configurada es `MAIL_IN_REVIEW` o `EXTERNAL_INSTRUCTIONS`, y
+`POST /admin/amoe-submissions` responde **409 `AMOE_MODE_NOT_MAIL_IN`** con
+cualquier modalidad que no sea `MAIL_IN_REVIEW`. Lo impone el dominio
+(`AmoeService`), no la ruta.
+
+**7. `POST /admin/amoe-submissions` exige `preferred_locale`.** §13.10 decía
+"`preferred_locale` = locale de la petición". La petición no lo lleva de forma
+fiable, y DEC-021 no admite un idioma por defecto: el cuerpo lo declara, porque
+quien teclea la ficha sabe en qué idioma la escribió su titular. Se ignora si el
+participante ya existe. La respuesta añade `flagged_envelope` a los cuatro
+campos declarados.
+
+**8. `POST /admin/products` acepta `variants[]` con `name` nulable.** Una
+variante sin nombre es el caso normal de un producto de variante única, y se
+publica como `name: null` —no como dos cadenas vacías— para que la interfaz
+distinga "no hay nombre" de "el nombre está a medias". `AdminProductRow`
+conserva `price_amount_minor`, `stock_quantity` y `variant_id` de nivel
+producto como **vista de `variants[0]`**, por compatibilidad con el panel.
+
+**9. `POST /admin/promotions/{id}/rules-versions` acepta también `config`.**
+§13.7 declaraba `clone_from_rules_version_id`, `config` y
+`attorney_approval_reference`; se implementa tal cual, y `config` se valida por
+rebanadas ANTES de escribir (422 `RULES_CONFIG_INVALID` con `path`).
+
+**10. Códigos de error nuevos.** `AMOE_ENTRY_CAP_REACHED` (409),
+`RULES_VERSION_NOT_ACTIVE` (409), `SEPARATION_OF_DUTIES` (409),
+`RULES_CONFIG_INVALID` (422), `FLAG_REQUIRES_CHANGE_REQUEST` (409),
+`SETTING_CHANGE_SELF_APPROVAL_FORBIDDEN` (409), `SETTING_CHANGE_NOT_PENDING`
+(409), `AMOE_MODE_NOT_ONLINE` (409), `AMOE_MODE_NOT_MAIL_IN` (409) y
+`AMOE_PARTICIPANT_INELIGIBLE_STAFF` (409). **Todos viven en `http/errors.ts`**,
+como fábrica: un código construido con `new ApiError({ code: "..." })` dentro
+de un handler es una cadena suelta que ningún tipo contradice, el catálogo deja
+de enumerar lo que la API puede responder, y el frontend traduce por código
+(S-09).
+
+**15. La cola AMOE exige `pii.view.masked` para publicar el correo, y ya no
+publica `transcribed_by_admin_user_id`.** (S-10.) Que hoy todos los roles con
+`amoe.review.read` tengan también la primera es una coincidencia del reparto de
+roles, no una garantía: sin capacidad, `participant_email` llega `null` y el
+perfil ni siquiera se lee. El identificador crudo del transcriptor se retira
+porque `transcribed_by_me` ya resuelve lo que la interfaz necesita y el id se lo
+llevaba cualquiera con `amoe.review.read`, incluido SUPPORT, que no tiene
+`rbac.admin.read`. §11.3 refleja las dos cosas.
+
+**16. El envío AMOE con auto-aprobación y tope agotado devuelve un desenlace,
+no una excepción.** (S-08.) `AmoeService.submit` responde
+`CAP_REACHED_PENDING_REVIEW`: la ficha queda registrada y en la cola, y no se
+concede nada. Antes se relanzaba, y con una transacción real en el llamante esa
+excepción revertía también el registro del envío y sus dos eventos —no quedaba
+ni la ficha ni el rastro—. La API sigue respondiendo **409
+`AMOE_ENTRY_CAP_REACHED`**; lo que cambia es que ahora la ficha existe.
+
+**17. El payload de un envío AMOE se recorta a `identity_requirements` antes de
+persistirse.** (S-12.) `assertPayloadComplete` comprueba que **estén** las
+claves requeridas; las de más se guardaban tal cual y la tabla acababa
+almacenando datos personales que nadie pidió. La huella se calcula sobre el
+payload ya proyectado, para que dos envíos que solo difieran en campos que el
+sistema no pide sigan siendo el mismo envío.
+
+**11. La traza del motor anota el tipo como `productKind`, no `product_kind`.**
+Los objetos anidados de `CalculationTrace` —`eligible_items`,
+`ineligible_items`— usan camelCase desde el hito B2 (`lineId`, `reasonKey`), y
+un `product_kind` suelto dentro de ellos sería la única clave con otra
+ortografía. El **snapshot** persistido (`entry_calculation_snapshots.input`),
+que sí es snake_case entero, lo escribe como `product_kind`.
+
+**12. El límite AMOE es ANIDADO en la configuración y PLANO en la respuesta, y
+las dos formas son correctas.**
+§13.2 describe `amoe.limit: { max_per_participant_per_period, period }` porque
+eso es `PromotionRulesVersion.config`: lo que redacta el abogado y lo que parsea
+`amoeConfigSchema`. `GET /promotions/{slug}/amoe-config` (§11.3) publica
+`max_per_participant_per_period` y `limit_period` **planos**, porque una vista
+pública no expone la configuración con su forma interna: publica lo que el
+participante necesita leer, y el resto de esa rebanada —`duplicate_policy`, por
+ejemplo— no sale en absoluto. No hay nada que cerrar: son dos documentos
+distintos del mismo dato. `frontend` puede leer la plana y retirar la caída a la
+anidada.
+
+**13. `GET /admin/settings/change-requests` publica `requested_by_me` por fila.**
+Un booleano, no el identificador del actor en la sesión: el panel solo necesita
+saber si puede aprobar ESA fila, y repartir identificadores de cuentas
+administrativas por una respuesta de listado es regalar el mapa del equipo. El
+control sigue siendo el 409 `SETTING_CHANGE_SELF_APPROVAL_FORBIDDEN`; el
+booleano evita el rechazo. Mismo criterio y misma forma que `transcribed_by_me`
+en la cola AMOE.
+
+**14. `AdminRulesVersion` publica `unresolved_required_keys` y `activatable`; no
+existe `missing_keys`.** Ver §13.7 para qué significa exactamente `activatable`
+y por qué no sustituye al trigger.
+
+**18. `GET /admin/amoe-submissions` acepta `?status=`.** Opcional, enum
+`PENDING_REVIEW | SUBMITTED | APPROVED | REJECTED | CANCELLED`, por defecto
+`PENDING_REVIEW`; forma completa y motivo en §11.3. Sin el parámetro la
+respuesta no cambia. Existe porque los cuatro campos que §13.3 y la nota 4
+declaran para un envío `APPROVED` —`granted_entries`, `applied_cap` y las dos
+proyecciones— eran **inalcanzables**: la única lectura administrativa devolvía
+solo lo pendiente, así que una aprobación se llevaba consigo el expediente y con
+él la explicación de por qué concedió menos de lo anunciado. `promotion_id`
+sigue siendo obligatorio.
+
+**19. En las rutas de §13 el motivo viaja en el cuerpo pero el esquema lo
+declara OPCIONAL: quien lo exige es el autorizador, y responde 403.** Afecta a
+`POST /admin/promotions/{id}/rules-versions/{rv}/activate`,
+`POST /admin/promotions/{id}/bonus-periods`,
+`POST /admin/settings/change-requests` y sus `/approve` y `/reject`, y también a
+`PATCH /admin/feature-flags/{key}`, que comparte esquema. Las capacidades de las
+seis están marcadas `requiresReason` en el catálogo de `@app/security`, y
+`authorize()` las deniega sin motivo (HO-034.1).
+
+Declararlo obligatorio en el esquema rompía esa cadena: Fastify valida el cuerpo
+**antes** del `preHandler`, así que una petición sin `reason_code` moría con 422
+`VALIDATION_FAILED` y nunca llegaba al control. El efecto práctico era que un
+fallo de **autorización** —"esta operación exige que digas por qué"— se
+presentaba como un cuerpo mal formado, indistinguible de una errata para quien
+lo recibía.
+
+**`POST /admin/promotions/{id}/activate` y `/close` (§12) van con la misma
+regla**, por decisión del Team Lead en la misma ronda: se señalaron primero como
+excepción y se corrigieron después, de modo que **no queda ninguna ruta con
+motivo en el cuerpo que responda 422 cuando lo que falta es el motivo**. Ver la
+tabla de §12. El ayudante que lo comprueba en el handler vive en un solo sitio,
+`http/authorization-inputs.ts`, que ya es el módulo dueño del concepto "motivo
+presentado en esta petición".
+
+**La forma sí se sigue validando**: un `reason_code` presente con otra
+ortografía es 422, porque lo que abre la puerta tiene que ser exactamente lo que
+se persiste en `audit_events.reason_code`.
+
+---
+
+## 14. Imágenes de catálogo subidas desde el panel (DEC-056)
+
+Status: IMPLEMENTED
+
+Las fotos de productos y variantes se **suben desde el dispositivo**; el panel
+ya no pide una URL. Esta sección **no cambia `image_url`**: sigue siendo el
+campo de §13.4 y §13.6, con la misma validación (`https://…` o ruta raíz del
+propio sitio). Lo que añade es de dónde sale esa ruta.
+
+El flujo tiene dos pasos y son independientes:
+
+1. `POST /admin/media` guarda los bytes y devuelve una `url`.
+2. Esa `url` se manda como `image_url` en el alta o el `PATCH` de siempre
+   (§13.6). Subir **no asocia nada**.
+
+Las imágenes son **inmutables**: cambiar la foto de un producto es subir otra.
+Subir dos veces el mismo contenido devuelve la misma imagen (`sha256` único).
+No hay `DELETE`: una imagen que dejó de usarse es inofensiva.
+
+### POST /api/v1/admin/media
+
+Authorization: `product.write`
+
+Es la misma capacidad que ya exige escribir `image_url`: lo único que puede
+hacerse con una imagen subida es ponerla en un producto o una variante.
+
+Request:
+
+```json
+{ "data_base64": "/9j/4AAQSkZJRgABAQ…" }
+```
+
+- `data_base64`: los bytes en base64 estándar **con relleno**. Base64 mal
+  formado es 422; no se guarda "lo que se pueda decodificar".
+- **No hay `content_type`.** El tipo lo decide la API leyendo la firma de los
+  bytes. Se admiten JPEG, PNG y WebP. **SVG no**: es un documento que puede
+  llevar script.
+- Tope: **5 MiB** (5 242 880 bytes) ya decodificados. Es el único cuerpo de la
+  API que supera `API_BODY_LIMIT_BYTES`, y el límite ampliado es de esta ruta,
+  no global.
+
+Response 201:
+
+```json
+{
+  "id": "5d5d5d5d-5d5d-4d5d-8d5d-5d5d5d5d5d5d",
+  "url": "/media/5d5d5d5d-5d5d-4d5d-8d5d-5d5d5d5d5d5d.jpg",
+  "content_type": "image/jpeg",
+  "byte_size": 184320
+}
+```
+
+`url` es una **ruta raíz de `apps/web`**, no de la API, y es exactamente lo que
+se manda después como `image_url`. La extensión es la canónica del tipo
+detectado: `jpg`, `png` o `webp`.
+
+Errors:
+
+| Status | `code`                   | Cuándo                                                          |
+| ------ | ------------------------ | --------------------------------------------------------------- |
+| 401    | `UNAUTHENTICATED`        | Sin sesión de personal.                                         |
+| 403    | `FORBIDDEN`              | Sin `product.write`.                                            |
+| 413    | `MEDIA_TOO_LARGE`        | Más de 5 MiB decodificados. `details.max_bytes`.                |
+| 413    | `PAYLOAD_TOO_LARGE`      | El cuerpo no cabe en el límite de la ruta (código transversal). |
+| 415    | `MEDIA_TYPE_UNSUPPORTED` | La firma no es JPEG, PNG ni WebP. `details.accepted`.           |
+| 422    | `VALIDATION_FAILED`      | Falta `data_base64` o no es base64 válido.                      |
+
+### GET /api/v1/media/:file
+
+Authorization: PUBLIC
+
+Son las fotos de la mercancía del escaparate, tan públicas como la ficha que las
+muestra. No enumera y no revela quién subió la imagen.
+
+`:file` es `<id>.<ext>` con la extensión canónica del tipo guardado. **Una
+imagen tiene una sola dirección**: cualquier otra forma —otra extensión, un
+nombre que no sea un uuid en minúsculas— es **404**, no 422: quien pide es una
+etiqueta `<img>`.
+
+Response 200: los bytes, **no JSON**. `Content-Type` es el tipo detectado al
+subir (nunca se deduce de la extensión pedida), con
+`Cache-Control: public, max-age=31536000, immutable` y `ETag: "<sha256>"`.
+Con `If-None-Match` vigente responde 304.
+
+Errors: 404 `NOT_FOUND`.
+
+**Cómo llega al navegador.** El navegador no habla con `apps/api` (§ adaptador
+de `apps/web`) y la CSP del sitio fija `img-src 'self'`. `apps/web` expone
+`GET /media/:file` en su propio origen y reenvía esta ruta; por eso `image_url`
+es `/media/<id>.<ext>` y no una URL de la API. El proxy solo reenvía respuestas
+cuyo `Content-Type` sea uno de los tres tipos de imagen.
+
+### Notas de implementación (§14)
+
+- Los bytes viven en PostgreSQL (`media_assets`, migración `0029`). No se ha
+  elegido proveedor de almacenamiento (`CLAUDE.md` §7): se usa lo ya decidido
+  (DEC-043). El día que haya almacén de objetos cambia de dónde lee la API y
+  **no cambia este contrato**.
+- `app_runtime` tiene solo `SELECT` e `INSERT` sobre `media_assets`: la
+  inmutabilidad de la que depende `immutable` no descansa en que la aplicación
+  no tenga una ruta para editar.
+- Las rutas `/products/…` de ficheros estáticos anteriores a esta sección siguen
+  siendo `image_url` válidos.
+
+## 15. Solicitudes de privacidad (DEC-063)
+
+> **Plantilla: RETIRADA.** Sin envío de correos, la ruta no tenía a dónde
+> entregar el expediente. `/privacychoices` indica escribir al correo de
+> contacto de la marca (`packages/brand`). Lo que sigue es histórico.
+
+La Política de Privacidad y el Aviso de California publican el formulario de
+`https://<dominio>/privacychoices` como vía para ejercer derechos.
+`POST /api/v1/privacy-requests` (PUBLIC) lo recibía.
+
+```text
+Method: POST
+Endpoint: /api/v1/privacy-requests
+
+Purpose:
+Enviar una solicitud de privacidad. La API manda el expediente al buzón del
+negocio (PRIVACY_REQUEST_INBOX; por defecto contacto@<dominio>, el de la
+Política) con reply-to de quien la envía, y un acuse a esa persona en su
+idioma. No decide nada ni toca la cuenta: verificar la identidad y responder
+lo hace una persona. No se guarda en la base: el registro es el buzón.
+
+Authentication: ninguna
+
+Request:
+{
+  "request_type": "ACCESS" | "DELETE" | "CORRECT" | "OPT_OUT_SALE_SHARING"
+                | "LIMIT_SENSITIVE" | "APPEAL" | "OTHER",
+  "full_name": "string (1-200)",
+  "email": "string",
+  "phone": "string (<= 40)" | null,        // opcional
+  "state": "string (2-60)",                 // estado de residencia, texto libre
+  "details": "string (<= 4000)" | null,     // opcional
+  "authorized_agent": boolean,              // por defecto false
+  "language": "en-US" | "es-US",            // idioma del acuse, sin defecto
+  "bot_check_token": "string"               // obligatorio si hay Turnstile
+}
+
+Response: 202
+{ "received": true, "reference": "PR-XXXXXXXXXX" }
+
+Errors:
+422 BOT_CHECK_FAILED, 422 VALIDATION_FAILED, 429 RATE_LIMITED,
+503 SERVICE_UNAVAILABLE (el buzón no recibió el expediente: la persona tiene
+que saber que NO llegó). Si solo falla el acuse, responde 202.
+
+Authorization: PUBLIC
+
+Owner: backend
+```
+
+## 16. Carrito sin cuenta y tarifa de envío (DEC-079)
+
+El carrito sin cuenta está en §5 (forma de `CartWithQuote`) y en la sección 10
+(adopción al iniciar sesión). Aquí, la tarifa que pone el panel.
+
+**Regla del envío.** Tarifa **fija por pedido**, solo si el carrito lleva al
+menos una línea de mercancía (`kind = MERCHANDISE`); los paquetes de
+participaciones no se envían. **Nunca es cero**: lo impone el esquema de la ruta
+(mínimo 1 centavo) y la CHECK `shipping_rates_amount_positive` de la migración
+`0036`. Sin tarifa puesta, un carrito con mercancía no tiene total y el checkout
+responde `409 SHIPPING_NOT_CONFIGURED`. Sin impuestos por ahora (pendiente
+legal). **El envío no genera participaciones.**
+
+**Solo inserción.** Cada cambio es una fila nueva de `shipping_rates`; la
+vigente es la última y las anteriores quedan de histórico con quién y cuándo. Lo
+que pagó cada pedido queda congelado en `orders.shipping_total_minor`, así que
+cambiar la tarifa no altera pedidos ya hechos.
+
+### GET /api/v1/admin/shipping-rate
+
+```text
+Method: GET
+Endpoint: /api/v1/admin/shipping-rate
+
+Purpose:
+Tarifa fija de envío vigente y su histórico (los 20 últimos cambios).
+
+Response: 200
+{
+  "current": {
+    "amount": { "amount_minor": "799", "currency": "USD" },
+    "set_at": "2026-10-05T18:00:00.000Z",
+    "set_by_admin_user_id": "uuid"
+  } | null,
+  "history": [ ...misma forma, de la más reciente a la más antigua... ]
+}
+
+Errors: 401, 403
+
+Authorization: product.read
+
+Owner: backend
+
+Status: IMPLEMENTED
+```
+
+### PUT /api/v1/admin/shipping-rate
+
+```text
+Method: PUT
+Endpoint: /api/v1/admin/shipping-rate
+
+Purpose:
+Poner la tarifa fija de envío. Nunca cero.
+
+Request:
+{ "amount_minor": 799, "currency": "USD" }
+
+`amount_minor` es entero en unidad menor, de 1 a 99 999. El tope (999.99) es de
+cordura contra errores de tecleo, no una regla de negocio.
+
+Response: 200, misma forma que GET.
+
+Errors: 401, 403, 422 VALIDATION_FAILED
+
+Authorization: product.write (la tiene PROMOTION_MANAGER: la tarifa es un precio
+de la tienda y la pone quien pone los precios)
+
+Owner: backend
+
+Status: IMPLEMENTED
+```
+
+## 17. Marca del sitio editable desde el panel (migración 0040)
+
+Todo lo que distingue a un cliente de otro sin tocar código vive en la fila
+única `brand_profile`: nombre y logotipo tipográfico (dos líneas), logotipo
+gráfico, los dos colores de la paleta, la intensidad del patrón de fondo, los
+datos legales que llevan Términos, Privacidad y Aviso de California, el correo
+de contacto, el dominio, los prefijos de numeración y la zona horaria del corte
+de caja. `packages/brand/src/brand.config.ts` queda como VALORES INICIALES:
+`db:bootstrap` los copia a la fila mientras nadie haya guardado desde el panel.
+
+**Se aplica sin redesplegar.** `GET /config` publica la fila en `brand` y la
+web la lee en cada petición: diccionarios, documentos legales, colores
+(`--app-color-*` derivados de los dos hex), patrón topográfico, logotipo y pie.
+
+**El logotipo se sube con `POST /admin/media`** (§14), como una foto del
+catálogo; aquí viaja solo su id. `null` = el símbolo de la plantilla.
+
+**Los prefijos cambian hacia delante.** `orders.order_number` lee el prefijo al
+crear cada pedido y la secuencia de números de participación de una promoción
+se fija en su primera asignación (0039): nada ya numerado cambia.
+
+### GET /api/v1/admin/brand
+
+```text
+Method: GET
+Endpoint: /api/v1/admin/brand
+
+Purpose:
+La marca tal como está guardada: lo mismo que `GET /config` publica en `brand`,
+más el id del logotipo y quién guardó por última vez.
+
+Response: 200
+{
+  "name": "Mi Marca",
+  "wordmark": { "lead": "Mi", "tail": "Marca" },
+  "legal": {
+    "name": "Mi Marca LLC",
+    "entity_description": "a Texas limited liability company",
+    "governing_law_state": "Texas",
+    "venue": "Travis County, Texas",
+    "street": "123 Main St, Suite 100",
+    "city_state_zip": "Austin, TX 78701"
+  },
+  "contact_email": "contacto@mimarca.com",
+  "domain": "mimarca.com",
+  "time_zone": "America/Chicago",
+  "numbering": { "order_prefix": "ORD", "entry_prefix": "NUM" },
+  "colors": { "brand": "#38bdf8", "accent": "#2563eb" },
+  "pattern_opacity_percent": 16,
+  "logo_url": "/media/<id>.png" | null,
+  "updated_at": "2026-10-13T12:00:00.000Z",
+  "logo_media_id": "uuid" | null,
+  "updated_by_admin_user_id": "uuid" | null   // null = valores iniciales
+}
+
+Errors: 401, 403
+
+Authorization: brand.read
+
+Owner: backend
+
+Status: IMPLEMENTED
+```
+
+### PUT /api/v1/admin/brand
+
+```text
+Method: PUT
+Endpoint: /api/v1/admin/brand
+
+Purpose:
+Guardar la marca. Reemplaza la fila ENTERA (es un formulario de una pantalla;
+un parche parcial dejaría una marca a medias entre dos guardados).
+
+Request:
+{
+  "name": "string (1-60)",
+  "wordmark": { "lead": "string (1-30)", "tail": "string (0-30)" },
+  "legal": {
+    "name": "string (1-120)",
+    "entity_description": "string (1-120)",
+    "governing_law_state": "string (1-60)",
+    "venue": "string (1-120)",
+    "street": "string (1-160)",
+    "city_state_zip": "string (1-120)"
+  },
+  "contact_email": "string (correo)",
+  "domain": "string (solo el host, sin protocolo; se guarda en minúsculas)",
+  "time_zone": "string (zona IANA válida)",
+  "numbering": { "order_prefix": "^[A-Z0-9]{2,8}$", "entry_prefix": "^[A-Z0-9]{2,8}$" },
+  "colors": { "brand": "#rrggbb", "accent": "#rrggbb" },
+  "pattern_opacity_percent": 0..40,
+  "logo_media_id": "uuid de POST /admin/media" | null
+}
+
+Los prefijos y los colores se normalizan (mayúsculas y minúsculas
+respectivamente). Un `logo_media_id` que no exista es 422, no un error del
+motor.
+
+Response: 200, misma forma que GET.
+
+Cada guardado queda en la auditoría (acción `brand.updated` del catálogo de
+`packages/audit`) con la lista de campos que cambiaron.
+
+Errors: 401, 403, 422 VALIDATION_FAILED
+
+Authorization: brand.update (la tienen PROMOTION_MANAGER y COMPLIANCE_OFFICER;
+SUPPORT solo brand.read)
+
+Owner: backend
+
+Status: IMPLEMENTED
+```

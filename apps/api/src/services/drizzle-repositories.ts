@@ -1,0 +1,974 @@
+/**
+ * Implementacion de los puertos contra PostgreSQL.
+ *
+ * TODO LO QUE ESTE ARCHIVO HACE ES SQL. La logica -que se cotiza, que error se
+ * devuelve, quien puede leer que- vive en los servicios y en los handlers, y se
+ * prueba sin Docker con dobles en memoria. Lo de aqui se prueba contra
+ * PostgreSQL real, porque DEC-018 no admite otra cosa para lo que depende del
+ * motor.
+ *
+ * DOS DECISIONES QUE MERECEN EXPLICACION
+ *
+ *   1. `promotions` DRAFT no sale nunca al publico. El resto de estados si,
+ *      CANCELLED incluido: una promocion que estuvo publicada y se cancelo debe
+ *      poder explicarse: hacerla desaparecer del catalogo publico dejaria al
+ *      participante con un enlace roto y sin motivo.
+ *
+ *   2. Las traducciones se leen SIEMPRE en los dos idiomas y se devuelven como
+ *      objeto (DEC-030). No hay negociacion de idioma en la consulta: el
+ *      backend no elige por el frontend, y un fallback de un idioma al otro
+ *      violaria el principio 4.
+ */
+
+import { and, asc, desc, eq, gt, inArray, isNull, sql } from "drizzle-orm";
+import type { Database } from "@app/database";
+import {
+  brandProfile,
+  cartItems,
+  carts,
+  featureFlagSettings,
+  featureFlags,
+  mediaAssets,
+  orders,
+  participants,
+  shippingRates,
+  productCategories,
+  productCategoryTranslations,
+  productTranslations,
+  productVariantTranslations,
+  productVariants,
+  products,
+  promotionHeroImages,
+  promotionRulesDocuments,
+  promotionRulesVersions,
+  promotionTranslations,
+  promotions,
+} from "@app/database";
+import { FEATURE_FLAG_KEYS, type FeatureFlagKey } from "../http/feature-flag-catalog.js";
+
+import { pageOfCatalog } from "./catalog-order.js";
+import { mediaUrl } from "./media.js";
+
+import type {
+  BrandProfileInput,
+  BrandProfileRecord,
+  BrandRepository,
+  CartOwnerRef,
+  CartRecord,
+  CatalogRepository,
+  ConfigRepository,
+  EntryBalanceRepository,
+  LocalizedText,
+  ProductCategoryRecord,
+  ProductRecord,
+  PromotionRecord,
+  PromotionRepository,
+  PublicConfigRecord,
+  Repositories,
+  RulesVersionRecord,
+  VariantRecord,
+  CartRepository,
+  ShippingRateRecord,
+  ShippingRateRepository,
+} from "./ports.js";
+
+/**
+ * Construye el objeto localizado a partir de las filas de traduccion.
+ *
+ * Si falta un idioma cae a cadena vacia en vez de romper. La validacion de que
+ * ningun locale queda vacio pertenece a la PUBLICACION (DEC-030), no a la
+ * lectura: reventar aqui convertiria un dato incompleto en una caida del
+ * storefront, cuando lo que hay que hacer es no dejarlo publicar.
+ */
+function localized(rows: readonly { locale: string; value: string | null }[]): LocalizedText {
+  const byLocale = new Map(rows.map((row) => [row.locale, row.value ?? ""]));
+  return {
+    "en-US": byLocale.get("en-US") ?? "",
+    "es-US": byLocale.get("es-US") ?? "",
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Promociones
+// ---------------------------------------------------------------------------
+
+/**
+ * Texto alternativo de la foto del hero (DEC-065), o `null`.
+ *
+ * A diferencia de `localized`, aqui un idioma vacio NO se rellena con `""`:
+ * `null` significa "decorativa" y el hero lo pinta como `alt=""` en los dos
+ * idiomas. Un alternativo en un idioma y vacio en el otro describiria la foto a
+ * la mitad del publico, asi que se trata como ausente.
+ */
+function heroAltOf(
+  rows: readonly { locale: string; heroImageAlt: string | null }[],
+): LocalizedText | null {
+  const en = rows.find((row) => row.locale === "en-US")?.heroImageAlt ?? null;
+  const es = rows.find((row) => row.locale === "es-US")?.heroImageAlt ?? null;
+  return en === null || es === null ? null : { "en-US": en, "es-US": es };
+}
+
+/** Todo menos DRAFT. Ver la cabecera. */
+const PUBLIC_PROMOTION_STATUSES = [
+  "SCHEDULED",
+  "ACTIVE",
+  "CLOSED",
+  "EXPORT_PREPARATION",
+  "DRAW_PENDING",
+  "POTENTIAL_WINNER_REVIEW",
+  "COMPLETED",
+  "CANCELLED",
+] as const;
+
+function createPromotionRepository(db: Database): PromotionRepository {
+  async function hydrate(
+    rows: readonly (typeof promotions.$inferSelect)[],
+  ): Promise<PromotionRecord[]> {
+    if (rows.length === 0) {
+      return [];
+    }
+
+    const translations = await db
+      .select()
+      .from(promotionTranslations)
+      .where(
+        inArray(
+          promotionTranslations.promotionId,
+          rows.map((row) => row.id),
+        ),
+      );
+
+    // DEC-066: fotos adicionales del carrusel, ya en orden.
+    const heroImages = await db
+      .select()
+      .from(promotionHeroImages)
+      .where(
+        inArray(
+          promotionHeroImages.promotionId,
+          rows.map((row) => row.id),
+        ),
+      )
+      .orderBy(asc(promotionHeroImages.position));
+
+    return rows.map((row) => {
+      const own = translations.filter((translation) => translation.promotionId === row.id);
+      return {
+        id: row.id,
+        slug: row.slug,
+        status: row.status,
+        title: localized(own.map((t) => ({ locale: t.locale, value: t.publicName }))),
+        summary: localized(own.map((t) => ({ locale: t.locale, value: t.tagline }))),
+        legalTimezone: row.legalTimezone,
+        startsAt: row.startsAt,
+        endsAt: row.endsAt,
+        rulesVersionId: row.activeRulesVersionId,
+        heroImageUrl: row.heroImageUrl,
+        heroImageAlt: heroAltOf(own),
+        heroGallery: heroImages
+          .filter((image) => image.promotionId === row.id)
+          .map((image) => ({
+            url: image.imageUrl,
+            alt:
+              image.altEn === null || image.altEs === null
+                ? null
+                : { "en-US": image.altEn, "es-US": image.altEs },
+          })),
+      };
+    });
+  }
+
+  return {
+    findActive: async () => {
+      const rows = await db
+        .select()
+        .from(promotions)
+        .where(eq(promotions.status, "ACTIVE"))
+        // Una sola promocion ACTIVE es lo esperado. El orden estable existe
+        // para que, si alguna vez hubiera dos, la portada no cambiara de
+        // promocion entre dos peticiones seguidas.
+        .orderBy(asc(promotions.createdAt), asc(promotions.id))
+        .limit(1);
+
+      const [record] = await hydrate(rows);
+      return record ?? null;
+    },
+
+    findBySlug: async (slug) => {
+      const rows = await db
+        .select()
+        .from(promotions)
+        .where(
+          and(
+            eq(promotions.slug, slug),
+            inArray(promotions.status, [...PUBLIC_PROMOTION_STATUSES]),
+          ),
+        )
+        .limit(1);
+
+      const [record] = await hydrate(rows);
+      return record ?? null;
+    },
+
+    listPublic: async ({ limit, after }) => {
+      const conditions = [inArray(promotions.status, [...PUBLIC_PROMOTION_STATUSES])];
+      if (after !== null) {
+        conditions.push(gt(promotions.slug, after));
+      }
+
+      const rows = await db
+        .select()
+        .from(promotions)
+        .where(and(...conditions))
+        // Por `slug` y no por fecha: es la unica columna que no puede ser nula
+        // y es unica, asi que sirve de cursor sin desempate adicional.
+        .orderBy(asc(promotions.slug))
+        .limit(limit);
+
+      return hydrate(rows);
+    },
+
+    findRulesVersion: async (rulesVersionId) => {
+      const [version] = await db
+        .select()
+        .from(promotionRulesVersions)
+        .where(eq(promotionRulesVersions.id, rulesVersionId))
+        .limit(1);
+
+      if (version === undefined) {
+        return null;
+      }
+
+      const documents = await db
+        .select()
+        .from(promotionRulesDocuments)
+        .where(eq(promotionRulesDocuments.rulesVersionId, rulesVersionId))
+        .orderBy(asc(promotionRulesDocuments.locale));
+
+      const record: RulesVersionRecord = {
+        id: version.id,
+        version: version.version,
+        effectiveAt: version.effectiveAt,
+        config: version.config,
+        documents: documents.map((document) => ({
+          locale: document.locale,
+          title: document.title,
+          body: document.body,
+          isLegallyControlling: document.isLegallyControlling,
+          isInformationalTranslation: document.isInformationalTranslation,
+        })),
+      };
+      return record;
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Catalogo
+// ---------------------------------------------------------------------------
+
+function createCatalogRepository(db: Database): CatalogRepository {
+  /**
+   * Categorias de un conjunto de claves, con su nombre en los dos idiomas.
+   *
+   * Se resuelve en una consulta aparte y no con un JOIN a la tabla de
+   * traducciones porque el JOIN multiplicaria las filas de producto por locale,
+   * y despues habria que deduplicarlas a mano. Con dos consultas el mapeo es
+   * directo y el numero de viajes sigue siendo constante.
+   */
+  async function categoriesOf(
+    keys: readonly string[],
+  ): Promise<Map<string, ProductCategoryRecord>> {
+    const unique = [...new Set(keys)];
+    if (unique.length === 0) {
+      return new Map();
+    }
+
+    const [rows, names] = await Promise.all([
+      db.select().from(productCategories).where(inArray(productCategories.key, unique)),
+      db
+        .select()
+        .from(productCategoryTranslations)
+        .where(inArray(productCategoryTranslations.categoryKey, unique)),
+    ]);
+
+    return new Map(
+      rows.map((row) => [
+        row.key,
+        {
+          key: row.key,
+          name: localized(
+            names
+              .filter((translation) => translation.categoryKey === row.key)
+              .map((t) => ({ locale: t.locale, value: t.name })),
+          ),
+          position: row.position,
+        },
+      ]),
+    );
+  }
+
+  async function hydrate(
+    rows: readonly (typeof products.$inferSelect)[],
+  ): Promise<ProductRecord[]> {
+    if (rows.length === 0) {
+      return [];
+    }
+
+    const ids = rows.map((row) => row.id);
+
+    const [translations, variants, categories] = await Promise.all([
+      db.select().from(productTranslations).where(inArray(productTranslations.productId, ids)),
+      db
+        .select()
+        .from(productVariants)
+        .where(
+          and(
+            inArray(productVariants.productId, ids),
+            eq(productVariants.status, "ACTIVE"),
+            isNull(productVariants.archivedAt),
+          ),
+        )
+        .orderBy(asc(productVariants.position), asc(productVariants.sku)),
+      categoriesOf(rows.flatMap((row) => (row.categoryKey === null ? [] : [row.categoryKey]))),
+    ]);
+
+    const variantNames =
+      variants.length === 0
+        ? []
+        : await db
+            .select()
+            .from(productVariantTranslations)
+            .where(
+              inArray(
+                productVariantTranslations.variantId,
+                variants.map((variant) => variant.id),
+              ),
+            );
+
+    return rows.map((row) => {
+      const own = translations.filter((translation) => translation.productId === row.id);
+      const hasDescription = own.some((translation) => translation.description !== null);
+
+      return {
+        id: row.id,
+        sku: row.sku,
+        slug: row.slug,
+        status: row.status,
+        kind: row.kind,
+        category: row.categoryKey === null ? null : (categories.get(row.categoryKey) ?? null),
+        currency: row.currency,
+        name: localized(own.map((t) => ({ locale: t.locale, value: t.name }))),
+        description: hasDescription
+          ? localized(own.map((t) => ({ locale: t.locale, value: t.description })))
+          : null,
+        imageUrl: row.imageUrl,
+        variants: variants
+          .filter((variant) => variant.productId === row.id)
+          .map((variant): VariantRecord => {
+            const names = variantNames.filter(
+              (translation) => translation.variantId === variant.id,
+            );
+            return {
+              id: variant.id,
+              sku: variant.sku,
+              status: variant.status,
+              priceAmountMinor: variant.priceAmountMinor,
+              currency: variant.currency,
+              stockQuantity: variant.stockQuantity,
+              // Sin filas de traduccion, la variante NO tiene nombre. `null` y
+              // no un objeto con dos cadenas vacias: la interfaz tiene que
+              // poder distinguir "variante unica sin nombre" de "nombre que
+              // alguien dejo a medias".
+              name:
+                names.length === 0
+                  ? null
+                  : localized(names.map((t) => ({ locale: t.locale, value: t.name }))),
+              imageUrl: variant.imageUrl,
+              position: variant.position,
+            };
+          }),
+      };
+    });
+  }
+
+  return {
+    listPublic: async ({ limit, after, kind, categoryKey }) => {
+      const conditions = [eq(products.status, "ACTIVE"), isNull(products.archivedAt)];
+      if (kind !== undefined && kind !== null) {
+        conditions.push(eq(products.kind, kind));
+      }
+      if (categoryKey !== undefined && categoryKey !== null) {
+        conditions.push(eq(products.categoryKey, categoryKey));
+      }
+
+      // Todo lo publicado que pasa los filtros, y el orden y el cursor se
+      // aplican despues: la clave mezcla precio de variante y posicion de
+      // categoria (ver `catalog-order.ts`).
+      const rows = await db
+        .select()
+        .from(products)
+        .where(and(...conditions));
+
+      return pageOfCatalog(await hydrate(rows), after, limit);
+    },
+
+    listCategoriesWithActiveProducts: async () => {
+      // `EXISTS` y no un `JOIN` con `DISTINCT`: lo que se pregunta es si HAY al
+      // menos un producto, no cuantos, y un JOIN obligaria a deduplicar.
+      const rows = await db
+        .select()
+        .from(productCategories)
+        .where(
+          sql`EXISTS (
+            SELECT 1 FROM ${products}
+             WHERE ${products.categoryKey} = ${productCategories.key}
+               AND ${products.status} = 'ACTIVE'
+               AND ${products.archivedAt} IS NULL
+          )`,
+        )
+        .orderBy(asc(productCategories.position), asc(productCategories.key));
+
+      const resolved = await categoriesOf(rows.map((row) => row.key));
+      return rows.flatMap((row) => {
+        const record = resolved.get(row.key);
+        return record === undefined ? [] : [record];
+      });
+    },
+
+    categoryExists: async (key) => {
+      const [row] = await db
+        .select({ key: productCategories.key })
+        .from(productCategories)
+        .where(eq(productCategories.key, key))
+        .limit(1);
+      return row !== undefined;
+    },
+
+    findBySlug: async (slug) => {
+      const rows = await db
+        .select()
+        .from(products)
+        .where(and(eq(products.slug, slug), eq(products.status, "ACTIVE")))
+        .limit(1);
+
+      const [record] = await hydrate(rows);
+      return record ?? null;
+    },
+
+    findVariant: async (variantId) => {
+      const [variant] = await db
+        .select()
+        .from(productVariants)
+        .where(eq(productVariants.id, variantId))
+        .limit(1);
+
+      if (variant === undefined) {
+        return null;
+      }
+
+      const rows = await db
+        .select()
+        .from(products)
+        .where(eq(products.id, variant.productId))
+        .limit(1);
+
+      const [product] = await hydrate(rows);
+      if (product === undefined) {
+        return null;
+      }
+
+      // El nombre y la imagen se toman de la variante YA hidratada del
+      // producto cuando esta ahi. `hydrate` solo trae variantes `ACTIVE`, asi
+      // que una variante en borrador o archivada cae al camino de abajo, donde
+      // no hay nombre que resolver: quien pregunta por ella lo hace para
+      // validar una compra, no para pintarla.
+      const hydrated = product.variants.find((candidate) => candidate.id === variant.id);
+
+      return {
+        product,
+        variant: hydrated ?? {
+          id: variant.id,
+          sku: variant.sku,
+          status: variant.status,
+          priceAmountMinor: variant.priceAmountMinor,
+          currency: variant.currency,
+          stockQuantity: variant.stockQuantity,
+          name: null,
+          imageUrl: variant.imageUrl,
+          position: variant.position,
+        },
+      };
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Carrito
+// ---------------------------------------------------------------------------
+
+function ownerCondition(owner: CartOwnerRef) {
+  return owner.kind === "PARTICIPANT"
+    ? eq(carts.participantId, owner.participantId)
+    : eq(carts.sessionRef, owner.sessionRef);
+}
+
+function createCartRepository(db: Database): CartRepository {
+  async function read(cartId: string): Promise<CartRecord> {
+    const [cart] = await db.select().from(carts).where(eq(carts.id, cartId)).limit(1);
+    if (cart === undefined) {
+      // El carrito lo acaba de crear o leer quien llama dentro de la misma
+      // peticion. Que desaparezca aqui es un fallo del servidor, no del cliente.
+      throw new Error(`carrito ${cartId} desaparecido entre dos consultas`);
+    }
+
+    const lines = await db
+      .select({
+        id: cartItems.id,
+        productVariantId: cartItems.productVariantId,
+        quantity: cartItems.quantity,
+        sku: productVariants.sku,
+        unitAmountMinor: productVariants.priceAmountMinor,
+        currency: productVariants.currency,
+        // La misma columna que decide el `409 INSUFFICIENT_STOCK`. No se
+        // publica en crudo: de ella sale `availability` y nada mas.
+        stockQuantity: productVariants.stockQuantity,
+        productId: products.id,
+        productSlug: products.slug,
+        variantImageUrl: productVariants.imageUrl,
+        productImageUrl: products.imageUrl,
+        // DEC-052: el tipo lo aporta el CATALOGO mientras la linea es un
+        // borrador. Al convertirse en pedido se congela y deja de leerse de aqui.
+        productKind: products.kind,
+      })
+      .from(cartItems)
+      .innerJoin(productVariants, eq(productVariants.id, cartItems.productVariantId))
+      .innerJoin(products, eq(products.id, productVariants.productId))
+      .where(eq(cartItems.cartId, cartId))
+      // Orden estable e independiente del momento en que se anadio cada cosa.
+      .orderBy(asc(productVariants.sku));
+
+    const names =
+      lines.length === 0
+        ? []
+        : await db
+            .select()
+            .from(productTranslations)
+            .where(
+              inArray(
+                productTranslations.productId,
+                lines.map((line) => line.productId),
+              ),
+            );
+
+    return {
+      id: cart.id,
+      promotionId: cart.promotionId,
+      currency: cart.currency,
+      // Lo pone el motor: `carts_set_updated_at` en la propia fila y
+      // `cart_items_touch_cart` (migracion 0025) cuando cambian las lineas.
+      // Aqui no se recalcula ni se sustituye por `new Date()`, que es lo que
+      // convertiria una cotizacion caducada en una que parece fresca.
+      updatedAt: cart.updatedAt,
+      lines: lines.map((line) => ({
+        id: line.id,
+        productId: line.productId,
+        productVariantId: line.productVariantId,
+        productSlug: line.productSlug,
+        sku: line.sku,
+        name: localized(
+          names
+            .filter((translation) => translation.productId === line.productId)
+            .map((t) => ({ locale: t.locale, value: t.name })),
+        ),
+        imageUrl: line.variantImageUrl ?? line.productImageUrl,
+        productKind: line.productKind,
+        quantity: line.quantity,
+        unitAmountMinor: line.unitAmountMinor,
+        currency: line.currency,
+        stockQuantity: line.stockQuantity,
+      })),
+    };
+  }
+
+  async function findOpenRow(owner: CartOwnerRef): Promise<string | null> {
+    const [row] = await db
+      .select({ id: carts.id })
+      .from(carts)
+      .where(and(ownerCondition(owner), eq(carts.status, "OPEN")))
+      .limit(1);
+    return row?.id ?? null;
+  }
+
+  return {
+    findOpen: async (owner) => {
+      const cartId = await findOpenRow(owner);
+      return cartId === null ? null : read(cartId);
+    },
+
+    openFor: async (owner, promotionId) => {
+      const existing = await findOpenRow(owner);
+      if (existing !== null) {
+        return read(existing);
+      }
+
+      // `onConflictDoNothing` y no un `if`: dos peticiones simultaneas del
+      // mismo dueno llegan aqui a la vez, y quien decide es el indice unico
+      // parcial de la migracion 0009, no el orden de ejecucion.
+      await db
+        .insert(carts)
+        .values({
+          participantId: owner.kind === "PARTICIPANT" ? owner.participantId : null,
+          sessionRef: owner.kind === "SESSION" ? owner.sessionRef : null,
+          promotionId,
+        })
+        .onConflictDoNothing();
+
+      const cartId = await findOpenRow(owner);
+      if (cartId === null) {
+        throw new Error("no se pudo abrir un carrito para el dueno indicado");
+      }
+      return read(cartId);
+    },
+
+    addItem: async (cartId, variantId, quantity) => {
+      await db
+        .insert(cartItems)
+        .values({ cartId, productVariantId: variantId, quantity })
+        .onConflictDoUpdate({
+          target: [cartItems.cartId, cartItems.productVariantId],
+          set: { quantity: sql`${cartItems.quantity} + ${quantity}` },
+        });
+
+      return read(cartId);
+    },
+
+    setItemQuantity: async (cartId, itemId, quantity) => {
+      const updated = await db
+        .update(cartItems)
+        .set({ quantity })
+        .where(and(eq(cartItems.id, itemId), eq(cartItems.cartId, cartId)))
+        .returning({ id: cartItems.id });
+
+      return updated.length === 0 ? null : read(cartId);
+    },
+
+    removeItem: async (cartId, itemId) => {
+      const deleted = await db
+        .delete(cartItems)
+        .where(and(eq(cartItems.id, itemId), eq(cartItems.cartId, cartId)))
+        .returning({ id: cartItems.id });
+
+      return deleted.length === 0 ? null : read(cartId);
+    },
+
+    convertForPaidOrder: async (orderId) => {
+      // `IN (subconsulta)`: un pedido sin `cart_id` devuelve NULL y no casa con
+      // ningun carrito, que es exactamente lo que tiene que pasar.
+      await db
+        .update(carts)
+        .set({ status: "CONVERTED" })
+        .where(
+          and(
+            eq(carts.status, "OPEN"),
+            inArray(
+              carts.id,
+              db.select({ id: orders.cartId }).from(orders).where(eq(orders.id, orderId)),
+            ),
+          ),
+        );
+    },
+
+    adoptSessionCart: async (sessionRef, identityId, promotionId) => {
+      return await db.transaction(async (tx) => {
+        const [participant] = await tx
+          .select({ id: participants.id })
+          .from(participants)
+          .where(eq(participants.identityId, identityId))
+          .limit(1);
+        // Una cuenta de personal no tiene carrito: no hay nada que adoptar.
+        if (participant === undefined) {
+          return { adoptedLines: 0 };
+        }
+
+        // `FOR UPDATE`: dos inicios de sesion simultaneos con la misma cookie
+        // no pueden sumar el mismo carrito dos veces.
+        const [guest] = await tx
+          .select({ id: carts.id })
+          .from(carts)
+          .where(and(eq(carts.sessionRef, sessionRef), eq(carts.status, "OPEN")))
+          .for("update")
+          .limit(1);
+        if (guest === undefined) {
+          return { adoptedLines: 0 };
+        }
+
+        const guestLines = await tx
+          .select({
+            productVariantId: cartItems.productVariantId,
+            quantity: cartItems.quantity,
+            currency: productVariants.currency,
+          })
+          .from(cartItems)
+          .innerJoin(productVariants, eq(productVariants.id, cartItems.productVariantId))
+          .where(eq(cartItems.cartId, guest.id));
+
+        // El carrito de la cuenta, creandolo si no existe. Mismo
+        // `onConflictDoNothing` que `openFor`: decide el indice unico.
+        await tx
+          .insert(carts)
+          .values({ participantId: participant.id, sessionRef: null, promotionId })
+          .onConflictDoNothing();
+        const [target] = await tx
+          .select({ id: carts.id, currency: carts.currency })
+          .from(carts)
+          .where(and(eq(carts.participantId, participant.id), eq(carts.status, "OPEN")))
+          .for("update")
+          .limit(1);
+        if (target === undefined) {
+          throw new Error("no se pudo abrir el carrito de la cuenta para adoptar el anonimo");
+        }
+
+        // La moneda la fija la primera linea (trigger de la 0009). Si la cuenta
+        // no tenia ninguna, la fija la primera que se adopta.
+        let currency = target.currency;
+        let adopted = 0;
+        for (const line of guestLines) {
+          if (currency !== null && line.currency !== currency) {
+            continue;
+          }
+          currency = line.currency;
+          await tx
+            .insert(cartItems)
+            .values({
+              cartId: target.id,
+              productVariantId: line.productVariantId,
+              quantity: Math.min(line.quantity, CART_LINE_MAX_QUANTITY),
+            })
+            .onConflictDoUpdate({
+              target: [cartItems.cartId, cartItems.productVariantId],
+              // El mismo tope que la CHECK de la 0009 y que `POST /cart/items`:
+              // sumar dos carritos no puede producir una cantidad que el motor
+              // rechace y tumbe el inicio de sesion entero.
+              set: {
+                quantity: sql`LEAST(${cartItems.quantity} + ${line.quantity}, ${CART_LINE_MAX_QUANTITY})`,
+              },
+            });
+          adopted += 1;
+        }
+
+        await tx.update(carts).set({ status: "ABANDONED" }).where(eq(carts.id, guest.id));
+
+        return { adoptedLines: adopted };
+      });
+    },
+  };
+}
+
+/** Tope de cantidad por linea: el de la CHECK de `cart_items` (migracion 0009). */
+const CART_LINE_MAX_QUANTITY = 10_000;
+
+// ---------------------------------------------------------------------------
+// Envio (DEC-079)
+// ---------------------------------------------------------------------------
+
+function createShippingRateRepository(db: Database): ShippingRateRepository {
+  function toRecord(row: typeof shippingRates.$inferSelect): ShippingRateRecord {
+    return {
+      id: row.id,
+      amountMinor: row.amountMinor,
+      currency: row.currency,
+      setAt: row.setAt,
+      setByAdminUserId: row.setByAdminUserId,
+    };
+  }
+
+  return {
+    current: async () => {
+      const [row] = await db
+        .select()
+        .from(shippingRates)
+        .orderBy(desc(shippingRates.setAt))
+        .limit(1);
+      return row === undefined ? null : toRecord(row);
+    },
+
+    set: async (input) => {
+      const [row] = await db
+        .insert(shippingRates)
+        .values({
+          amountMinor: input.amountMinor,
+          currency: input.currency,
+          setByAdminUserId: input.setByAdminUserId,
+        })
+        .returning();
+      if (row === undefined) {
+        throw new Error("shipping_rate_insert_returned_no_row");
+      }
+      return toRecord(row);
+    },
+
+    history: async (limit) => {
+      const rows = await db
+        .select()
+        .from(shippingRates)
+        .orderBy(desc(shippingRates.setAt))
+        .limit(limit);
+      return rows.map(toRecord);
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Configuracion publica y saldo
+// ---------------------------------------------------------------------------
+
+function createConfigRepository(db: Database): ConfigRepository {
+  return {
+    read: async (): Promise<PublicConfigRecord> => {
+      const [rows, settings] = await Promise.all([
+        db.select({ key: featureFlags.key, enabled: featureFlags.enabled }).from(featureFlags),
+        db.select({ amoeMode: featureFlagSettings.amoeMode }).from(featureFlagSettings).limit(1),
+      ]);
+
+      const stored = new Map(rows.map((row) => [row.key, row.enabled]));
+
+      // Se recorre el CATALOGO de DEC-032, no lo que haya en la tabla. Un flag
+      // que la migracion no hubiera sembrado saldria como `false`, que es la
+      // postura segura; leyendo solo la tabla, saldria ausente y el frontend
+      // tendria que decidir por su cuenta que hacer con un hueco.
+      const featureFlagsOut = Object.fromEntries(
+        FEATURE_FLAG_KEYS.map((key: FeatureFlagKey) => [key, stored.get(key) ?? false]),
+      ) as Record<FeatureFlagKey, boolean>;
+
+      return {
+        featureFlags: featureFlagsOut,
+        amoeMode: settings[0]?.amoeMode ?? null,
+      };
+    },
+  };
+}
+
+function createEntryBalanceRepository(db: Database): EntryBalanceRepository {
+  return {
+    activeEntries: async (promotionId, participantId) => {
+      // La FUNCION de DEC-007, no un `SELECT sum(...)` reescrito aqui. El
+      // predicado del saldo -incluida la ventana de caducidad de DEC-033/034-
+      // esta escrito una sola vez, en la migracion 0006.
+      const result = await db.execute<{ balance: string }>(
+        sql`SELECT app_entry_balance_at(${promotionId}::uuid, ${participantId}::uuid) AS balance`,
+      );
+
+      const raw = result.rows[0]?.balance ?? "0";
+      return Number(raw);
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Marca del sitio (migracion 0040)
+// ---------------------------------------------------------------------------
+
+function createBrandRepository(db: Database): BrandRepository {
+  async function read(): Promise<BrandProfileRecord> {
+    // LEFT JOIN con `media_assets` solo por el tipo: la extension de la ruta
+    // publica del logotipo sale de ahi. Los bytes no se leen.
+    const [row] = await db
+      .select({
+        profile: brandProfile,
+        logoContentType: mediaAssets.contentType,
+      })
+      .from(brandProfile)
+      .leftJoin(mediaAssets, eq(mediaAssets.id, brandProfile.logoMediaId))
+      .where(eq(brandProfile.id, 1))
+      .limit(1);
+
+    if (row === undefined) {
+      // La siembra la migracion 0040 y nadie la borra (`app_runtime` no tiene
+      // DELETE). Que falte es un fallo del despliegue, no un estado.
+      throw new Error("brand_profile: falta la fila unica que siembra la migracion 0040");
+    }
+
+    const { profile } = row;
+    return {
+      name: profile.name,
+      wordmarkLead: profile.wordmarkLead,
+      wordmarkTail: profile.wordmarkTail,
+      legalName: profile.legalName,
+      legalEntity: profile.legalEntity,
+      governingLawState: profile.governingLawState,
+      venue: profile.venue,
+      street: profile.street,
+      cityStateZip: profile.cityStateZip,
+      contactEmail: profile.contactEmail,
+      domain: profile.domain,
+      timeZone: profile.timeZone,
+      orderNumberPrefix: profile.orderNumberPrefix,
+      entryNumberPrefix: profile.entryNumberPrefix,
+      colorBrand: profile.colorBrand,
+      colorAccent: profile.colorAccent,
+      patternOpacityPercent: profile.patternOpacityPercent,
+      logoMediaId: profile.logoMediaId,
+      logoUrl:
+        profile.logoMediaId === null || row.logoContentType === null
+          ? null
+          : mediaUrl({ id: profile.logoMediaId, contentType: row.logoContentType }),
+      updatedAt: profile.updatedAt,
+      updatedByAdminUserId: profile.updatedByAdminUserId,
+    };
+  }
+
+  return {
+    read,
+
+    update: async (input: BrandProfileInput, updatedByAdminUserId) => {
+      await db
+        .update(brandProfile)
+        .set({
+          name: input.name,
+          wordmarkLead: input.wordmarkLead,
+          wordmarkTail: input.wordmarkTail,
+          legalName: input.legalName,
+          legalEntity: input.legalEntity,
+          governingLawState: input.governingLawState,
+          venue: input.venue,
+          street: input.street,
+          cityStateZip: input.cityStateZip,
+          contactEmail: input.contactEmail,
+          domain: input.domain,
+          timeZone: input.timeZone,
+          orderNumberPrefix: input.orderNumberPrefix,
+          entryNumberPrefix: input.entryNumberPrefix,
+          colorBrand: input.colorBrand,
+          colorAccent: input.colorAccent,
+          patternOpacityPercent: input.patternOpacityPercent,
+          logoMediaId: input.logoMediaId,
+          updatedByAdminUserId,
+          // `updated_at` lo pone el trigger `brand_profile_set_updated_at`.
+        })
+        .where(eq(brandProfile.id, 1));
+
+      return read();
+    },
+
+    mediaExists: async (mediaId) => {
+      const [row] = await db
+        .select({ id: mediaAssets.id })
+        .from(mediaAssets)
+        .where(eq(mediaAssets.id, mediaId))
+        .limit(1);
+      return row !== undefined;
+    },
+  };
+}
+
+export function createRepositories(db: Database): Repositories {
+  return {
+    promotions: createPromotionRepository(db),
+    catalog: createCatalogRepository(db),
+    carts: createCartRepository(db),
+    config: createConfigRepository(db),
+    entryBalances: createEntryBalanceRepository(db),
+    shipping: createShippingRateRepository(db),
+    brand: createBrandRepository(db),
+  };
+}

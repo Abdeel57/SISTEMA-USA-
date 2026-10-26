@@ -1,0 +1,251 @@
+import { render, screen } from "@testing-library/react";
+import { NextIntlClientProvider } from "next-intl";
+import type { ReactNode } from "react";
+import { describe, expect, it, vi } from "vitest";
+
+import enMessages from "../../messages/en-US.json";
+import esMessages from "../../messages/es-US.json";
+
+/**
+ * Los componentes hablan los dos idiomas.
+ *
+ * El test de paridad garantiza que las claves existen en los dos diccionarios.
+ * Este comprueba lo siguiente: que los componentes las USAN, y que un cambio de
+ * locale cambia de verdad lo que lee el usuario.
+ */
+
+// `usePathname` y `Link` de next-intl necesitan el router del App Router, que no
+// existe en jsdom. El doble reproduce su contrato documentado: `usePathname`
+// devuelve la ruta SIN prefijo de idioma y `Link` anade el del `locale`. Lo que
+// se comprueba con el es la decision propia del componente: pasar la ruta
+// actual en vez de mandar al usuario a la portada.
+vi.mock("@/i18n/navigation", async () => {
+  // Sin JSX dentro del factory: `vi.mock` se eleva por encima de los imports y
+  // el runtime automatico de JSX podria no estar disponible todavia.
+  const { createElement } = await import("react");
+
+  return {
+    usePathname: () => "/account/entries",
+    Link: ({
+      href,
+      locale,
+      children,
+      ...rest
+    }: {
+      href: string;
+      locale?: string;
+      children: ReactNode;
+    }) =>
+      createElement(
+        "a",
+        { href: locale === undefined ? href : `/${locale}${href}`, ...rest },
+        children,
+      ),
+  };
+});
+
+import { ApiErrorState } from "@/components/api-error-state";
+import { LanguageBar } from "@/components/language-bar";
+import { LanguageSwitcher } from "@/components/language-switcher";
+import { PromotionStatusBadge } from "@/components/promotion-status-badge";
+
+function renderIn(locale: "en" | "es", ui: ReactNode) {
+  return render(
+    <NextIntlClientProvider
+      locale={locale}
+      messages={locale === "en" ? enMessages : esMessages}
+      timeZone="UTC"
+    >
+      {ui}
+    </NextIntlClientProvider>,
+  );
+}
+
+describe("PromotionStatusBadge", () => {
+  it("muestra el estado en ingles", () => {
+    renderIn("en", <PromotionStatusBadge status="POTENTIAL_WINNER_REVIEW" />);
+    expect(
+      screen.getByText(enMessages.promotionStatus.POTENTIAL_WINNER_REVIEW),
+    ).toBeInTheDocument();
+  });
+
+  it("muestra el mismo estado en espanol", () => {
+    renderIn("es", <PromotionStatusBadge status="POTENTIAL_WINNER_REVIEW" />);
+    expect(
+      screen.getByText(esMessages.promotionStatus.POTENTIAL_WINNER_REVIEW),
+    ).toBeInTheDocument();
+  });
+
+  it("el estado no se transmite solo con el color", () => {
+    // Quien no distinga los colores tiene que poder leer el estado.
+    renderIn("en", <PromotionStatusBadge status="CLOSED" />);
+    expect(screen.getByText(enMessages.promotionStatus.CLOSED)).toBeInTheDocument();
+  });
+});
+
+describe("ApiErrorState (DEC-022, DEC-031)", () => {
+  it("traduce el codigo del backend con el copy del frontend", () => {
+    renderIn(
+      "es",
+      <ApiErrorState
+        failure={{
+          kind: "http",
+          status: 500,
+          code: "INTERNAL_ERROR",
+          requestId: "req_test_0001",
+          details: null,
+        }}
+      />,
+    );
+
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent(esMessages.apiErrors.INTERNAL_ERROR);
+    expect(alert).toHaveTextContent("req_test_0001");
+  });
+
+  it("cae al mensaje generico ante un codigo que no conoce", () => {
+    // El backend puede introducir codigos nuevos en cualquier despliegue. Un
+    // codigo sin traducir no puede acabar en pantalla en el idioma equivocado.
+    renderIn(
+      "es",
+      <ApiErrorState
+        failure={{
+          kind: "http",
+          status: 422,
+          code: "SOME_NEW_CODE_FROM_BACKEND",
+          requestId: null,
+          details: null,
+        }}
+      />,
+    );
+
+    expect(screen.getByRole("alert")).toHaveTextContent(esMessages.apiErrors.fallback);
+  });
+
+  it("el 503 de pago SIN proveedor configurado tiene texto propio, no el generico", () => {
+    /*
+     * HO-034 punto 6. `POST /checkout/session` responde
+     * `PAYMENT_PROVIDER_NOT_CONFIGURED` -hoy, siempre: el proveedor sigue sin
+     * elegirse- y el diccionario solo traducia
+     * `PAYMENT_PROVIDER_UNAVAILABLE`. El codigo caia al generico "algo ha
+     * fallado", que ademas invita a reintentar algo que no puede funcionar.
+     *
+     * Los dos codigos existen y NO dicen lo mismo: uno es "no contesta" y el
+     * otro es "no hay a quien llamar".
+     */
+    for (const locale of ["en", "es"] as const) {
+      const messages = locale === "en" ? enMessages : esMessages;
+      const view = renderIn(
+        locale,
+        <ApiErrorState
+          failure={{
+            kind: "http",
+            status: 503,
+            code: "PAYMENT_PROVIDER_NOT_CONFIGURED",
+            requestId: null,
+            details: null,
+          }}
+        />,
+      );
+
+      const alert = screen.getByRole("alert");
+      expect(alert).toHaveTextContent(messages.apiErrors.PAYMENT_PROVIDER_NOT_CONFIGURED);
+      expect(alert).not.toHaveTextContent(messages.apiErrors.fallback);
+      expect(messages.apiErrors.PAYMENT_PROVIDER_NOT_CONFIGURED).not.toEqual(
+        messages.apiErrors.PAYMENT_PROVIDER_UNAVAILABLE,
+      );
+
+      view.unmount();
+    }
+  });
+
+  it("un fallo de red tiene su propio mensaje", () => {
+    renderIn(
+      "en",
+      <ApiErrorState
+        failure={{
+          kind: "network",
+          status: null,
+          code: null,
+          requestId: null,
+          details: null,
+        }}
+      />,
+    );
+
+    expect(screen.getByRole("alert")).toHaveTextContent(enMessages.apiErrors.NETWORK_UNAVAILABLE);
+  });
+});
+
+describe("LanguageSwitcher (DEC-021)", () => {
+  it("conserva la ruta al cambiar de idioma", () => {
+    renderIn("es", <LanguageSwitcher />);
+
+    // Cambiar de idioma desde `/es/account/entries` lleva a la misma pagina en
+    // ingles, no a la portada.
+    expect(screen.getByRole("link", { name: enMessages.localeName.en })).toHaveAttribute(
+      "href",
+      "/en/account/entries",
+    );
+    expect(screen.getByRole("link", { name: esMessages.localeName.es })).toHaveAttribute(
+      "href",
+      "/es/account/entries",
+    );
+  });
+
+  it("marca el idioma actual para tecnologia de asistencia", () => {
+    renderIn("en", <LanguageSwitcher />);
+
+    const current = screen.getByRole("link", { name: enMessages.localeName.en });
+    expect(current).toHaveAttribute("aria-current", "true");
+
+    const other = screen.getByRole("link", { name: enMessages.localeName.es });
+    expect(other).not.toHaveAttribute("aria-current");
+  });
+
+  it("el conmutador es una region con nombre", () => {
+    renderIn("es", <LanguageSwitcher />);
+    expect(
+      screen.getByRole("navigation", { name: esMessages.a11y.languageSwitcher }),
+    ).toBeInTheDocument();
+  });
+
+  it("cada idioma va con su `lang`, para que se pronuncie en su idioma", () => {
+    renderIn("es", <LanguageSwitcher />);
+
+    expect(screen.getByRole("link", { name: enMessages.localeName.en })).toHaveAttribute(
+      "lang",
+      "en",
+    );
+    expect(screen.getByRole("link", { name: esMessages.localeName.es })).toHaveAttribute(
+      "lang",
+      "es",
+    );
+  });
+});
+
+describe("LanguageBar (DEC-081)", () => {
+  it("pone el conmutador arriba con la palabra Idioma a la vista", () => {
+    renderIn("es", <LanguageBar />);
+
+    const nav = screen.getByRole("navigation", { name: esMessages.a11y.languageSwitcher });
+    // La palabra se VE (es para quien busca donde se cambia el idioma)...
+    expect(nav).toHaveTextContent(esMessages.a11y.languageSwitcher);
+    // ...pero no se anuncia dos veces: el nombre accesible ya la lleva.
+    expect(screen.getByText(esMessages.a11y.languageSwitcher)).toHaveAttribute(
+      "aria-hidden",
+      "true",
+    );
+    expect(screen.getAllByRole("link")).toHaveLength(2);
+  });
+
+  it("en ingles dice Language y marca English", () => {
+    renderIn("en", <LanguageBar />);
+
+    expect(screen.getByText(enMessages.a11y.languageSwitcher)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: enMessages.localeName.en })).toHaveAttribute(
+      "aria-current",
+      "true",
+    );
+  });
+});

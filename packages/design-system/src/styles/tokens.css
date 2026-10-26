@@ -1,0 +1,582 @@
+/* ---------------------------------------------------------------------------
+ * Plantilla Sorteos - tokens semanticos (@app/design-system)
+ *
+ * =====================  MARCA: AQUI SE CAMBIAN LOS COLORES  =================
+ * Para un cliente nuevo basta con cambiar los valores de los bloques
+ * "Color: superficies", "Color: texto", "Color: marca", "Color: acento" y
+ * "BANDA CLARA" de mas abajo (canales RGB). Ningun componente lleva colores
+ * propios. La paleta de la plantilla es neutra: negro frio con azul.
+ *   brand   #38bdf8  marca: titulares, filetes, cifras, foco (9,3:1 sobre bg)
+ *   accent  #2563eb  accion: botones de compra, con texto blanco (5,2:1)
+ *   light-gold #0369a1  tinta de marca sobre la banda clara (5,6:1)
+ * Los contrastes citados en los comentarios de mas abajo son los de la paleta
+ * original (oro y rojo); si se cambia la paleta, conviene volver a medirlos.
+ * El color del patron topografico esta en `tailwind-preset.mjs` (BRAND_HEX).
+ * ===========================================================================
+ *
+ * Este archivo contiene UNICAMENTE custom properties. No aplica estilos a
+ * ningun elemento: la aplicacion decide como consumirlos (apps/web/src/app/
+ * globals.css). Asi el paquete puede usarse desde cualquier superficie
+ * (storefront, portal del participante, admin) sin arrastrar decisiones de
+ * layout.
+ *
+ * Convenciones
+ * ------------
+ * 1. Los tokens de color se declaran como CANALES RGB separados por espacio
+ *    (201 162 39), no como notacion hexadecimal. Es lo que permite a Tailwind
+ *    aplicar modificadores de opacidad (bg-brand/10) mediante <alpha-value>.
+ *    En CSS plano se consumen como rgb(var(--app-color-brand)).
+ * 2. Los nombres son SEMANTICOS (surface, text-muted, danger), nunca
+ *    literales (oro-claro). Cambiar la marca no debe obligar a tocar ningun
+ *    componente. Esta misma reescritura es la prueba: el sistema paso de azul
+ *    marino sobre blanco a oro sobre negro sin que ningun componente de
+ *    `@app/ui` cambiara de nombre de color.
+ * 3. Hay UN SOLO TEMA. Ver mas abajo.
+ *
+ * ---------------------------------------------------------------------------
+ * DIRECCION DE MARCA (DEC-038)
+ * ---------------------------------------------------------------------------
+ * Negro profundo como superficie, ORO como acento, blanco calido para texto.
+ * La gama sale del logotipo entregado por el cliente (`apps/web/brand/
+ * logo.jpeg`): estrella negra biselada con filete dorado, coronada, sobre
+ * negro. La referencia de composicion es dark-first y de titulares enormes.
+ *
+ * NOTA SUPERSEDED. La version anterior de este archivo declaraba: "Prohibido
+ * explicitamente: oro brillante, degradados neon, sombras de brillo y cualquier
+ * otro recurso de estetica de casino". DEC-038 deja sin efecto la parte
+ * cromatica de esa nota y explica por que: la proteccion real contra la
+ * estetica de casino nunca fue el color, sino el LENGUAJE, y esa parte se
+ * mantiene entera. Siguen prohibidos, ahora por escrito:
+ *
+ *   - describir la compra como boletos, oportunidades o participaciones a la
+ *     venta (CLAUDE.md, seccion 1);
+ *   - cifras de participaciones fuera del carrito, que es donde las produce el
+ *     backend (DEC-023);
+ *   - urgencia fabricada, parpadeos, contadores que "deciden" nada.
+ *
+ * Lo que DEC-038 autoriza es cromatico y tipografico: oro, negro, titulares
+ * grandes en mayusculas y secciones de alto contraste.
+ *
+ * ---------------------------------------------------------------------------
+ * UN SOLO TEMA, OSCURO (DEC-038), CON SUPERFICIES CLARAS ACOTADAS (DEC-039/040)
+ * ---------------------------------------------------------------------------
+ * La dualidad claro/oscuro desaparece COMO TEMA. El logotipo es negro y oro y
+ * la identidad es dark-first: un tema claro seria una segunda marca a
+ * mantener, no una preferencia. `color-scheme: dark` se declara aqui para que
+ * los controles nativos del navegador (scrollbars, selectores de fecha,
+ * autocompletado) lleguen ya en oscuro en vez de aparecer como rectangulos
+ * blancos dentro de una pagina negra.
+ *
+ * Lo que DEC-039 y DEC-040 anaden no es un segundo tema sino unas SUPERFICIES
+ * claras acotadas -las de mercancia- con su propia paleta `light-*`. Esas
+ * superficies contrarrestan el `color-scheme` del documento en su propia clase
+ * (`.app-band-light` / `.app-panel-light` en `apps/web`, con
+ * `color-scheme: light`), porque un `<select>` o un `<input>` nativo pintado en
+ * oscuro dentro de una banda blanca es el mismo fallo al reves.
+ *
+ * Consecuencia practica: NINGUN color se define dentro de un bloque de tema.
+ * Todos viven en `:root` y no hay nada que reasignar; la paleta clara son
+ * tokens ADICIONALES, no una reasignacion de los oscuros.
+ * ------------------------------------------------------------------------- */
+
+:root {
+  color-scheme: dark;
+
+  /* --- Tipografia: familias ---------------------------------------------- */
+  /* Las dos familias de marca las inyecta `next/font` en el elemento raiz como
+     `--font-app-sans` y `--font-app-display` (ver apps/web/src/app/fonts.ts).
+     Se referencian aqui con respaldo completo: si la app no las declara -por
+     ejemplo en un test que renderiza una primitiva suelta- la cadena sigue
+     resolviendo a una familia real. */
+  --app-font-sans:
+    var(--font-app-sans), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+  /* Display: condensada, alta y pesada. Los titulares van en MAYUSCULAS con
+     tracking (ver `.app-display` en globals.css). Los respaldos son las
+     condensadas que existen de serie en Windows y macOS, por ese orden, para
+     que un fallo de la fuente de marca degrade a algo estrecho y no a la misma
+     sans del cuerpo. */
+  --app-font-display:
+    var(--font-app-display), "Oswald", "Haettenschweiler", "Arial Narrow",
+    "Helvetica Neue Condensed", "Impact", var(--app-font-sans);
+  /* Titular de impacto (DEC-068): ancha, gruesa y en italica, la letra de las
+     referencias de carreras. Solo para textos cortos: titulares, botones,
+     cifras. Sin la fuente cargada cae en la display, que tambien es de marca. */
+  --app-font-headline: var(--font-app-headline), "Saira", var(--app-font-display);
+  --app-font-mono:
+    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+
+  /* --- Tipografia: escala (mobile-first mediante clamp) -------------------
+   *
+   * `display-xl` es nueva con DEC-038: es el titular del hero, y su minimo
+   * (2.5rem) esta calculado para que un titulo de dos palabras largas quepa en
+   * 360px sin desbordar. El maximo es deliberadamente grande: la referencia
+   * visual construye la jerarquia con tamano, no con adornos.
+   *
+   * Los `tracking` positivos de `display-*` son consecuencia de la condensada
+   * en mayusculas: sin ellos las astas se tocan y el titular se lee como una
+   * mancha. */
+  --app-text-display-xl-size: clamp(2.5rem, 1.15rem + 6vw, 5.5rem);
+  --app-text-display-xl-line: 0.96;
+  --app-text-display-xl-tracking: 0.005em;
+
+  --app-text-display-lg-size: clamp(2.125rem, 1.4rem + 3.2vw, 3.75rem);
+  --app-text-display-lg-line: 1;
+  --app-text-display-lg-tracking: 0.006em;
+
+  --app-text-display-md-size: clamp(1.75rem, 1.35rem + 1.8vw, 2.5rem);
+  --app-text-display-md-line: 1.06;
+  --app-text-display-md-tracking: 0.008em;
+
+  --app-text-heading-lg-size: clamp(1.5rem, 1.3rem + 0.9vw, 1.875rem);
+  --app-text-heading-lg-line: 1.15;
+  --app-text-heading-lg-tracking: 0.01em;
+
+  --app-text-heading-md-size: 1.25rem;
+  --app-text-heading-md-line: 1.25;
+  --app-text-heading-md-tracking: 0.012em;
+
+  --app-text-heading-sm-size: 1.0625rem;
+  --app-text-heading-sm-line: 1.3;
+  --app-text-heading-sm-tracking: 0.012em;
+
+  --app-text-body-lg-size: 1.125rem;
+  --app-text-body-lg-line: 1.65;
+  --app-text-body-lg-tracking: 0em;
+
+  --app-text-body-md-size: 1rem;
+  --app-text-body-md-line: 1.6;
+  --app-text-body-md-tracking: 0em;
+
+  --app-text-body-sm-size: 0.875rem;
+  --app-text-body-sm-line: 1.55;
+  --app-text-body-sm-tracking: 0.002em;
+
+  --app-text-label-size: 0.8125rem;
+  --app-text-label-line: 1.4;
+  --app-text-label-tracking: 0.02em;
+
+  --app-text-caption-size: 0.75rem;
+  --app-text-caption-line: 1.45;
+  --app-text-caption-tracking: 0.015em;
+
+  --app-text-overline-size: 0.6875rem;
+  --app-text-overline-line: 1.3;
+  --app-text-overline-tracking: 0.18em;
+
+  --app-font-weight-regular: 400;
+  --app-font-weight-medium: 500;
+  --app-font-weight-semibold: 600;
+  --app-font-weight-bold: 700;
+
+  /* Tracking de los titulares en mayusculas. Se expone como token propio
+     porque lo consumen tanto `.app-display` como utilidades de Tailwind. */
+  --app-tracking-display: 0.04em;
+  --app-tracking-wide: 0.12em;
+
+  /* --- Espaciado ---------------------------------------------------------- */
+  --app-space-0: 0rem;
+  --app-space-1: 0.25rem;
+  --app-space-2: 0.5rem;
+  --app-space-3: 0.75rem;
+  --app-space-4: 1rem;
+  --app-space-5: 1.25rem;
+  --app-space-6: 1.5rem;
+  --app-space-8: 2rem;
+  --app-space-10: 2.5rem;
+  --app-space-12: 3rem;
+  --app-space-16: 4rem;
+  --app-space-20: 5rem;
+  --app-space-24: 6rem;
+
+  /* --- Radios -------------------------------------------------------------
+   *
+   * DEC-038 los estrecha. La referencia visual es de esquinas casi rectas:
+   * sobre negro, un radio grande lee como interfaz de aplicacion, y uno
+   * pequeno lee como pieza impresa o de automocion, que es la direccion. */
+  --app-radius-none: 0rem;
+  --app-radius-sm: 0.125rem;
+  --app-radius-md: 0.25rem;
+  --app-radius-lg: 0.375rem;
+  --app-radius-xl: 0.5rem;
+  --app-radius-2xl: 0.75rem;
+  --app-radius-pill: 9999px;
+
+  /* --- Superficies y contenedores ---------------------------------------- */
+  --app-container-max: 80rem;
+  --app-container-narrow: 46rem;
+  --app-gutter: var(--app-space-4);
+  /* La altura por defecto (`md`) son 44px: el minimo comodo de area tactil en
+     movil (principio #13). `sm` queda por debajo a proposito y esta reservada a
+     superficies densas de escritorio, como las tablas del admin, donde sigue
+     cumpliendo el minimo de 24px de WCAG 2.5.8. `xl` es para el CTA principal
+     del hero, que DEC-038 quiere grande de verdad. */
+  --app-control-height-sm: 2rem;
+  --app-control-height-md: 2.75rem;
+  --app-control-height-lg: 3.25rem;
+  --app-control-height-xl: 3.875rem;
+
+  /* --- Movimiento --------------------------------------------------------- */
+  --app-duration-instant: 80ms;
+  --app-duration-fast: 140ms;
+  --app-duration-base: 220ms;
+  --app-duration-slow: 340ms;
+  --app-ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --app-ease-emphasized: cubic-bezier(0.3, 0, 0, 1);
+
+  /* --- Capas -------------------------------------------------------------- */
+  --app-z-base: 0;
+  --app-z-sticky: 100;
+  --app-z-dropdown: 200;
+  --app-z-overlay: 300;
+  --app-z-modal: 400;
+  --app-z-toast: 500;
+
+  /* --- Foco --------------------------------------------------------------- */
+  --app-focus-ring-width: 2px;
+  --app-focus-ring-offset: 2px;
+
+  /* --- Color: superficies -------------------------------------------------
+   *
+   * Cinco escalones de negro, no dos. Sobre fondo oscuro la elevacion no se
+   * percibe por la sombra -una sombra negra sobre negro no existe- sino por la
+   * diferencia de luminosidad entre superficies y por el filete del borde. Por
+   * eso los escalones estan medidos para ser perceptibles: cada uno sube unos
+   * 6-7 puntos de luminancia sobre el anterior. */
+  --app-color-bg: 8 10 14;
+  --app-color-surface: 15 18 24;
+  --app-color-surface-raised: 23 27 35;
+  --app-color-surface-sunken: 4 5 8;
+
+  --app-color-border: 36 42 54;
+  --app-color-border-strong: 64 72 90;
+
+  /* --- Color: texto -------------------------------------------------------
+   *
+   * Blanco CALIDO, no blanco puro: el blanco puro sobre negro vibra y cansa, y
+   * ademas choca con el oro. Contrastes medidos sobre `--app-color-bg`:
+   *   text        #f6f2e9  ~17.8:1
+   *   text-muted  #b5aea0   ~9.0:1
+   *   text-subtle #8a8377   ~5.3:1  (AA para texto normal; se usa en captions)
+   * Todos por encima de 4.5:1, que es el minimo AA. */
+  --app-color-text: 238 242 248;
+  --app-color-text-muted: 168 178 194;
+  --app-color-text-subtle: 124 134 152;
+  /* Texto sobre superficies claras: solo existe sobre oro (botones, insignias
+     solidas), donde lo correcto es casi negro. */
+  --app-color-text-inverse: 8 10 14;
+
+  /* --- Color: oro ---------------------------------------------------------
+   *
+   * `brand` es el oro del logotipo. #c9a227 sobre el fondo da 9.4:1, asi que
+   * cumple AA incluso en texto pequeno; aun asi, la regla de composicion es
+   * reservarlo para titulares, filetes, iconos y cifras destacadas, y llevar el
+   * cuerpo en blanco calido. La razon no es de contraste sino de jerarquia: si
+   * todo es oro, nada lo es.
+   *
+   * `brand-hover` y `brand-active` ACLARAN en vez de oscurecer. Sobre fondo
+   * oscuro, oscurecer un color al pasar el raton se lee como desactivarlo. */
+  --app-color-brand: 56 189 248;
+  --app-color-brand-hover: 125 211 252;
+  --app-color-brand-active: 186 230 253;
+  --app-color-brand-subtle: 8 30 44;
+  --app-color-on-brand: 8 10 14;
+
+  /* --- Color: ROJO DE ACENTO (DEC-042) ------------------------------------
+   *
+   * El segundo color del sistema, y el unico que no es oro. Antes de DEC-042
+   * `accent` era "oro intenso": un tercer escalon de la misma rampa dorada que
+   * solo se distinguia de `brand` mirandolos juntos. Lo que hacia -destacar el
+   * badge del periodo de multiplicador- lo hace igual de bien `brand`, y ahi ha
+   * vuelto. Este nombre queda libre para lo que el sistema no tenia: un color
+   * de ACCION.
+   *
+   * REPARTO, Y NO ES NEGOCIABLE:
+   *   oro  = MARCA. Titulares, filetes, chips de elegibilidad, cifras de
+   *          participaciones, patron topografico, anillo de foco.
+   *   rojo = COMPRA Y ATENCION. El CTA que lleva a la mercancia, el boton de
+   *          anadir al carrito, el fragmento destacado del titular, la barra de
+   *          progreso, la barra de anuncio.
+   *
+   * NO ES `danger`, aunque se parezcan. Un error sigue pintandose con `danger`
+   * (#f07a7a, un rojo palido calibrado como TEXTO sobre negro) y este nunca
+   * aparece en un `Alert` ni en un mensaje de validacion. Son dos preguntas
+   * distintas -"esto ha fallado" y "esto es la accion principal"- y colapsarlas
+   * en un token haria imposible cambiar una sin cambiar la otra.
+   *
+   * CONTRASTES MEDIDOS (DEC-042; rojo puro desde DEC-074)
+   * -----------------------------------------------------
+   * El rojo de la referencia (#e8232a) da 4,46:1 con texto blanco encima: se
+   * queda a cuatro centesimas del minimo AA de 4,5:1. DEC-042 lo oscurecio a
+   * #cf1a22, pero llevaba verde y azul (26, 34) y en pantalla se veia apagado.
+   * DEC-074 lo cambia por un rojo PURO, sin verde y casi sin azul: igual de
+   * oscuro, mucho mas saturado (100% frente a 78%), y el blanco sigue en AA:
+   *
+   *   accent        #e10012  blanco encima 4,99:1   contra la pagina 4,01:1
+   *   accent-hover  #ea0816  blanco encima 4,62:1   contra la pagina 4,33:1
+   *   accent-active #c0000c  blanco encima 6,47:1
+   *   accent-text   #ff3838  sobre `bg` 5,60:1  sobre `surface-raised` 4,95:1
+   *   light-accent  #bf1620  sobre la banda clara 5,91:1  sobre blanco 6,27:1
+   *
+   * Los tres primeros son RELLENO (llevan `on-accent` encima); los dos ultimos
+   * son TINTA (son ellos los que se leen). Ese es el motivo de que existan
+   * cinco tonos y no dos: un rojo legible como texto sobre negro es demasiado
+   * claro para llevar texto blanco encima, y al reves.
+   *
+   * `accent-hover` ACLARA, como `brand-hover`: sobre fondo oscuro, oscurecer al
+   * pasar el raton se lee como desactivar. `accent-active` es la EXCEPCION y
+   * oscurece, porque el techo de luminosidad de este relleno lo fija el texto
+   * blanco que lleva encima: un pulsado mas claro que #ea0816 bajaria de 4,5:1.
+   * El pulsado tambien es momentaneo, asi que no compite con el hover. */
+  --app-color-accent: 37 99 235;
+  --app-color-accent-hover: 44 104 240;
+  --app-color-accent-active: 29 78 216;
+  /* Lavado rojo casi negro, para la insignia `accent` discreta. Con
+     `accent-text` encima mide 5,51:1. */
+  --app-color-accent-subtle: 12 22 48;
+  /* Blanco PURO y no el blanco calido del texto: sobre un rojo saturado, el
+     blanco calido tira a rosa. Es la unica superficie del sistema donde el
+     texto va en blanco puro. */
+  --app-color-on-accent: 255 255 255;
+  /* Rojo de TEXTO sobre las superficies oscuras. Es el que lleva el fragmento
+     destacado del titular y el antetitulo de seccion. */
+  --app-color-accent-text: 96 165 250;
+
+  /* --- Color: ROJO DE COMPRA, FIJO ---------------------------------------
+   *
+   * Los botones de COMPRA (comprar ahora, anadir al carrito, pagar, ir a la
+   * tienda) y la franja de anuncio de arriba son SIEMPRE rojo fuerte, elija el
+   * panel el color de acento que elija: lo pidio el cliente (2026-10-13). Por
+   * eso estos tokens NO los sobreescribe `apps/web/src/lib/brand-palette.ts`,
+   * que solo toca `brand` y `accent`.
+   *
+   * ROJO VIVO Y BRILLANTE (2026-10-13): el cliente lo quiso mas intenso que
+   * el #e10012 de DEC-074. Un rojo puro mas claro baja el contraste con el
+   * blanco por debajo de 4,5:1 -no hay rojo mas luminoso que lo cumpla-, y se
+   * acepta asi a peticion suya. Medidos con blanco puro encima:
+   *   buy         #ff1424  3,90:1
+   *   buy-hover   #ff3846  3,56:1
+   *   buy-active  #dc0018  5,18:1
+   * Por encima de 3:1, que es lo que WCAG pide al texto grande o en negrita
+   * gruesa: el de los botones lo es (Saira 900), y la franja y los botones
+   * llevan ademas una sombra oscura bajo la letra. */
+  --app-color-buy: 255 20 36;
+  --app-color-buy-hover: 255 56 70;
+  --app-color-buy-active: 220 0 24;
+  --app-color-on-buy: 255 255 255;
+
+  /* --- Color: ORO FIJO (2026-10-13) ---------------------------------------
+   *
+   * La banda de participaciones y la del premio son DORADAS siempre, elija el
+   * panel el color de marca que elija (lo pidio el cliente: con una marca azul
+   * la banda salia azul). Como el rojo de compra, no lo sobreescribe la hoja
+   * de la marca. Tres escalones para el degradado metalico y la tinta que va
+   * encima: casi negra, 9,6:1 sobre el oro base. */
+  --app-color-gold: 214 168 56;
+  --app-color-gold-light: 248 222 132;
+  --app-color-gold-deep: 160 114 20;
+  --app-color-on-gold: 20 14 2;
+
+  /* --- Color: BANDA CLARA (DEC-039) ---------------------------------------
+   *
+   * DEC-038 fijo un solo tema, oscuro, y esa sigue siendo la regla del sitio.
+   * DEC-039 la enmienda en un punto concreto y acotado: las secciones de
+   * MERCANCIA -la rejilla de `/shop` y la franja destacada de la portada- van
+   * sobre blanco calido, porque es lo que produce la sensacion limpia de la
+   * referencia real y es lo que el usuario aprobo con la captura delante.
+   *
+   * Esto NO es un segundo tema. Un tema se aplica al documento entero y obliga
+   * a que cada componente sepa en cual esta. Esto es una PALETA DE BANDA: un
+   * punado de tokens que solo consumen las piezas que viven dentro de
+   * `.app-band-light`, declarados en el mismo `:root` que los demas y sin
+   * ningun selector de tema de por medio. La cabecera, el hero, el marcador, la
+   * banda del premio y el pie siguen siendo oscuros y siguen usando `bg`,
+   * `surface` y `text` sin enterarse de que esto existe.
+   *
+   * Blanco CALIDO y no blanco puro (#faf8f4 y no #ffffff) para el FONDO de la
+   * banda: el blanco puro junto al oro tira a azul y delata que son dos
+   * sistemas distintos. La TARJETA si es blanco puro, de modo que se separa del
+   * fondo por luminosidad y no necesita un borde grueso que la recorte.
+   *
+   * Contrastes medidos sobre `--app-color-light-bg` (#faf8f4):
+   *   light-text        #0d0c0a  18.4:1  (texto)
+   *   light-text-muted  #5a554c   7.0:1  (texto secundario)
+   *   light-gold        #7a6116   5.6:1  (antetitulo, foco, hover)
+   * Los tres por encima de 4.5:1, que es el minimo AA para texto normal.
+   *
+   * `light-gold` es el ORO DE TINTA, y existe por una razon medida: el oro de
+   * marca (#c9a227) da 2.3:1 sobre este fondo, asi que NO puede llevar texto
+   * sobre claro. No es un color nuevo, es el mismo acento llevado a la sombra:
+   * sobre negro manda `--app-color-brand`, sobre claro manda este.
+   *
+   * `light-border-strong` es el unico token de esta paleta que NO lleva texto:
+   * es el CONTORNO de un control (el boton `ink`, el chip neutro). WCAG 1.4.11
+   * pide 3:1 a la parte grafica que identifica un control, y el valor original
+   * (#c7bfb0) daba 1.7:1 sobre la banda y 1.8:1 sobre el blanco de la tarjeta:
+   * el boton "cargar mas" se distinguia de un texto suelto por una linea que no
+   * se veia. #938d82 es la misma rampa calida un 26% mas oscura y mide 3.1:1
+   * sobre la banda y 3.3:1 sobre blanco (hallazgo A6 de la revision de
+   * accesibilidad de DEC-039).
+   *
+   * `light-border` sigue siendo tenue (1.3:1) A PROPOSITO: no identifica ningun
+   * control, solo dibuja el canto de una tarjeta blanca sobre blanco calido. */
+  --app-color-light-bg: 246 248 251;
+  --app-color-light-surface: 255 255 255;
+  --app-color-light-surface-sunken: 236 240 246;
+  --app-color-light-border: 222 228 237;
+  --app-color-light-border-strong: 125 135 154;
+  --app-color-light-text: 10 14 22;
+  --app-color-light-text-muted: 82 92 110;
+  --app-color-light-gold: 3 105 161;
+  /* Rojo de TINTA (DEC-042). La contrapartida exacta de `light-gold`: sobre
+     negro el rojo que se lee es `accent-text` (#ff3838), y sobre la banda clara
+     ese mismo #ff3838 da 3,37:1, asi que ahi manda este. Mide 5,91:1 sobre el
+     fondo de la banda y 6,27:1 sobre el blanco de la tarjeta. Vive en la
+     familia `light-*` y no como `accent-text-light` porque lo que decide que
+     rojo se usa no es el componente sino LA SUPERFICIE, igual que con el oro. */
+  --app-color-light-accent: 29 78 216;
+
+  /* --- Color: estados -----------------------------------------------------
+   *
+   * NOTA SUPERSEDED (DEC-042). Aqui decia: "el rojo es SOLO para errores
+   * (DEC-038); nada de rojo decorativo, nada de rojo de urgencia". DEC-042
+   * levanta la primera mitad y CONSERVA la segunda, que es la que importaba:
+   *
+   *   - hay un rojo que no es de error, y es `accent` (ver mas arriba): color
+   *     de accion de compra y de atencion;
+   *   - sigue sin haber rojo DE URGENCIA. Ni cuentas atras que cambien de color
+   *     al acercarse al cierre, ni "solo quedan X", ni parpadeos. Que la barra
+   *     de progreso sea roja no la convierte en un reclamo: sigue midiendo el
+   *     tramo real entre apertura y cierre y sigue sin decidir nada.
+   *
+   * `danger` no se toca y sigue siendo el unico rojo de los errores. */
+  --app-color-success: 122 200 150;
+  --app-color-success-subtle: 14 32 22;
+  --app-color-on-success: 6 20 12;
+
+  --app-color-warning: 226 173 88;
+  --app-color-warning-subtle: 40 30 12;
+  --app-color-on-warning: 26 18 4;
+
+  --app-color-danger: 240 122 122;
+  --app-color-danger-subtle: 46 18 18;
+  --app-color-on-danger: 32 6 6;
+
+  /* `info` es el tono de los avisos legales, que en este producto son
+     frecuentes y no son alarmas: champan apagado sobre un fondo casi negro.
+     Un azul aqui seria el unico color frio del sistema y se leeria como un
+     componente de otra marca. */
+  --app-color-info: 186 200 220;
+  --app-color-info-subtle: 16 22 32;
+  --app-color-on-info: 8 10 14;
+
+  /* El anillo de foco es oro claro: es el color mas visible del sistema sobre
+     cualquiera de las cinco superficies. */
+  --app-color-focus: 125 211 252;
+  --app-color-overlay: 0 0 0;
+  --app-color-skeleton: 28 32 40;
+
+  /* --- Elevacion ----------------------------------------------------------
+   *
+   * Sobre negro, una sombra sola no eleva nada. Cada escalon lleva DOS partes:
+   * un filete dorado tenue en el borde superior del contorno -que es lo que de
+   * verdad separa la pieza del fondo- y una sombra negra profunda que la asienta
+   * sobre la pagina. */
+  --app-shadow-none: none;
+  --app-shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.7);
+  --app-shadow-md: 0 0 0 1px rgb(var(--app-color-brand) / 0.06), 0 4px 12px -2px rgb(0 0 0 / 0.8);
+  --app-shadow-lg: 0 0 0 1px rgb(var(--app-color-brand) / 0.09), 0 12px 28px -8px rgb(0 0 0 / 0.85);
+  --app-shadow-xl: 0 0 0 1px rgb(var(--app-color-brand) / 0.12), 0 28px 60px -16px rgb(0 0 0 / 0.9);
+
+  /* Elevacion de la BANDA CLARA (DEC-039). Sobre blanco pasa lo contrario que
+     sobre negro: la sombra SI existe, y lo que no funciona es el filete dorado
+     -sobre blanco se lee como un subrayado-. Estos dos escalones son sombra de
+     tinta muy abierta y muy poco opaca, mas un filete de un pixel al 5-7% que
+     hace de contorno. La tarjeta se separa del fondo sin recortarse contra el,
+     que es lo que hace un borde solido de 1px sobre blanco. */
+  --app-shadow-light-sm:
+    0 0 0 1px rgb(var(--app-color-light-text) / 0.05),
+    0 1px 2px 0 rgb(var(--app-color-light-text) / 0.05);
+  --app-shadow-light-md:
+    0 0 0 1px rgb(var(--app-color-light-text) / 0.07),
+    0 10px 24px -10px rgb(var(--app-color-light-text) / 0.22);
+
+  /* --- Patrones -----------------------------------------------------------
+   *
+   * PATRON TOPOGRAFICO (segunda pasada de DEC-038)
+   *
+   * Curvas de nivel, como las de un mapa de terreno. Es la firma decorativa de
+   * la referencia visual y lo que impide que una banda de color plano lea como
+   * un rectangulo vacio: da materia sin meter ruido ni una sola peticion de red.
+   *
+   * SUS TOKENS NO ESTAN EN ESTE ARCHIVO. Son cuatro
+   * -`--app-pattern-topo-size`, `--app-pattern-topo`, `--app-pattern-topo-ink`
+   * y `--app-pattern-topo-ink-soft`- y los emite el preset de Tailwind
+   * (`tailwind-preset.mjs`, plugin `addBase`) a partir de UNA sola definicion
+   * de la geometria.
+   *
+   * El motivo es el hallazgo M6 de la revision de DEC-039: las tres tintas son
+   * el MISMO mosaico de nueve curvas y solo cambian en trazo, color y opacidad.
+   * Escritas a mano eran tres cadenas de ~1,5 KB que habia que editar a la vez,
+   * y la tercera nacio copiando la segunda. CSS no sabe componer un `url()` a
+   * partir de fragmentos, asi que la unica forma de tener una sola fuente es
+   * generarlas; el preset ya es el sitio donde el design system hace trabajo
+   * derivado, y sigue sin decidir NINGUN valor de tema (los colores del patron
+   * son los mismos literales que estaban aqui, no tokens reasignables).
+   *
+   * Las decisiones de diseno del patron, que sobreviven al cambio de sitio:
+   *
+   * 1. **La opacidad va DENTRO del SVG**, no fuera. Una capa de
+   *    `background-image` no acepta opacidad propia, asi que la unica forma de
+   *    tenerla al 4-7% sin un pseudo-elemento adicional -que chocaria con los
+   *    que ya usan `.app-atmosphere` y `.app-grain`- es bajar el
+   *    `stroke-opacity` del trazo. Consecuencia deseada: el patron se puede
+   *    APILAR como una capa mas sobre los degradados existentes.
+   * 2. **Hay tres tintas.** La dorada es para las superficies negras; la negra
+   *    (`-ink`) es para la banda del premio, que es dorada; y la negra suave
+   *    (`-ink-soft`, DEC-039/040) para las superficies claras de mercancia,
+   *    donde el trazo al 11% competiria con las fotografias. Un patron dorado
+   *    sobre oro no se ve, y aclarar el oro para que se viera romperia el
+   *    contraste del texto negro que lleva encima.
+   * 3. **Las curvas empiezan y terminan a la misma altura** en los dos bordes
+   *    verticales del mosaico (`y` en `x=0` es `y` en `x=640`), de modo que la
+   *    repeticion horizontal no deja costura visible.
+   *
+   * El patron es DECORACION: se aplica siempre como imagen de fondo, nunca como
+   * `<img>` ni como elemento con contenido, y por tanto no entra en el arbol de
+   * accesibilidad. */
+
+  /* Rayas diagonales de la barra de progreso. Dos tonos contiguos del MISMO
+     color: el relleno se ve como una cinta rayada y no como una barra plana.
+     DEC-042 las pasa de oro a rojo, que es como las pinta la referencia; el
+     unico consumidor es `PromotionProgress`, y lo que la barra representa -el
+     tramo transcurrido del periodo- no cambia. Con el rojo de DEC-074, el
+     relleno mide 4,01:1 contra la pagina y 4,11:1 contra el carril
+     (`surface-sunken`), por encima del 3:1 que WCAG 1.4.11 pide a una parte
+     grafica portadora de informacion. */
+  --app-pattern-stripes: repeating-linear-gradient(
+    135deg,
+    rgb(var(--app-color-accent)) 0 7px,
+    rgb(var(--app-color-accent-hover)) 7px 14px
+  );
+
+  /* --- Movimiento decorativo ----------------------------------------------
+   *
+   * NO se reutilizan `--app-duration-*`: bajo `prefers-reduced-motion` esos
+   * valen 0ms, y una animacion infinita de 0ms no se detiene, se vuelve un
+   * parpadeo. Las piezas decorativas continuas declaran su duracion aqui y se
+   * apagan con `animation: none` explicito bajo la misma preferencia. */
+  --app-marquee-duration: 46s;
+  --app-announce-duration: 15s;
+}
+
+/* Preferencia de movimiento reducido: los tokens de duracion se anulan en el
+ * origen, de modo que ningun componente tiene que acordarse de respetarla. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --app-duration-instant: 0ms;
+    --app-duration-fast: 0ms;
+    --app-duration-base: 0ms;
+    --app-duration-slow: 0ms;
+  }
+}

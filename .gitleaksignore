@@ -1,0 +1,8 @@
+# Falsos positivos de gitleaks en el HISTORIAL, identificados por huella
+# (commit:fichero:regla:linea). Solo para hallazgos de commits YA empujados,
+# que no se pueden reescribir (CLAUDE.md, principio 18). Cada huella lleva su
+# explicacion.
+#
+# Repositorio nuevo de la plantilla: sin huellas. Los valores de fixture que
+# gitleaks confunde con claves (p. ej. la referencia documental ficticia de una
+# autorizacion de sorteo) llevan `gitleaks:allow` en su propia linea.

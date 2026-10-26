@@ -1,0 +1,230 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1787616000000,
+      "tag": "0000_baseline",
+      "breakpoints": false
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1787616001000,
+      "tag": "0001_identity_and_rbac",
+      "breakpoints": false
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1787616002000,
+      "tag": "0002_promotions",
+      "breakpoints": false
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1787616003000,
+      "tag": "0003_catalog",
+      "breakpoints": false
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1787616004000,
+      "tag": "0004_rbac_catalog_unification",
+      "breakpoints": false
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1787616005000,
+      "tag": "0005_feature_flags",
+      "breakpoints": false
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1787616006000,
+      "tag": "0006_entry_ledger",
+      "breakpoints": false
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1787616007000,
+      "tag": "0007_rbac_read_capabilities",
+      "breakpoints": false
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1787616008000,
+      "tag": "0008_permission_feature_flag_key",
+      "breakpoints": false
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1787616009000,
+      "tag": "0009_cart",
+      "breakpoints": false
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1787616010000,
+      "tag": "0010_credentials_and_sessions",
+      "breakpoints": false
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1787616020000,
+      "tag": "0020_orders_and_checkout",
+      "breakpoints": false
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1787616021000,
+      "tag": "0021_amoe_submissions",
+      "breakpoints": false
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1787616022000,
+      "tag": "0022_entry_operations",
+      "breakpoints": false
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1787616023000,
+      "tag": "0023_draw_and_export",
+      "breakpoints": false
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1787616024000,
+      "tag": "0024_audit_events",
+      "breakpoints": false
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1787616025000,
+      "tag": "0025_cart_touch_on_item_change",
+      "breakpoints": false
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1787616026000,
+      "tag": "0026_product_kind_categories_variants",
+      "breakpoints": false
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1787616027000,
+      "tag": "0027_rbac_catalog_ho041",
+      "breakpoints": false
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1787616028000,
+      "tag": "0028_setting_change_requests",
+      "breakpoints": false
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1787616029000,
+      "tag": "0029_media_assets",
+      "breakpoints": false
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1787616030000,
+      "tag": "0030_email_tokens",
+      "breakpoints": false
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1787616031000,
+      "tag": "0031_verified_phone",
+      "breakpoints": false
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1787616032000,
+      "tag": "0032_promotion_hero_image",
+      "breakpoints": false
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1787616033000,
+      "tag": "0033_promotion_hero_gallery",
+      "breakpoints": false
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1787616034000,
+      "tag": "0034_participant_eligibility",
+      "breakpoints": false
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1787616035000,
+      "tag": "0035_cash_payments",
+      "breakpoints": false
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1787616036000,
+      "tag": "0036_guest_cart_and_shipping",
+      "breakpoints": false
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1787616037000,
+      "tag": "0037_entry_numbers_always",
+      "breakpoints": false
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1787616038000,
+      "tag": "0038_order_cancel_and_fulfillment",
+      "breakpoints": false
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1787616039000,
+      "tag": "0039_plantilla_admin_simple",
+      "breakpoints": false
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1787616040000,
+      "tag": "0040_brand_profile",
+      "breakpoints": false
+    }
+  ]
+}

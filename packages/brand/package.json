@@ -1,0 +1,28 @@
+{
+  "name": "@app/brand",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Configuracion de marca del cliente: nombre, datos legales, contacto, dominio, prefijos y zona horaria. Es el unico archivo que se edita para cambiar de cliente.",
+  "license": "UNLICENSED",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\""
+  },
+  "devDependencies": {
+    "@types/node": "^22.18.1",
+    "typescript": "^5.9.2"
+  }
+}

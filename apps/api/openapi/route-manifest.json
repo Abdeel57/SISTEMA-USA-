@@ -1,0 +1,1077 @@
+{
+  "generated_from": "apps/api/src/http/route-registry.ts",
+  "contract_version": "0.1.0",
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/api/v1/account/amoe-submissions",
+      "operation_id": "listOwnAmoeSubmissions",
+      "authorization": "PARTICIPANT_SELF",
+      "requires_step_up": false,
+      "tags": ["amoe"],
+      "summary": "Envios AMOE del propio participante."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/account/award-holds",
+      "operation_id": "listAwardHolds",
+      "authorization": "entry.self.read",
+      "requires_step_up": false,
+      "tags": ["portal"],
+      "summary": "Concesiones retenidas del propio participante."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/account/entry-numbers",
+      "operation_id": "listEntryNumbers",
+      "authorization": "entry.self.read",
+      "requires_step_up": false,
+      "tags": ["portal"],
+      "summary": "Rangos de numeros asignados al participante (\"mis numeros\")."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/account/entry-summary",
+      "operation_id": "getEntrySummary",
+      "authorization": "entry.self.read",
+      "requires_step_up": false,
+      "tags": ["portal"],
+      "summary": "Saldo de participaciones del participante, con su procedencia."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/account/entry-transactions",
+      "operation_id": "listEntryTransactions",
+      "authorization": "entry.self.read",
+      "requires_step_up": false,
+      "tags": ["portal"],
+      "summary": "Historial del ledger del propio participante, correcciones incluidas."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/account/orders",
+      "operation_id": "listAccountOrders",
+      "authorization": "order.self.read",
+      "requires_step_up": false,
+      "tags": ["portal"],
+      "summary": "Pedidos del propio participante."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/account/orders/:order_id",
+      "operation_id": "getAccountOrder",
+      "authorization": "order.self.read",
+      "requires_step_up": false,
+      "tags": ["portal"],
+      "summary": "Detalle de un pedido, con la traza del calculo de entries."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/amoe-submissions",
+      "operation_id": "listAmoeReviewQueue",
+      "authorization": "amoe.review.read",
+      "requires_step_up": false,
+      "tags": ["admin"],
+      "summary": "Cola de revision de envios AMOE, filtrable por estado."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/amoe-submissions",
+      "operation_id": "transcribeAmoeSubmission",
+      "authorization": "amoe.submission.transcribe",
+      "requires_step_up": false,
+      "tags": ["admin"],
+      "summary": "Transcribir una ficha AMOE recibida por correo."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/amoe-submissions/:submission_id/approve",
+      "operation_id": "approveAmoeSubmission",
+      "authorization": "amoe.review.approve",
+      "requires_step_up": false,
+      "tags": ["admin"],
+      "summary": "Aprobar un envio AMOE y generar sus participaciones."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/amoe-submissions/:submission_id/reject",
+      "operation_id": "rejectAmoeSubmission",
+      "authorization": "amoe.review.reject",
+      "requires_step_up": false,
+      "tags": ["admin"],
+      "summary": "Rechazar un envio AMOE, con motivo obligatorio."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/audit-events",
+      "operation_id": "listAdminAuditEvents",
+      "authorization": "audit.read",
+      "requires_step_up": false,
+      "tags": ["admin"],
+      "summary": "Traza de auditoria, la mas reciente primero."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/brand",
+      "operation_id": "getAdminBrand",
+      "authorization": "brand.read",
+      "requires_step_up": false,
+      "tags": ["admin"],
+      "summary": "La marca del sitio tal como esta guardada."
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/admin/brand",
+      "operation_id": "updateAdminBrand",
+      "authorization": "brand.update",
+      "requires_step_up": false,
+      "tags": ["admin"],
+      "summary": "Guardar la marca del sitio. Se aplica en el acto en la web publica."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/dashboard",
+      "operation_id": "getAdminDashboard",
+      "authorization": "dashboard.read",
+      "requires_step_up": false,
+      "tags": ["admin"],
+      "summary": "Agregados de cabecera del panel."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/draws",
+      "operation_id": "listDrawingEvents",
+      "authorization": "draw.result.read",
+      "requires_step_up": false,
+      "tags": ["draw"],
+      "summary": "Sorteos ejecutados de una promocion, en orden de cadena."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/draws",
+      "operation_id": "initiateDraw",
+      "authorization": "draw.initiate",
+      "requires_step_up": true,
+      "tags": ["draw"],
+      "summary": "Iniciar un sorteo interno."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/entry-adjustments",
+      "operation_id": "listPendingAdjustments",
+      "authorization": "entry.ledger.read",
+      "requires_step_up": false,
+      "tags": ["admin"],
+      "summary": "Ajustes pendientes de aprobacion."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/entry-adjustments",
+      "operation_id": "createEntryAdjustment",
+      "authorization": "entry.adjust.create",
+      "requires_step_up": true,
+      "tags": ["admin"],
+      "summary": "Solicitar un ajuste manual de participaciones."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/entry-adjustments/:adjustment_id/approve",
+      "operation_id": "approveEntryAdjustment",
+      "authorization": "entry.adjust.approve",
+      "requires_step_up": true,
+      "tags": ["admin"],
+      "summary": "Aprobar un ajuste y aplicarlo al ledger, con motivo."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/entry-adjustments/:adjustment_id/reject",
+      "operation_id": "rejectEntryAdjustment",
+      "authorization": "entry.adjust.approve",
+      "requires_step_up": true,
+      "tags": ["admin"],
+      "summary": "Rechazar un ajuste pendiente, con motivo."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/entry-adjustments/preview",
+      "operation_id": "previewEntryAdjustment",
+      "authorization": "entry.adjust.create",
+      "requires_step_up": true,
+      "tags": ["admin"],
+      "summary": "Que pasaria si se pidiera este ajuste. No escribe nada."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/export-snapshots/:snapshot_id",
+      "operation_id": "getExportSnapshot",
+      "authorization": "export.snapshot.read",
+      "requires_step_up": false,
+      "tags": ["export"],
+      "summary": "Manifiesto de un snapshot."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/export-snapshots/:snapshot_id/deliver",
+      "operation_id": "deliverExportSnapshot",
+      "authorization": "export.deliver",
+      "requires_step_up": true,
+      "tags": ["export"],
+      "summary": "Registrar la entrega de un snapshot al administrador externo."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/export-snapshots/:snapshot_id/download",
+      "operation_id": "downloadExportSnapshot",
+      "authorization": "export.download",
+      "requires_step_up": true,
+      "tags": ["export"],
+      "summary": "Descargar el artefacto de un snapshot finalizado."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/export-snapshots/:snapshot_id/finalize",
+      "operation_id": "finalizeExportSnapshot",
+      "authorization": "export.finalize",
+      "requires_step_up": true,
+      "tags": ["export"],
+      "summary": "Finalizar un snapshot y fijar su evidencia."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/export-snapshots/:snapshot_id/results",
+      "operation_id": "ingestExportResults",
+      "authorization": "winner.status.update",
+      "requires_step_up": true,
+      "tags": ["export"],
+      "summary": "Registrar los ganadores que comunica el administrador externo."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/export-snapshots/:snapshot_id/validate",
+      "operation_id": "validateExportSnapshot",
+      "authorization": "export.snapshot.validate",
+      "requires_step_up": false,
+      "tags": ["export"],
+      "summary": "Reconciliar un snapshot antes de finalizarlo."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/feature-flags",
+      "operation_id": "listFeatureFlags",
+      "authorization": "flag.read",
+      "requires_step_up": false,
+      "tags": ["admin"],
+      "summary": "Los feature flags con su postura de arranque y su dependencia legal."
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/admin/feature-flags/:key",
+      "operation_id": "updateFeatureFlag",
+      "authorization": "flag.update",
+      "requires_step_up": false,
+      "tags": ["admin"],
+      "summary": "Cambiar un flag NO legalmente material, con motivo."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/media",
+      "operation_id": "uploadAdminMedia",
+      "authorization": "product.write",
+      "requires_step_up": false,
+      "tags": ["admin"],
+      "summary": "Subir una imagen de catalogo. Devuelve la ruta que va en `image_url`."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/orders",
+      "operation_id": "listAdminOrders",
+      "authorization": "order.read",
+      "requires_step_up": false,
+      "tags": ["admin"],
+      "summary": "Pedidos de cualquier participante."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/orders/:order_id",
+      "operation_id": "getAdminOrder",
+      "authorization": "order.read",
+      "requires_step_up": false,
+      "tags": ["admin"],
+      "summary": "Ficha de un pedido, con su traza de calculo de participaciones."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/orders/:order_id/cancel",
+      "operation_id": "cancelAdminOrder",
+      "authorization": "order.cancel",
+      "requires_step_up": false,
+      "tags": ["admin"],
+      "summary": "Cancelar un pedido que nunca se cobro."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/orders/:order_id/cash-payment",
+      "operation_id": "getAdminOrderCashPayment",
+      "authorization": "order.read",
+      "requires_step_up": false,
+      "tags": ["admin"],
+      "summary": "Estado del cobro en efectivo de un pedido."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/orders/:order_id/cash-payment/confirm",
+      "operation_id": "confirmAdminOrderCashPayment",
+      "authorization": "order.cash.confirm",
+      "requires_step_up": false,
+      "tags": ["admin"],
+      "summary": "Confirmar que se recibio el pago en efectivo y generar las participaciones."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/orders/:order_id/cash-payment/entries",
+      "operation_id": "generateAdminOrderCashEntries",
+      "authorization": "order.cash.confirm",
+      "requires_step_up": false,
+      "tags": ["admin"],
+      "summary": "Reintentar la generacion de participaciones de un cobro en efectivo ya confirmado."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/orders/:order_id/fulfillment",
+      "operation_id": "setAdminOrderFulfillment",
+      "authorization": "order.fulfillment.update",
+      "requires_step_up": false,
+      "tags": ["admin"],
+      "summary": "Marcar la mercancia de un pedido como enviada, o devolverla a pendiente."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/orders/:order_id/refund",
+      "operation_id": "initiateOrderRefund",
+      "authorization": "order.refund.initiate",
+      "requires_step_up": true,
+      "tags": ["admin"],
+      "summary": "Devolver un pedido desde administracion."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/participants",
+      "operation_id": "listAdminParticipants",
+      "authorization": "participant.list",
+      "requires_step_up": false,
+      "tags": ["admin"],
+      "summary": "Participantes, con el PII enmascarado."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/participants/:participant_id",
+      "operation_id": "getAdminParticipant",
+      "authorization": "participant.read",
+      "requires_step_up": false,
+      "tags": ["admin"],
+      "summary": "Ficha de un participante, con el PII enmascarado."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/participants/:participant_id/disqualify",
+      "operation_id": "disqualifyParticipant",
+      "authorization": "participant.disqualify",
+      "requires_step_up": true,
+      "tags": ["admin"],
+      "summary": "Descalificar a un participante en una promocion."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/participants/:participant_id/password",
+      "operation_id": "setAdminParticipantPassword",
+      "authorization": "participant.password.reset",
+      "requires_step_up": false,
+      "tags": ["admin"],
+      "summary": "Fijar una contrasena nueva a un participante."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/participants/:participant_id/pii",
+      "operation_id": "getAdminParticipantPii",
+      "authorization": "pii.view.full",
+      "requires_step_up": true,
+      "tags": ["admin"],
+      "summary": "Datos personales completos de un participante."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/payment-webhooks",
+      "operation_id": "listPaymentWebhooks",
+      "authorization": "payment.webhook.read",
+      "requires_step_up": false,
+      "tags": ["admin"],
+      "summary": "Cola de eventos de pago sin procesar."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/payment-webhooks/:event_id/replay",
+      "operation_id": "replayPaymentWebhook",
+      "authorization": "payment.webhook.replay",
+      "requires_step_up": true,
+      "tags": ["admin"],
+      "summary": "Marcar un evento fallido para reproceso."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/potential-winners/:potential_winner_id/status",
+      "operation_id": "updatePotentialWinnerStatus",
+      "authorization": "winner.status.update",
+      "requires_step_up": true,
+      "tags": ["draw"],
+      "summary": "Mover el expediente de un ganador potencial."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/product-categories",
+      "operation_id": "listAdminProductCategories",
+      "authorization": "product.read",
+      "requires_step_up": false,
+      "tags": ["admin"],
+      "summary": "Categorias del catalogo, incluidas las que no tienen productos."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/product-categories",
+      "operation_id": "createAdminProductCategory",
+      "authorization": "product.write",
+      "requires_step_up": false,
+      "tags": ["admin"],
+      "summary": "Crear una categoria del catalogo."
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/admin/product-categories/:category_key",
+      "operation_id": "updateAdminProductCategory",
+      "authorization": "product.write",
+      "requires_step_up": false,
+      "tags": ["admin"],
+      "summary": "Renombrar una categoria o cambiar su orden."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/products",
+      "operation_id": "listAdminProducts",
+      "authorization": "product.read",
+      "requires_step_up": false,
+      "tags": ["admin"],
+      "summary": "Catalogo completo para el panel, borradores incluidos."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/products",
+      "operation_id": "createAdminProduct",
+      "authorization": "product.write",
+      "requires_step_up": false,
+      "tags": ["admin"],
+      "summary": "Dar de alta mercancia. Nace en DRAFT."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/products/:product_id",
+      "operation_id": "getAdminProduct",
+      "authorization": "product.read",
+      "requires_step_up": false,
+      "tags": ["admin"],
+      "summary": "Un producto del catalogo, en cualquier estado."
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/admin/products/:product_id",
+      "operation_id": "updateAdminProduct",
+      "authorization": "product.write",
+      "requires_step_up": false,
+      "tags": ["admin"],
+      "summary": "Editar nombre, precio o existencias."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/products/:product_id/publish",
+      "operation_id": "publishAdminProduct",
+      "authorization": "product.publish",
+      "requires_step_up": false,
+      "tags": ["admin"],
+      "summary": "Publicar o archivar un producto."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/products/:product_id/variants",
+      "operation_id": "listAdminProductVariants",
+      "authorization": "product.read",
+      "requires_step_up": false,
+      "tags": ["admin"],
+      "summary": "Variantes de un producto, archivadas incluidas."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/products/:product_id/variants",
+      "operation_id": "createAdminProductVariant",
+      "authorization": "product.write",
+      "requires_step_up": false,
+      "tags": ["admin"],
+      "summary": "Anadir una variante. Nace en DRAFT."
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/admin/products/:product_id/variants/:variant_id",
+      "operation_id": "updateAdminProductVariant",
+      "authorization": "product.write",
+      "requires_step_up": false,
+      "tags": ["admin"],
+      "summary": "Editar una variante, o archivarla."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/promotions",
+      "operation_id": "listAdminPromotions",
+      "authorization": "promotion.read",
+      "requires_step_up": false,
+      "tags": ["admin"],
+      "summary": "Promociones para el panel, borradores incluidos."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/promotions",
+      "operation_id": "createAdminPromotion",
+      "authorization": "promotion.create",
+      "requires_step_up": false,
+      "tags": ["admin"],
+      "summary": "Crear una promocion. Nace en DRAFT."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/promotions/:promotion_id",
+      "operation_id": "getAdminPromotion",
+      "authorization": "promotion.read",
+      "requires_step_up": false,
+      "tags": ["admin"],
+      "summary": "Una promocion, en cualquier estado."
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/admin/promotions/:promotion_id",
+      "operation_id": "updateAdminPromotion",
+      "authorization": "promotion.update",
+      "requires_step_up": false,
+      "tags": ["admin"],
+      "summary": "Editar nombre, ventana, lema y foto del premio de una promocion."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/promotions/:promotion_id/activate",
+      "operation_id": "activateAdminPromotion",
+      "authorization": "promotion.activate",
+      "requires_step_up": true,
+      "tags": ["admin"],
+      "summary": "Activar una promocion. Exige motivo y segundo factor reciente."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/promotions/:promotion_id/bonus-periods",
+      "operation_id": "createBonusPeriod",
+      "authorization": "rules.version.activate",
+      "requires_step_up": true,
+      "tags": ["admin"],
+      "summary": "Atajo: clonar la version activa, anadir un periodo bonus y activarla."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/promotions/:promotion_id/bonus-periods/:period_id/extend",
+      "operation_id": "extendBonusPeriod",
+      "authorization": "rules.version.activate",
+      "requires_step_up": true,
+      "tags": ["admin"],
+      "summary": "Atajo: alargar el fin de un periodo bonus vigente o anunciado (DEC-084)."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/promotions/:promotion_id/close",
+      "operation_id": "closeAdminPromotion",
+      "authorization": "promotion.close",
+      "requires_step_up": true,
+      "tags": ["admin"],
+      "summary": "Cerrar una promocion. Exige motivo y segundo factor reciente."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/promotions/:promotion_id/draw-authorizations",
+      "operation_id": "listDrawAuthorizations",
+      "authorization": "draw.result.read",
+      "requires_step_up": false,
+      "tags": ["draw"],
+      "summary": "Autorizaciones documentales de sorteo de una promocion."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/promotions/:promotion_id/draw-authorizations",
+      "operation_id": "createDrawAuthorization",
+      "authorization": "draw.authorization.create",
+      "requires_step_up": true,
+      "tags": ["draw"],
+      "summary": "Registrar una autorizacion documental de sorteo."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/promotions/:promotion_id/draw-authorizations/:authorization_id/revoke",
+      "operation_id": "revokeDrawAuthorization",
+      "authorization": "draw.authorization.create",
+      "requires_step_up": true,
+      "tags": ["draw"],
+      "summary": "Revocar una autorizacion de sorteo, con motivo."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/promotions/:promotion_id/export-snapshots",
+      "operation_id": "listExportSnapshots",
+      "authorization": "export.snapshot.read",
+      "requires_step_up": false,
+      "tags": ["export"],
+      "summary": "Snapshots de una promocion, del mas reciente al mas antiguo."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/promotions/:promotion_id/export-snapshots",
+      "operation_id": "createExportSnapshot",
+      "authorization": "export.snapshot.create",
+      "requires_step_up": false,
+      "tags": ["export"],
+      "summary": "Crear un snapshot de exportacion sobre un corte."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/promotions/:promotion_id/potential-winners",
+      "operation_id": "listPotentialWinners",
+      "authorization": "winner.workflow.read",
+      "requires_step_up": false,
+      "tags": ["draw"],
+      "summary": "Expedientes de ganador potencial de una promocion."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/promotions/:promotion_id/rules-versions",
+      "operation_id": "listRulesVersions",
+      "authorization": "rules.version.read",
+      "requires_step_up": false,
+      "tags": ["admin"],
+      "summary": "Versiones de reglas de una promocion, de la mas reciente a la mas antigua."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/promotions/:promotion_id/rules-versions",
+      "operation_id": "createRulesVersion",
+      "authorization": "rules.version.create",
+      "requires_step_up": false,
+      "tags": ["admin"],
+      "summary": "Crear un borrador de version de reglas, vacio o clonado."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/promotions/:promotion_id/rules-versions/:rules_version_id",
+      "operation_id": "getRulesVersion",
+      "authorization": "rules.version.read",
+      "requires_step_up": false,
+      "tags": ["admin"],
+      "summary": "Una version de reglas con su configuracion y sus documentos."
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/admin/promotions/:promotion_id/rules-versions/:rules_version_id",
+      "operation_id": "updateRulesVersion",
+      "authorization": "rules.version.create",
+      "requires_step_up": false,
+      "tags": ["admin"],
+      "summary": "Editar un borrador de version de reglas."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/promotions/:promotion_id/rules-versions/:rules_version_id/activate",
+      "operation_id": "activateRulesVersion",
+      "authorization": "rules.version.activate",
+      "requires_step_up": true,
+      "tags": ["admin"],
+      "summary": "Activar una version de reglas. Archiva la anterior."
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/admin/promotions/:promotion_id/rules-versions/:rules_version_id/documents/:locale",
+      "operation_id": "putRulesVersionDocument",
+      "authorization": "rules.version.create",
+      "requires_step_up": false,
+      "tags": ["admin"],
+      "summary": "Redactar el texto legal de una version en un idioma."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/promotions/:promotion_id/schedule",
+      "operation_id": "scheduleAdminPromotion",
+      "authorization": "promotion.update",
+      "requires_step_up": false,
+      "tags": ["admin"],
+      "summary": "Programar una promocion: DRAFT -> SCHEDULED."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/promotions/:promotion_id/unschedule",
+      "operation_id": "unscheduleAdminPromotion",
+      "authorization": "promotion.update",
+      "requires_step_up": false,
+      "tags": ["admin"],
+      "summary": "Retirar una promocion programada: SCHEDULED -> DRAFT."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/reports/daily-cut",
+      "operation_id": "getAdminDailyCut",
+      "authorization": "order.read",
+      "requires_step_up": false,
+      "tags": ["admin"],
+      "summary": "Corte de caja de un dia, en la hora del punto de venta."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/settings/change-requests",
+      "operation_id": "listSettingChangeRequests",
+      "authorization": "flag.read",
+      "requires_step_up": false,
+      "tags": ["admin"],
+      "summary": "Solicitudes de cambio de ajustes, filtrables por estado."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/settings/change-requests",
+      "operation_id": "createSettingChangeRequest",
+      "authorization": "flag.update.legally_material",
+      "requires_step_up": true,
+      "tags": ["admin"],
+      "summary": "Cambiar un ajuste legalmente material, con motivo."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/settings/change-requests/:change_request_id/approve",
+      "operation_id": "approveSettingChangeRequest",
+      "authorization": "flag.update.legally_material",
+      "requires_step_up": true,
+      "tags": ["admin"],
+      "summary": "Aprobar una solicitud de cambio y aplicarla."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/admin/settings/change-requests/:change_request_id/reject",
+      "operation_id": "rejectSettingChangeRequest",
+      "authorization": "flag.update.legally_material",
+      "requires_step_up": true,
+      "tags": ["admin"],
+      "summary": "Rechazar una solicitud de cambio, con motivo."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/shipping-rate",
+      "operation_id": "getAdminShippingRate",
+      "authorization": "product.read",
+      "requires_step_up": false,
+      "tags": ["admin"],
+      "summary": "Tarifa fija de envio vigente y su historico."
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/admin/shipping-rate",
+      "operation_id": "setAdminShippingRate",
+      "authorization": "product.write",
+      "requires_step_up": false,
+      "tags": ["admin"],
+      "summary": "Poner la tarifa fija de envio. Nunca cero."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/auth/login",
+      "operation_id": "login",
+      "authorization": "PUBLIC",
+      "requires_step_up": false,
+      "tags": ["auth"],
+      "summary": "Iniciar sesion con correo y contrasena."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/auth/logout",
+      "operation_id": "logout",
+      "authorization": "PUBLIC",
+      "requires_step_up": false,
+      "tags": ["auth"],
+      "summary": "Cerrar la sesion actual."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/auth/password",
+      "operation_id": "changeOwnPassword",
+      "authorization": "PUBLIC",
+      "requires_step_up": false,
+      "tags": ["auth"],
+      "summary": "Cambiar la contrasena propia."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/auth/register",
+      "operation_id": "register",
+      "authorization": "PUBLIC",
+      "requires_step_up": false,
+      "tags": ["auth"],
+      "summary": "Alta de participante con correo y contrasena."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/auth/session",
+      "operation_id": "getSession",
+      "authorization": "PUBLIC",
+      "requires_step_up": false,
+      "tags": ["auth"],
+      "summary": "Estado de la sesion actual."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/cart",
+      "operation_id": "getCart",
+      "authorization": "PUBLIC",
+      "requires_step_up": false,
+      "tags": ["cart"],
+      "summary": "Carrito vigente de quien pregunta, con envio, total y cotizacion de entries."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/cart/entry-quote",
+      "operation_id": "getCartEntryQuote",
+      "authorization": "PUBLIC",
+      "requires_step_up": false,
+      "tags": ["cart"],
+      "summary": "Cotizacion de entries del carrito de servidor, con desglose auditable."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/cart/items",
+      "operation_id": "addCartItem",
+      "authorization": "PUBLIC",
+      "requires_step_up": false,
+      "tags": ["cart"],
+      "summary": "Anadir una variante al carrito."
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/cart/items/:item_id",
+      "operation_id": "removeCartItem",
+      "authorization": "PUBLIC",
+      "requires_step_up": false,
+      "tags": ["cart"],
+      "summary": "Quitar una linea del carrito."
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/cart/items/:item_id",
+      "operation_id": "updateCartItem",
+      "authorization": "PUBLIC",
+      "requires_step_up": false,
+      "tags": ["cart"],
+      "summary": "Cambiar la cantidad de una linea."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/checkout/cash-order",
+      "operation_id": "createCashOrder",
+      "authorization": "PARTICIPANT_SELF",
+      "requires_step_up": false,
+      "tags": ["commerce"],
+      "summary": "Pedido para pagar en efectivo en un punto de venta fisico."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/checkout/session",
+      "operation_id": "createCheckoutSession",
+      "authorization": "PARTICIPANT_SELF",
+      "requires_step_up": false,
+      "tags": ["commerce"],
+      "summary": "Abrir una sesion de pago sobre el carrito de servidor."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/checkout/sessions/:order_draft_id",
+      "operation_id": "getCheckoutSession",
+      "authorization": "PARTICIPANT_SELF",
+      "requires_step_up": false,
+      "tags": ["commerce"],
+      "summary": "Estado de una sesion de pago."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/config",
+      "operation_id": "getPublicConfig",
+      "authorization": "PUBLIC",
+      "requires_step_up": false,
+      "tags": ["config"],
+      "summary": "Feature flags legalmente materiales, modalidad AMOE vigente y marca del sitio."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/health",
+      "operation_id": "getHealth",
+      "authorization": "PUBLIC",
+      "requires_step_up": false,
+      "tags": ["meta"],
+      "summary": "Liveness probe."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/health/ready",
+      "operation_id": "getReadiness",
+      "authorization": "PUBLIC",
+      "requires_step_up": false,
+      "tags": ["meta"],
+      "summary": "Readiness probe."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/me",
+      "operation_id": "getParticipantProfile",
+      "authorization": "participant.self.read",
+      "requires_step_up": false,
+      "tags": ["portal"],
+      "summary": "Perfil del participante autenticado."
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/me",
+      "operation_id": "updateParticipantProfile",
+      "authorization": "participant.self.update",
+      "requires_step_up": false,
+      "tags": ["portal"],
+      "summary": "Cambiar nombre para mostrar e idioma preferido."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/me/eligibility",
+      "operation_id": "getParticipantEligibility",
+      "authorization": "participant.self.read",
+      "requires_step_up": false,
+      "tags": ["portal"],
+      "summary": "Si el participante ya declaro su fecha de nacimiento y su estado (DEC-067)."
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/me/eligibility",
+      "operation_id": "declareParticipantEligibility",
+      "authorization": "participant.self.update",
+      "requires_step_up": false,
+      "tags": ["portal"],
+      "summary": "Declarar fecha de nacimiento y estado en una cuenta anterior a DEC-067."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/media/:file",
+      "operation_id": "getMedia",
+      "authorization": "PUBLIC",
+      "requires_step_up": false,
+      "tags": ["products"],
+      "summary": "Los bytes de una imagen de catalogo."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/openapi.json",
+      "operation_id": "getOpenApiDocument",
+      "authorization": "PUBLIC",
+      "requires_step_up": false,
+      "tags": ["meta"],
+      "summary": "Documento OpenAPI 3.1 generado desde los esquemas Zod."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/product-categories",
+      "operation_id": "listProductCategories",
+      "authorization": "PUBLIC",
+      "requires_step_up": false,
+      "tags": ["products"],
+      "summary": "Categorias con al menos un producto a la venta."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/products",
+      "operation_id": "listProducts",
+      "authorization": "PUBLIC",
+      "requires_step_up": false,
+      "tags": ["products"],
+      "summary": "Catalogo de mercancia."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/products/:slug",
+      "operation_id": "getProductBySlug",
+      "authorization": "PUBLIC",
+      "requires_step_up": false,
+      "tags": ["products"],
+      "summary": "Ficha de producto con sus variantes."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/promotions",
+      "operation_id": "listPromotions",
+      "authorization": "PUBLIC",
+      "requires_step_up": false,
+      "tags": ["promotions"],
+      "summary": "Promociones visibles al publico."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/promotions/:promotion_id/amoe-submissions",
+      "operation_id": "submitAmoeEntry",
+      "authorization": "amoe.self.submit",
+      "requires_step_up": false,
+      "tags": ["amoe"],
+      "summary": "Enviar una participacion sin compra."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/promotions/:slug",
+      "operation_id": "getPromotionBySlug",
+      "authorization": "PUBLIC",
+      "requires_step_up": false,
+      "tags": ["promotions"],
+      "summary": "Detalle de una promocion."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/promotions/:slug/amoe-config",
+      "operation_id": "getAmoeConfig",
+      "authorization": "PUBLIC",
+      "requires_step_up": false,
+      "tags": ["amoe"],
+      "summary": "Modalidad AMOE vigente y lo que exige."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/promotions/:slug/official-rules",
+      "operation_id": "getPromotionOfficialRules",
+      "authorization": "PUBLIC",
+      "requires_step_up": false,
+      "tags": ["promotions"],
+      "summary": "Texto legalmente controlante de la version de reglas vigente."
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/promotions/active",
+      "operation_id": "getActivePromotion",
+      "authorization": "PUBLIC",
+      "requires_step_up": false,
+      "tags": ["promotions"],
+      "summary": "La promocion activa, para la portada."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/webhooks/payments/:provider",
+      "operation_id": "receivePaymentWebhook",
+      "authorization": "PUBLIC",
+      "requires_step_up": false,
+      "tags": ["commerce"],
+      "summary": "Recepcion de eventos del proveedor de pago."
+    }
+  ]
+}

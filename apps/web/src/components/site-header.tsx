@@ -1,0 +1,257 @@
+import { cn } from "@app/ui";
+import { getTranslations } from "next-intl/server";
+
+import type { Locale } from "@/i18n/locales";
+import { Link } from "@/i18n/navigation";
+import { loadBrand } from "@/lib/brand-server";
+import { loadSession } from "@/lib/participant-server";
+
+import { AccountGlyph, AccountMenu, type AccountDestination } from "./account-menu";
+import { BrandLockup } from "./brand-lockup";
+import { MobileNav, type NavDestination } from "./mobile-nav";
+
+/**
+ * Cabecera del sitio.
+ *
+ * Solo se enlaza lo que EXISTE. `Winners` y la cuenta del participante llegan
+ * en hitos posteriores y por eso no aparecen: un enlace a una pantalla que no
+ * existe es peor que no tener el enlace, y en un sitio donde una de las rutas
+ * son las Reglas Oficiales, un 404 en la barra de navegacion es un problema de
+ * confianza, no una molestia.
+ *
+ * El carrito NO lleva contador de articulos. Para pintarlo habria que pedir el
+ * carrito en CADA pagina del sitio -incluida la portada, que no lo necesita- y
+ * eso convertiria una lectura de sesion en parte del render de todas las
+ * pantallas publicas. El contador se anadira cuando exista una lectura barata
+ * que no obligue a ello.
+ *
+ * Las Reglas Oficiales estan en la navegacion principal a proposito. La ruta
+ * `/official-rules` resuelve sola la promocion vigente, de modo que el enlace
+ * funciona sin que la cabecera tenga que saber que promocion hay abierta.
+ *
+ * ---------------------------------------------------------------------------
+ * COMPOSICION (segunda pasada de DEC-038)
+ * ---------------------------------------------------------------------------
+ * Tres columnas y el LOGOTIPO EN EL CENTRO, como la referencia: navegacion a la
+ * izquierda -hamburguesa por debajo de `xl`-, marca centrada, acciones a la
+ * derecha. La rejilla es `1fr auto 1fr`, de modo que la marca queda centrada
+ * respecto del contenedor y no respecto del hueco que le dejen los lados; si
+ * dependiera del reparto natural, el logotipo se desplazaria cada vez que un
+ * enlace cambiara de longitud al cambiar de idioma.
+ *
+ * EL PUNTO DE RUPTURA ES `xl`, Y ESTA MEDIDO
+ * ------------------------------------------
+ * La tira de escritorio en espanol -"Tienda / Promociones / Reglas Oficiales /
+ * Preguntas frecuentes"- ronda los 550px. Con la marca centrada (~230px) y las
+ * dos acciones de la derecha (~260px) no cabe en los 960px utiles de una
+ * pantalla de 1024, y la cabecera se partiria en dos filas justo en las
+ * tabletas. Hasta 1280px manda el panel lateral, que es la misma navegacion
+ * completa y no una version recortada. Los tres `xl:` de este archivo y el de
+ * `mobile-nav.tsx` tienen que moverse juntos.
+ *
+ * UN DESTINO EN ORO
+ * -----------------
+ * `Promociones` es el equivalente de la entrada destacada de la referencia. Se
+ * destaca esa y no la tienda porque es la pantalla que explica el marco -que
+ * hay abierto, en que fase esta, donde estan las reglas-, y porque destacar la
+ * tienda empujaria a comprar, que es exactamente la jerarquia que este producto
+ * no debe tener.
+ *
+ * La cabecera sigue siendo fija, sobre negro semitransparente con desenfoque:
+ * al hacer scroll, el contenido pasa POR DEBAJO de la marca en vez de empujarla
+ * fuera. Desde DEC-082 la fija el contenedor del layout, junto con la banda
+ * roja de anuncio.
+ */
+export async function SiteHeader({ locale }: { readonly locale: Locale }) {
+  const t = await getTranslations();
+
+  /*
+   * LA CABECERA SI PIDE LA SESION, Y EL CARRITO SIGUE SIN PEDIR SU CONTADOR.
+   *
+   * No es incoherente. Un contador de articulos obliga a leer el carrito ENTERO
+   * -sus lineas y su cotizacion- en cada pagina del sitio, incluida la portada,
+   * y una cifra de participaciones recalculada en cada render es justo lo que
+   * DEC-023 saca del camino comun. Saber si hay sesion es una lectura pequena y
+   * de respuesta constante, y sin ella la cabecera tendria que ofrecer a la vez
+   * "iniciar sesion" y "mi cuenta", que es peor que la lectura.
+   *
+   * `loadSession` corta antes de salir a la red cuando el navegador no manda
+   * ninguna cookie, asi que un visitante que nunca ha entrado no genera ni una
+   * peticion de mas. Y pide la SESION y no el PERFIL: le basta el correo, que
+   * ya viene en `SessionState`, y el perfil es una lectura mas que solo el
+   * portal necesita.
+   *
+   * Una sesion que no esta `ACTIVE` cuenta como NO tener sesion en esta
+   * cabecera: ofrecer el menu de cuenta prometeria un acceso que el backend no
+   * da.
+   */
+  const { state } = await loadSession(locale);
+  // El logotipo subido desde el panel. Misma lectura que el layout: `loadBrand`
+  // la comparte dentro de la peticion.
+  const brand = await loadBrand();
+
+  const accountDestinations: readonly AccountDestination[] = [
+    { href: "/account", label: t("account.nav.overview") },
+    { href: "/account/entries", label: t("account.nav.entries") },
+    { href: "/account/orders", label: t("account.nav.orders") },
+    { href: "/account/profile", label: t("account.nav.profile") },
+  ];
+
+  /*
+   * La lista de destinos se declara UNA vez y la consumen las dos
+   * colocaciones: la tira de escritorio y el panel de telefono. Antes de que el
+   * logotipo pasara al centro, ambas eran el mismo `<nav>` movido con `order`;
+   * ahora son dos, y esta lista es lo que impide que discrepen.
+   */
+  const destinations: readonly NavDestination[] = [
+    { href: "/shop", label: t("nav.shop"), highlighted: false },
+    { href: "/promotions", label: t("nav.promotions"), highlighted: true },
+    { href: "/official-rules", label: t("nav.officialRules"), highlighted: false },
+    { href: "/faq", label: t("nav.faq"), highlighted: false },
+  ];
+
+  return (
+    <header
+      className={cn(
+        // Fija, pero no por si sola: la pega junto con la banda roja el
+        // contenedor de `app/[locale]/layout.tsx` (DEC-082).
+        "border-b border-border",
+        "bg-bg/90 supports-[backdrop-filter]:bg-bg/70 supports-[backdrop-filter]:backdrop-blur-md",
+      )}
+    >
+      {/* Filete dorado superior: un pixel, y es lo que separa la cabecera del
+          borde del navegador cuando la pagina esta arriba del todo. */}
+      <div aria-hidden="true" className="app-gold-rule" />
+
+      <div className="app-container grid grid-cols-[1fr_auto_1fr] items-center gap-2 py-3 sm:gap-4">
+        {/* --- Izquierda: navegacion --- */}
+        <div className="flex min-w-0 items-center justify-start">
+          <MobileNav
+            destinations={destinations}
+            menuLabel={t("nav.menu")}
+            closeLabel={t("nav.closeMenu")}
+            title={t("a11y.mobileNavigation")}
+          />
+
+          <nav aria-label={t("a11y.primaryNavigation")} className="hidden xl:block">
+            <ul className="flex items-center gap-1">
+              {destinations.map((destination) => (
+                <li key={destination.href}>
+                  <Link
+                    href={destination.href}
+                    className={cn(
+                      NAV_LINK,
+                      FOCUS,
+                      destination.highlighted
+                        ? "text-brand hover:bg-brand/12"
+                        : "text-text-muted hover:bg-brand/10 hover:text-brand",
+                    )}
+                  >
+                    {destination.label}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </nav>
+        </div>
+
+        {/* --- Centro: marca ---
+            Estrella y logotipo tambien en telefono (DEC-073). Antes el logotipo
+            se ocultaba por debajo de 640px porque no cabia junto al conmutador
+            de idioma, que hoy vive en la franja de arriba (DEC-081). */}
+        <Link href="/" className={cn("justify-self-center rounded-md", FOCUS)}>
+          <BrandLockup size="md" logoUrl={brand.logoUrl} />
+        </Link>
+
+        {/* --- Derecha: acciones --- */}
+        <div className="flex min-w-0 items-center justify-end gap-1 sm:gap-2">
+          {/* El idioma ya no esta aqui: vive en la franja de arriba del todo
+              (`LanguageBar`, DEC-081) en todas las anchuras. En 360px no cabia
+              en esta fila, y en escritorio serian dos conmutadores iguales uno
+              encima del otro. */}
+
+          {/*
+           * TRES ESTADOS Y NO DOS. Con sesion, el menu de cuenta; sin ella, un
+           * enlace a entrar. Y si la sesion NO SE HA PODIDO LEER, tambien el
+           * enlace a entrar: es lo unico que no miente, porque ofrecer "mi
+           * cuenta" a quien quiza no la tenga abierta acaba en una pantalla que
+           * le vuelve a pedir la contrasena sin explicar por que.
+           */}
+          {state.kind === "active" ? (
+            <AccountMenu
+              locale={locale}
+              label={t("account.menuLabel")}
+              closeLabel={t("nav.closeMenu")}
+              signOutLabel={t("auth.signOut")}
+              // DEC-060: una cuenta creada con celular no tiene correo.
+              accountName={
+                state.session.email === "" ? (state.session.phone ?? "") : state.session.email
+              }
+              destinations={accountDestinations}
+            />
+          ) : (
+            <Link href="/account/login" className={cn(ACCOUNT_LINK, FOCUS)}>
+              <AccountGlyph />
+              <span className="sr-only">{t("auth.login.title")}</span>
+            </Link>
+          )}
+
+          <Link href="/cart" className={cn(CART_LINK, FOCUS)}>
+            <CartIcon />
+            {/* El rotulo solo aparece cuando hay sitio. Por debajo de `sm` el
+                icono se queda solo y el nombre accesible lo aporta el texto
+                oculto, no un `aria-label`: asi sigue funcionando con control por
+                voz y con los traductores del navegador. */}
+            <span className="sr-only sm:not-sr-only">{t("nav.cart")}</span>
+          </Link>
+        </div>
+      </div>
+
+      {/* DEC-075: barra fina de lectura, de rojo a oro, que avanza con el
+          desplazamiento. Solo CSS (`animation-timeline`); donde el navegador no
+          lo soporta no aparece. Decorativa. */}
+      <div aria-hidden="true" className="app-scroll-progress" />
+    </header>
+  );
+}
+
+function CartIcon() {
+  return (
+    <svg
+      viewBox="0 0 20 20"
+      fill="none"
+      aria-hidden="true"
+      focusable="false"
+      className="h-5 w-5 shrink-0"
+    >
+      <path
+        d="M2.5 3h1.7l1.9 8.6a1.4 1.4 0 0 0 1.4 1.1h6.2a1.4 1.4 0 0 0 1.4-1.1L16.5 6H5.3"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <circle cx="8" cy="16" r="1.2" fill="currentColor" />
+      <circle cx="14" cy="16" r="1.2" fill="currentColor" />
+    </svg>
+  );
+}
+
+const NAV_LINK = cn(
+  "app-display inline-flex min-h-touch items-center whitespace-nowrap rounded-md px-3",
+  "text-body-sm font-medium transition-colors duration-fast ease-standard",
+);
+
+const ACCOUNT_LINK = cn(
+  "inline-flex min-h-touch min-w-touch items-center justify-center rounded-md",
+  "text-text transition-colors duration-fast ease-standard hover:text-brand",
+);
+
+const CART_LINK = cn(
+  "inline-flex min-h-touch min-w-touch items-center justify-center gap-2 rounded-md border border-brand/45 px-2 sm:px-3",
+  "app-display text-body-sm font-medium text-brand",
+  "transition-colors duration-fast ease-standard hover:border-brand hover:bg-brand/12",
+);
+
+const FOCUS =
+  "outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg";

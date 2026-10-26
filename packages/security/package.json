@@ -1,0 +1,32 @@
+{
+  "name": "@app/security",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Roles, capacidades, autorizacion deny-by-default y esquema de entorno de Plantilla Sorteos.",
+  "license": "UNLICENSED",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\""
+  },
+  "devDependencies": {
+    "@types/node": "^22.18.1",
+    "typescript": "^5.9.2"
+  },
+  "dependencies": {
+    "@node-rs/argon2": "^2.1.0",
+    "otpauth": "^9.5.1"
+  }
+}

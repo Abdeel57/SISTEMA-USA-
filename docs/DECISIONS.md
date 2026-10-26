@@ -1,0 +1,4360 @@
+# DECISIONS.md
+
+Registro de decisiones arquitectónicas (**ADR ligero**) de Plantilla Sorteos.
+
+**Todo cambio importante de arquitectura debe quedar registrado aquí.**
+
+## Reglas
+
+1. Una decisión no implementada previamente registrada aquí **no existe**.
+   Si un agente encuentra código que contradice este documento, abre un
+   handoff en lugar de adaptarse silenciosamente.
+2. Las decisiones **no se borran**. Una decisión que deja de aplicar cambia a
+   `Superseded` y apunta a la que la reemplaza.
+3. Las decisiones de stack (framework, ORM, base de datos, hosting, pagos,
+   email, storage, analytics, colas, nube) requieren **acuerdo de los tres
+   agentes** antes de pasar a `Accepted`.
+4. Las decisiones que afecten seguridad, auditabilidad, entries, AMOE o
+   integración con el third-party administrator requieren revisión explícita
+   del agente `security-integration`.
+5. Identificadores correlativos: `DEC-001`, `DEC-002`, … sin reutilizar.
+
+## Estados
+
+- `Proposed` — propuesta abierta, aún en discusión.
+- `Accepted` — vigente y vinculante.
+- `Rejected` — descartada, con motivo registrado.
+- `Superseded` — reemplazada por otra decisión (indicar cuál).
+
+---
+
+## Plantilla
+
+```text
+## DEC-000
+
+Status:
+Proposed / Accepted / Rejected / Superseded
+
+Date:
+
+Decision:
+
+Context:
+
+Alternatives:
+
+Reason:
+
+Affected areas:
+```
+
+Campos opcionales recomendados cuando apliquen:
+
+```text
+Proposed by:
+Agreed by:
+Supersedes / Superseded by:
+Legal dependency:
+```
+
+---
+
+# Registro de decisiones
+
+> **Estado de esta tanda (DEC-001 … DEC-021):** producto de la FASE 1
+> (planificación) del 2026-08-25, en la que los tres agentes propusieron de
+> forma independiente y sin verse entre sí. **Aprobadas por el usuario el
+> 2026-08-25**; todas pasan a `Accepted` y son vinculantes.
+>
+> `DEC-022`, `DEC-023` y `DEC-024` resuelven los conflictos que quedaron
+> abiertos como `HO-001`, `HO-002` y `HO-004`.
+
+---
+
+## DEC-001
+
+Status: Accepted
+
+Date: 2026-08-25
+
+Decision:
+Monorepo gestionado con **pnpm workspaces + Turborepo**, con la disposición de
+rutas ya prevista en `docs/TASK_OWNERSHIP.md` (`apps/web`, `apps/api`,
+`packages/*`).
+
+Context:
+Tres agentes con ownership estricto por rutas y necesidad real de compartir
+tipos de contrato entre frontend y backend.
+
+Alternatives:
+Repositorios separados (descartado: complica el reparto de ownership y el
+versionado del contrato compartido). npm/yarn workspaces (descartado: pnpm es
+más eficiente en disco con varias apps). Nx (descartado: sobrecoste para el
+tamaño actual).
+
+Reason:
+`docs/TASK_OWNERSHIP.md` ya anticipaba rutas de monorepo, así que la fricción
+de la decisión es baja. Turborepo aporta cache de tareas en CI.
+
+Affected areas: repositorio completo, CI, ownership.
+
+Proposed by: frontend, backend (coincidencia independiente)
+Agreed by: frontend, backend; security no objeta
+
+---
+
+## DEC-002
+
+Status: Accepted
+
+Date: 2026-08-25
+
+Decision:
+**TypeScript en modo `strict`** en todo el monorepo, con
+`noUncheckedIndexedAccess`, `exactOptionalPropertyTypes` y
+`noImplicitOverride`. `@typescript-eslint/no-explicit-any` como _error_.
+
+Context:
+Los contratos entre frontend y backend son tipados; un cambio de contrato debe
+fallar en build, no en producción.
+
+Alternatives:
+TypeScript sin `strict` (descartado). JavaScript (descartado).
+
+Reason:
+Es lo que convierte el principio #16 en algo que el compilador detecta.
+
+Affected areas: todo el código.
+
+Proposed by: los tres
+Agreed by: los tres
+
+---
+
+## DEC-003
+
+Status: Accepted
+
+Date: 2026-08-25
+
+Decision:
+**PostgreSQL 16+** como base de datos, con **tres roles de base de datos
+diferenciados**: `migrator` (DDL), `app` (DML, **sin `UPDATE`/`DELETE` sobre
+tablas de ledger y auditoría**) y `readonly_report`.
+
+Context:
+El ledger append-only, los rangos de entries sin solapamiento y la idempotencia
+de awards deben ser garantizados por el motor de base de datos, no por código
+de aplicación.
+
+Alternatives:
+Cualquier store schemaless (**objetado formalmente por `security`**: dejaría la
+inmutabilidad en manos del código, y un solo bug la anularía). MySQL
+(descartado: sin `EXCLUDE USING gist` sobre rangos).
+
+Reason:
+Se requieren transacciones serializables, `UNIQUE` compuestos, `CHECK`,
+`EXCLUDE USING gist` sobre `int8range`, triggers y GRANTs por rol. Es la
+precondición técnica de los principios #5, #6 y #7.
+
+Affected areas: `packages/database`, hosting, todo el dominio de entries.
+
+Proposed by: backend
+Agreed by: backend, security (requisitos no negociables R1 y R2 de security)
+
+Nota: **el proveedor concreto (Neon / RDS / Supabase / otro) sigue sin decidir.**
+Restricción vinculante: si el hosting no permite crear roles de base de datos
+diferenciados, ese hosting queda descartado.
+
+---
+
+## DEC-004
+
+Status: Accepted
+
+Date: 2026-08-25
+
+Decision:
+Dos procesos separados:
+
+- **`apps/web`** — Next.js (App Router) con `output: "standalone"`.
+- **`apps/api`** — **Fastify 5 standalone**. Las API routes de Next **no** se
+  usan para lógica de negocio.
+
+El frontend consume la API por HTTP. No se fusionan.
+
+Context:
+Los webhooks de pago exigen _raw body_ para verificar firma; los jobs largos y
+la generación de export snapshots no encajan en funciones serverless.
+
+Alternatives:
+Todo en Next API routes (**descartado explícitamente por backend**: rompe la
+verificación de firma de webhooks y da al frontend autoridad sobre reglas de
+negocio, violando la frontera de `docs/ARCHITECTURE.md`).
+
+Reason:
+Mantiene la frontera de responsabilidad del principio #15 como separación de
+procesos, no solo de carpetas. `standalone` evita dar por supuesto Vercel y
+mantiene abierta la decisión de hosting.
+
+Affected areas: `apps/web`, `apps/api`, despliegue.
+
+Proposed by: frontend (Next standalone), backend (Fastify separado)
+Agreed by: frontend, backend; security no objeta
+
+---
+
+## DEC-005
+
+Status: Accepted
+
+Date: 2026-08-25
+
+Decision:
+**Drizzle ORM** + `drizzle-kit`, con **migraciones SQL forward-only
+versionadas**. Sin `db push`. Sin migraciones destructivas sobre tablas de
+ledger o auditoría.
+
+Context:
+El esquema forma parte del expediente de auditoría y debe ser legible por un
+tercero.
+
+Alternatives:
+Prisma (mejor DX, pero abstrae precisamente lo que aquí es evidencia
+regulatoria: triggers, `CHECK`, `EXCLUDE`, `FOR UPDATE`, GRANTs). Si se
+prefiriera Prisma, habría que escribir a mano las constraints críticas en SQL.
+
+Reason:
+`security` exige poder inspeccionar las migraciones en CI y fallar si alguna
+concede `UPDATE`/`DELETE` sobre ledger o auditoría. Con migraciones SQL planas
+eso es verificable; con migraciones generadas y opacas, no.
+
+Affected areas: `packages/database`, quality gates, auditoría.
+
+Proposed by: backend
+Agreed by: backend; alineado con los requisitos R1/R2 de security
+
+---
+
+## DEC-006
+
+Status: Accepted
+
+Date: 2026-08-25
+
+Decision:
+**Un único sistema de identidad** para participantes y administradores.
+Sesiones de servidor **opacas y revocables** en cookie `httpOnly`, `Secure`,
+`SameSite=Lax` (`Strict` en el scope admin), respaldadas por tabla `Session`.
+**No** JWT auto-contenido, **no** tokens en `localStorage`.
+Hash de contraseña con **Argon2id**. **MFA/TOTP obligatorio para todo rol
+administrativo**. **Step-up authentication** (re-auth + MFA reciente, ventana
+menor o igual a 5 min) para descarga de export, finalización de snapshot,
+inicio de sorteo, cambio de rol, cambio de flag legalmente material y ajuste
+manual.
+
+Context:
+El patrón habitual (auth de participante con la librería del framework, más un
+login admin propio) viola el principio #16 y crea dos superficies de escalada
+de privilegios.
+
+Alternatives:
+JWT sin estado (descartado: no se revoca; añadir una denylist reintroduce el
+estado sin ninguna ventaja). Dos sistemas separados (**prohibido** por
+`CLAUDE.md`).
+
+Reason:
+Los tres agentes convergieron de forma independiente en la cookie `httpOnly`.
+El admin no es otra aplicación: es el mismo usuario con roles distintos, scope
+de cookie distinto y política de sesión más estricta.
+
+Affected areas: `packages/security`, `apps/api`, `apps/web`, todos los flujos.
+
+Proposed by: security (recomendación); frontend y backend (preferencia
+coincidente e independiente)
+Agreed by: los tres
+
+Nota: si en el futuro se propone SSO/IdP externo para staff, se implementa como
+_provider adicional dentro del mismo Identity_, nunca como sistema paralelo, y
+requiere un `DEC-xxx` propio.
+
+---
+
+## DEC-007
+
+Status: Accepted
+
+Date: 2026-08-25
+
+Decision:
+El **entry ledger es append-only de forma estructural**, garantizado en tres
+capas independientes:
+
+1. **Permisos de base de datos** — `REVOKE UPDATE, DELETE ON
+entry_transactions, audit_events FROM app;`
+2. **Triggers** `BEFORE UPDATE OR DELETE` que lanzan excepción.
+3. **Test de invariante en CI** que intenta activamente un `UPDATE` y un
+   `DELETE` y exige que fallen; más un check que inspecciona las migraciones y
+   falla si alguna concede `UPDATE`/`DELETE` sobre esas tablas.
+
+Toda corrección es una **fila nueva** con delta de signo contrario y
+`reverses_transaction_id` apuntando a la original. Sin soft-delete. Sin campo
+`status` mutable: un cambio de estado es otra fila.
+
+El saldo es un **agregado derivado** (`SUM(quantity_delta)`), expuesto como
+vista SQL única. Nunca un campo editable. Cualquier caché de saldo se escribe
+en la misma transacción y un job de reconciliación la recalcula contra el
+ledger y alerta ante cualquier deriva.
+
+Los reversals se anclan a `rules_version_id` y `engine_version` **originales**:
+un refund de hoy revierte lo que se calculó bajo las reglas de entonces, no
+bajo las de ahora.
+
+Context:
+Principios globales #5, #6 y #7. El atajo natural de cualquier ORM para un
+refund es `UPDATE` o `DELETE`, y sería una violación irreversible.
+
+Alternatives:
+Append-only por convención de código (descartado: un solo bug lo anula).
+Soft-delete (descartado: sigue siendo mutación).
+
+Reason:
+Convierte la auditabilidad en una garantía del motor, no en disciplina de los
+desarrolladores.
+
+Affected areas: `packages/database`, `packages/sweepstakes`, `packages/audit`,
+quality gates.
+
+Proposed by: backend y security (diseños independientes prácticamente idénticos)
+Agreed by: backend, security
+
+---
+
+## DEC-008
+
+Status: Accepted
+
+Date: 2026-08-25
+
+Decision:
+Cada `EntryTransaction` y cada `AuditEvent` incluye
+`hash = SHA256(canonical(payload) || prev_hash)`, **encadenado por promoción**,
+con `canonicalization_version` explícita. Un **job verificador** recorre la
+cadena periódicamente y emite alerta más un `AuditEvent` de tipo
+`INTEGRITY_CHECK`. El `chain_head_hash` de cada promoción se **sella
+diariamente en un almacén externo write-once**, fuera del alcance del rol `app`.
+
+Context:
+Sin anclaje externo, un atacante con acceso total a la base de datos podría
+recalcular toda la cadena y reescribir el pasado sin dejar rastro.
+
+Alternatives:
+Solo append-only sin hash chain (descartado: detecta el borrado, no la
+reescritura coherente). Hash chain sin sellado externo (insuficiente por la
+razón anterior).
+
+Reason:
+Es la diferencia entre _append-only_ y **tamper-evident**. Un tercero debe
+poder demostrar que el histórico no se reescribió.
+
+Affected areas: `packages/audit`, `packages/database`, infraestructura.
+
+Proposed by: security
+Agreed by: security; backend ya contemplaba puntos de emisión de `AuditEvent`
+compatibles
+
+---
+
+## DEC-009
+
+Status: Accepted
+
+Date: 2026-08-25
+
+Decision:
+**Idempotencia estructural**, garantizada por constraints y no por lógica:
+
+- `UNIQUE (promotion_id, source_type, source_ref)` sobre todo award de entries.
+- `UNIQUE (provider, provider_event_id)` sobre todo webhook, persistido
+  **antes** de procesarse.
+- Asignación de rangos de entries con `pg_advisory_xact_lock(promotion_id)` y
+  **constraint de exclusión GiST sobre `int8range`**, que hace matemáticamente
+  imposible el solapamiento.
+
+Un duplicado debe fallar como error de restricción de base de datos, nunca como
+un `if` en el código.
+
+Context:
+Un webhook reintentado por el proveedor de pago es el fallo con mayor coste
+reputacional posible: entries duplicadas en un sweepstakes.
+
+Alternatives:
+`if (alreadyAwarded)` en código (descartado: condición de carrera bajo doble
+clic o reintento concurrente).
+
+Reason:
+Backend y security identificaron este riesgo de forma independiente y con la
+misma mitigación.
+
+Affected areas: `packages/sweepstakes`, `packages/commerce`, `packages/database`.
+
+Proposed by: backend, security
+Agreed by: backend, security
+
+---
+
+## DEC-010
+
+Status: Accepted
+
+Date: 2026-08-25
+
+Decision:
+**Nunca coma flotante** para dinero ni para entries.
+
+- Dinero: enteros en unidad menor (`amount_minor`) más `currency` explícita.
+- Entries: enteros.
+- Multiplicadores: par numerador/denominador entero, nunca decimal.
+- Rangos de entries: `string` en el contrato de API (por ejemplo
+  `APP26-000450001`), nunca número.
+
+Context:
+Aritmética de coma flotante sobre dinero o entries produce discrepancias
+legalmente indefendibles.
+
+Alternatives:
+`float`/`number` (descartado en base de datos y en el contrato de API).
+
+Reason:
+Requisito R4 de security y reglas equivalentes en el rol de backend.
+
+Affected areas: base de datos, contrato de API, frontend.
+
+Proposed by: los tres
+Agreed by: los tres
+
+---
+
+## DEC-011
+
+Status: Accepted
+
+Date: 2026-08-25
+
+Decision:
+Todos los instantes se almacenan como `timestamptz` **en UTC**. Cada promoción
+declara su **timezone legal IANA explícita** (`promotion.legal_timezone`), y
+todos los deadlines se evalúan **en el servidor** contra esa zona. Prohibido
+usar la zona del navegador o la del servidor como fuente de verdad. Cada
+registro distingue `occurred_at` (cuándo ocurrió) de `recorded_at`
+(`DEFAULT now()` de la base de datos).
+
+Context:
+Un cierre de promoción evaluado en la zona equivocada admite o rechaza entries
+incorrectamente, con consecuencias legales directas.
+
+Alternatives:
+UTC sin zona legal declarada (descartado: no permite evaluar un deadline
+expresado en hora local en las Official Rules).
+
+Reason:
+Riesgo identificado por security, coincidente con la propuesta de backend.
+
+Affected areas: base de datos, `packages/sweepstakes`, frontend.
+
+Proposed by: backend, security
+Agreed by: backend, security
+
+---
+
+## DEC-012
+
+Status: Accepted
+
+Date: 2026-08-25
+
+Decision:
+La configuración legal vive en una entidad **`PromotionRulesVersion`
+inmutable** (`DRAFT` / `ACTIVE` / `ARCHIVED`), con activación auditada. **Cero
+constantes legales en código.** Cada `EntryTransaction` guarda el
+`rules_version_id` que la produjo. Una promoción `ACTIVE` **nunca** edita sus
+reglas: crea una versión nueva.
+
+**Una promoción no puede transicionar a `ACTIVE` mientras exista una clave
+requerida en estado provisional o `TBD`.** El validador de activación lo
+bloquea y devuelve la lista de claves faltantes.
+
+Context:
+Principios #2, #3 y #14. Los requisitos legales los fija el abogado del cliente
+y todavía están sin resolver.
+
+Alternatives:
+Constantes en código con un comentario "TODO: confirmar con legal" (descartado:
+es exactamente lo que prohíbe el principio #2).
+
+Reason:
+Convierte "pendiente del abogado" en un bloqueo verificable por máquina en vez
+de una nota que se olvida.
+
+Affected areas: `packages/sweepstakes`, `apps/api`, admin, frontend.
+
+Proposed by: backend, security
+Agreed by: backend, security
+
+---
+
+## DEC-013
+
+Status: Accepted
+
+Date: 2026-08-25
+
+Decision:
+Los **feature flags se persisten en base de datos**, **desactivados por
+defecto**, con cambio auditado y `reason` obligatorio. Prohibido leer flags
+legalmente materiales desde variables de entorno del frontend. Los flags se
+leen **en el servidor**, en la misma request que el render.
+
+Context:
+El principio #8 exige que la capacidad AMOE exista aunque esté apagada; el #11
+exige que el sorteo interno no pueda activarse sin autorización.
+
+Alternatives:
+Flags en variables de entorno (descartado por security: no auditable, y expone
+política legal al cliente).
+
+Reason:
+Un flag legalmente material es una decisión de negocio auditable, no una
+variable de despliegue.
+
+Affected areas: `apps/api`, `apps/web`, `packages/security`, admin.
+
+Proposed by: security
+Agreed by: security, backend; frontend lo requiere leído en servidor
+
+Nota: **la lista exacta y la convención de nombres siguen sin cerrar.** Ver
+`HO-003` en `docs/AGENT_HANDOFF.md`.
+
+---
+
+## DEC-014
+
+Status: Accepted
+
+Date: 2026-08-25
+
+Decision:
+El backend publica un **spec OpenAPI 3.1 generado desde los esquemas Zod**, y
+`packages/api-types` (tipos generados) es **propiedad de `backend`** como
+productor del contrato. El frontend consume mediante `openapi-typescript` y
+`openapi-fetch`.
+
+Context:
+El principio #16 y la regla "un agente no debe asumir una API que no esté
+documentada" dependían hasta ahora de la buena voluntad.
+
+Alternatives:
+Tipos mantenidos a mano en ambos lados (descartado: la deriva de contrato es
+cuestión de tiempo).
+
+Reason:
+Una sola definición Zod produce validación en runtime, tipos de TypeScript y el
+documento que alimenta `docs/API_CONTRACT.md`. Convierte la regla en algo que
+verifica el compilador.
+
+Affected areas: `apps/api`, `apps/web`, `packages/api-types`,
+`docs/API_CONTRACT.md`.
+
+Proposed by: frontend (petición), backend (oferta)
+Agreed by: frontend, backend
+
+---
+
+## DEC-015
+
+Status: Accepted
+
+Date: 2026-08-25
+
+Decision:
+`docs/API_CONTRACT.md` hace **obligatorio** el campo `Authorization:` con el
+nombre exacto del permiso requerido. Existe un **test de contrato** que compara
+el registro de rutas del backend contra el documento: si un endpoint existe en
+código y no en el contrato, o su permiso difiere, **CI falla**. Toda ruta
+declara su permiso en un registro central **deny-by-default**; una ruta sin
+permiso declarado **no arranca**.
+
+Context:
+Ocultar un botón en el frontend no es autorización, y el principio #16 no puede
+depender de que los agentes se acuerden de actualizar un documento.
+
+Alternatives:
+Revisión manual (descartado: no escala y no es verificable).
+
+Reason:
+Permite a `security` auditar sin editar código ajeno, respetando el ownership
+del principio #15.
+
+Affected areas: `apps/api`, `docs/API_CONTRACT.md`, CI, `tests/security`.
+
+Proposed by: security
+Agreed by: security
+
+---
+
+## DEC-016
+
+Status: Accepted
+
+Date: 2026-08-25
+
+Decision:
+El **`ExportSnapshot` es una función pura** de
+`(promotion_id, cutoff_at, rules_version_id, ledger_high_water_mark,
+export_schema_version, canonicalization_version)`. Regenerarlo en cualquier
+momento futuro debe producir **bytes idénticos**.
+
+Determinismo obligatorio: orden fijo de filas y columnas, UTF-8 sin BOM, saltos
+`LF`, formato numérico invariante de locale, fechas ISO-8601 UTC, y ningún
+`generated_at` dentro de las filas de datos (solo en el manifiesto).
+
+Integridad: **Merkle root** sobre el hash canónico de cada registro, SHA-256 del
+ZIP y de cada miembro, y firma criptográfica desprendida con clave **fuera del
+repositorio**. Almacenamiento write-once. Un export finalizado **jamás se
+sobrescribe**: una corrección es una versión nueva que referencia la anterior.
+
+Test en CI: doble generación sobre un fixture sembrado produce hashes
+idénticos; y la regeneración tras insertar filas posteriores al corte **no
+cambia** el snapshot.
+
+Context:
+Principio #10. Es la razón técnica por la que el ledger no puede admitir
+`UPDATE` (DEC-007).
+
+Alternatives:
+Export como resultado de una query del día (descartado: no reproducible, no
+auditable por un tercero).
+
+Reason:
+El Merkle root permite al TPA verificar un registro concreto sin recibir todo el
+fichero, y detecta reordenación.
+
+Affected areas: `packages/tpa`, `packages/audit`, `apps/api`, CI.
+
+Proposed by: security
+Agreed by: security; backend produce el dataset, security es propietario del
+formato, la firma y la entrega
+
+---
+
+## DEC-017
+
+Status: Accepted
+
+Date: 2026-08-25
+
+Decision:
+Un sorteo interno requiere **cinco cerrojos simultáneos**, todos necesarios:
+
+1. Flag `internal_draw_enabled = false` por defecto, persistido en base de
+   datos. Nunca `true` en migraciones semilla ni en `.env.example`. Test de
+   invariante que falla si el default es `true`.
+2. Entidad **`DrawAuthorization`** por promoción, con `authorized_by` y
+   `authorization_reference` al documento de aprobación. Sin autorización viva,
+   el endpoint devuelve 403 **aunque el flag esté activo**.
+3. **Separación de funciones**: quien finaliza el snapshot
+   (`COMPLIANCE_OFFICER`) **no puede** iniciar el sorteo (`DRAW_OFFICER`), y el
+   inicio exige segunda aprobación de un actor distinto dentro de un TTL, más
+   step-up auth.
+4. **Entrada inmutable verificada**: el sorteo opera solo sobre un
+   `ExportSnapshot` en estado `FINALIZED`, **recalculando su hash en el momento
+   del sorteo**. Nunca sobre una query en vivo.
+5. **CSPRNG** del sistema operativo con rechazo de muestreo. Prohibidos por
+   regla de lint `Math.random()`, PRNG sembrados y timestamps como entropía.
+
+El resultado es un **`PotentialWinner`**, nunca un ganador confirmado. Sin
+publicación automática.
+
+Context:
+Principio #11. El riesgo real es que el módulo se active simplemente porque
+existe.
+
+Alternatives:
+Solo un feature flag (descartado: insuficiente; un flag se cambia sin dejar
+constancia de autorización legal).
+
+Reason:
+La autorización del principio #11 debe ser un objeto de datos con referencia al
+documento que la respalda, no una variable booleana.
+
+Affected areas: `packages/security`, `packages/tpa`, `apps/api`, admin.
+
+Proposed by: security
+Agreed by: security; backend se compromete a no implementar selección aleatoria
+interna sin este `DEC` aprobado
+
+Nota adicional propuesta por security, **no vinculante**: esquema
+_commit-reveal_ (publicar `snapshot_hash` y `commitment = SHA256(server_seed)`
+antes del sorteo, y revelar `server_seed` después) para que un auditor externo
+compruebe que la semilla no se eligió a posteriori. Requiere decisión del
+cliente y de su abogado.
+
+---
+
+## DEC-018
+
+Status: Accepted
+
+Date: 2026-08-25
+
+Decision:
+Stack de calidad, **bloqueante en `main` desde el primer milestone**:
+`gitleaks` (secretos) con hook pre-commit; esquema de entorno validado en boot;
+`tsc --noEmit` strict; ESLint type-aware con `eslint-plugin-security` y reglas
+propias (prohibir `Math.random()` en `packages/security`, `packages/tpa` y
+`packages/sweepstakes`; prohibir SQL por concatenación; prohibir
+`dangerouslySetInnerHTML` sin sanitizar); `semgrep` o CodeQL; `osv-scanner` con
+Renovate; **Vitest** con **cobertura mínima del 90 % en `packages/audit`,
+ledger y export**, y 70 % global; **Testcontainers con PostgreSQL real**;
+test de invariantes de base de datos sobre las migraciones; **test de matriz de
+autorización** (rol x endpoint); **Playwright** con `@axe-core/playwright`; y
+test de reproducibilidad de snapshot.
+
+Context:
+Los tres agentes propusieron Vitest de forma independiente. Security aportó la
+lista completa de gates.
+
+Alternatives:
+Mocks o SQLite para los tests de ledger (**descartado explícitamente**: el
+comportamiento crítico, es decir concurrencia, unicidad de rangos y doble
+webhook, no es testeable así).
+
+Reason:
+Principio #12: seguridad y auditabilidad por encima de shortcuts.
+
+Affected areas: CI, todos los paquetes.
+
+Proposed by: security (lista completa); backend y frontend (Vitest,
+Testcontainers, Playwright)
+Agreed by: los tres
+
+---
+
+## DEC-019
+
+Status: Accepted
+
+Date: 2026-08-25
+
+Decision:
+**`docs/LEGAL_PENDING.md` es el único registro de decisiones legales
+pendientes.** El archivo `docs/LEGAL_CONFIG_PENDING.md` que menciona el prompt
+del agente `security-integration` **no se crea**. En ese punto concreto, el
+prompt del agente queda _superseded_ por `CLAUDE.md`.
+
+Context:
+El prompt de `security-integration` pide crear `docs/LEGAL_CONFIG_PENDING.md`,
+pero la constitución ya designa `docs/LEGAL_PENDING.md` para exactamente lo
+mismo.
+
+Alternatives:
+Crear ambos (**descartado**: sería el anti-patrón de "dos fuentes de verdad" que
+prohíbe `CLAUDE.md` y que el propio agente `security` tiene el deber de
+impedir).
+
+Reason:
+El propio agente de security detectó la contradicción entre su prompt y la
+constitución, y propuso resolverla a favor de la constitución.
+
+Affected areas: `docs/`.
+
+Proposed by: security
+Agreed by: security
+
+---
+
+## DEC-020
+
+Status: Accepted
+
+Date: 2026-08-25
+
+Decision:
+**Jobs y colas sobre `pg-boss`** (cola implementada sobre el mismo PostgreSQL),
+no sobre Redis/BullMQ.
+
+Context:
+Encolar un job y escribir en el ledger deben poder ocurrir dentro de la misma
+transacción.
+
+Alternatives:
+Redis con BullMQ (descartado por ahora: encolar no es atómico respecto a la
+transacción del ledger, lo que abre la puerta a entries duplicadas si la
+transacción hace rollback después de encolar). SQS (misma objeción).
+
+Reason:
+Si la transacción hace rollback, el job desaparece con ella. Si el volumen lo
+exigiera más adelante, se migra sin tocar la lógica de dominio.
+
+Affected areas: `apps/api`, `packages/database`.
+
+Proposed by: backend
+Agreed by: backend; sin objeción de security
+
+---
+
+## DEC-021
+
+Status: Accepted
+
+Date: 2026-08-25
+
+Decision:
+**i18n con `next-intl`.** Ambos idiomas llevan **prefijo de ruta** (`/en/...` y
+`/es/...`); **ningún locale por defecto sin prefijo**. Diccionarios en
+`messages/en-US.json` y `messages/es-US.json` con ICU MessageFormat.
+**Test de paridad de claves en CI**: el build falla si una clave existe en un
+locale y no en el otro, o si queda una cadena literal visible fuera del
+diccionario. Formateo de números, fechas y moneda con `Intl` según locale.
+
+Context:
+Principio #4: español e inglés son idiomas de primera clase.
+
+Alternatives:
+Locale por defecto sin prefijo (**descartado**: esconder un idioma lo convierte
+de facto en secundario). Páginas duplicadas a mano (descartado).
+
+Reason:
+El test de paridad convierte el principio #4 en algo mecánicamente verificable
+en vez de una intención declarada.
+
+Affected areas: `apps/web`, CI.
+
+Proposed by: frontend
+Agreed by: frontend; backend y security no objetan
+
+Nota: **la frontera del contenido dinámico localizado sigue abierta.** Ver
+`HO-001` en `docs/AGENT_HANDOFF.md`.
+
+---
+
+## DEC-022
+
+Status: Accepted
+
+Date: 2026-08-25
+
+Decision:
+**El backend envía códigos estables; el frontend es dueño del copy en ambos
+idiomas.**
+
+- El envelope de error es
+  `{ error: { code, message_key, details, request_id } }`. **Sin** `message_en`
+  ni `message_es`.
+- El ledger expone `reason_key` como **enum estable**, nunca prosa.
+- Todo texto visible al participante se resuelve desde `messages/en-US.json` y
+  `messages/es-US.json`.
+
+**Única excepción:** el contenido **legalmente controlante** (Official Rules,
+disclaimers y cualquier texto aprobado por el abogado) viaja desde el backend
+como objeto por locale, con los campos `is_legally_controlling` e
+`is_informational_translation`. El frontend **nunca** traduce ni autotraduce
+ese contenido: lo renderiza tal cual llega.
+
+Context:
+Resuelve `HO-001`. `frontend` pedía claves estables; `backend` se contradijo a
+sí mismo, definiendo el envelope con `message_en`/`message_es` en su sección de
+APIs y proponiendo lo contrario en su sección de riesgos.
+
+Alternatives:
+Backend traduce y envía ambos idiomas (descartado: el copy legal viviría en dos
+repositorios de texto distintos, y el test de paridad de claves de DEC-021 no
+podría verificarlo).
+
+Reason:
+Es la única opción compatible con el test que rompe el build cuando falta una
+traducción. La excepción legal existe porque la redacción aprobada por el
+abogado no es copy de producto: es texto controlado cuya fuente debe ser única.
+
+Affected areas: `docs/API_CONTRACT.md`, `apps/api`, `apps/web`, `messages/*`.
+
+Proposed by: Team Lead (consolidando frontend y backend)
+Agreed by: aprobado por el usuario el 2026-08-25
+
+---
+
+## DEC-023
+
+Status: Accepted
+
+Date: 2026-08-25
+
+Decision:
+**El carrito vive en el servidor.** Existen endpoints de carrito
+(`GET|POST|PATCH|DELETE /api/v1/cart*`) propiedad de `backend`. La cotización
+de entries se calcula **sobre el carrito de servidor**, no sobre una lista de
+ítems enviada por el cliente.
+
+Context:
+Resuelve `HO-002`. `frontend` pedía carrito de servidor; `backend` no ofreció
+ninguno, y su cotizador recibía los ítems en el cuerpo de la petición, lo que
+implicaba un carrito de cliente.
+
+Alternatives:
+Carrito en cliente (descartado: sería el cliente quien decide qué se cotiza, lo
+que roza el requisito R13 de `security` — "los números los produce el backend" —
+y no deja rastro de qué se cotizó ni cuándo).
+
+Reason:
+Un carrito de servidor cuesta más trabajo, pero hace que carrito y cotización
+compartan una única fuente de verdad y deja una traza auditable. En un producto
+donde una cifra de entries mal calculada es un problema legal, esa traza vale
+más que la simplicidad.
+
+Affected areas: `apps/api`, `apps/web`, `packages/commerce`,
+`docs/API_CONTRACT.md`.
+
+Proposed by: Team Lead (consolidando frontend y backend)
+Agreed by: aprobado por el usuario el 2026-08-25
+
+---
+
+## DEC-024
+
+Status: Accepted
+
+Date: 2026-08-25
+
+Decision:
+Ampliación de ownership, resolviendo `HO-004`:
+
+- **`security-integration`** pasa a ser propietario de `docs/SECURITY.md`,
+  `docs/THREAT_MODEL.md`, `docs/PRODUCTION_READINESS.md`, `docs/runbooks/**` y
+  de la configuración de CI (`.github/workflows/**`).
+- La **zona neutral raíz** del monorepo (`pnpm-workspace.yaml`, `turbo.json`,
+  `tsconfig.base.json`, configuración de ESLint y Prettier, `package.json`
+  raíz, `.env.example`) la crea **`backend-sweepstakes`**, en solitario y
+  **antes** de que ningún otro agente escriba código.
+
+Context:
+`docs/TASK_OWNERSHIP.md` dejaba sin propietario los documentos de seguridad, el
+CI y la configuración raíz. Los tres agentes los necesitan, y sin asignación
+explícita habrían acabado editándolos a la vez.
+
+Alternatives:
+Dejar la zona neutral a quien llegue primero (descartado: es exactamente el
+escenario de edición simultánea que prohíbe `CLAUDE.md` §4).
+
+Reason:
+`security` ya es el autor natural de los quality gates, así que el CI le
+pertenece. La raíz del monorepo la crea un solo agente para que exista una
+sola vez y de forma coherente; se elige `backend` porque es quien más depende
+de ella para arrancar.
+
+Affected areas: `docs/TASK_OWNERSHIP.md`, raíz del repositorio, CI.
+
+Proposed by: Team Lead (resolviendo HO-004)
+Agreed by: aprobado por el usuario el 2026-08-25
+
+---
+
+## DEC-025
+
+Status: Accepted
+
+Date: 2026-08-25
+
+Decision:
+**Node.js 24 LTS**, no Node 22. `engines.node` queda en `>=24.0.0 <25` y
+`.nvmrc` en `24.12.0`.
+
+Context:
+La propuesta original de `backend` en la FASE 1 decía "Node 22 LTS". Al crear
+la zona neutral raíz, el propio agente detectó dos problemas: la máquina de
+desarrollo corre **Node v24.12.0**, de modo que `pnpm install` habría fallado
+con `engine-strict`; y a fecha de hoy Node 22 ya está en mantenimiento mientras
+que **Node 24 es Active LTS**.
+
+Alternatives:
+Mantener Node 22 y forzar un cambio de versión con nvm en cada máquina
+(descartado: fricción diaria y una LTS en mantenimiento para un proyecto que
+empieza hoy).
+
+Reason:
+Fijar una versión que ni siquiera es la instalada habría bloqueado la
+instalación de dependencias en el primer paso. El agente lo reportó en vez de
+cambiarlo por su cuenta, que es exactamente el comportamiento correcto.
+
+Affected areas: `package.json`, `.nvmrc`, CI.
+
+Proposed by: backend (detectado durante la implementación)
+Agreed by: Team Lead; supersede el "Node 22 LTS" de la propuesta original
+
+---
+
+## DEC-026
+
+Status: Accepted
+
+Date: 2026-08-25
+
+Decision:
+Se añade **`.gitattributes`** en la raíz con `* text=auto eol=lf`, más reglas
+explícitas para los tipos que participan en hashes (`.sql`, `.json`, `.jsonl`,
+`.csv`), `eol=crlf` para scripts de Windows y `binary` para los formatos que
+nunca deben normalizarse. Propietario: **Team Lead**, junto a `.gitignore`.
+
+Además, el glob `tests/*` se añade a `pnpm-workspace.yaml`, para que
+`tests/security/**` —asignado a `security` en `docs/TASK_OWNERSHIP.md`— pueda
+tener su propio `package.json` y dependencias.
+
+Context:
+El desarrollo ocurre en Windows con `core.autocrlf = true` **verificado**. Sin
+`.gitattributes`, Git convierte los finales de línea a CRLF en el checkout.
+
+Alternatives:
+Confiar en `.editorconfig` y Prettier (descartado: solo aplican a quien tenga
+el plugin instalado, y no gobiernan lo que hace Git al hacer checkout).
+
+Reason:
+Un `ExportSnapshot` cuyo hash depende del sistema operativo del desarrollador
+**no es reproducible**, y por tanto no es auditable por el third-party
+administrator. Esto convertía DEC-016 en inaplicable en la práctica. Detectado
+por `backend` al crear la zona neutral.
+
+Affected areas: raíz del repositorio, `packages/tpa`, `packages/database`,
+`pnpm-workspace.yaml`, CI.
+
+Proposed by: backend (detectado durante la implementación)
+Agreed by: Team Lead
+
+---
+
+## DEC-027
+
+Status: Accepted
+
+Date: 2026-08-25
+
+Decision:
+**El catálogo canónico de roles y capacidades vive en `packages/security`.**
+`packages/database` lo importa para la semilla y mantiene un test de paridad.
+`apps/api` lo consume a través de `apps/api/src/http/permission-catalog.ts`.
+
+Se adoptan del catálogo de `security`: los 8 roles (incluidos **`EXPORT_OFFICER`**
+y el actor **`SYSTEM`**), la convención `dominio.recurso.accion`, y los
+metadatos de step-up, segunda aprobación, dependencia de flag y dependencia
+legal.
+
+Se conservan del diseño de `backend`, por ser aciertos que el otro catálogo no
+tenía: **`SUPER_ADMIN` excluido de `export.finalize`, `draw.authorize` y
+`draw.execute`**; el conflicto de roles impuesto por trigger de base de datos; y
+el renombrado de `COMPLIANCE_REVIEWER` a `COMPLIANCE_OFFICER` para alinear con
+DEC-017.
+
+Context:
+Resuelve `HO-007`. Trabajando en paralelo, `security` y `backend` crearon dos
+catálogos de autorización incompatibles: capacidades `entry.ledger.read` frente
+a `entry.read`, y solo dos roles coincidentes de ocho. Es el anti-patrón de dos
+fuentes de verdad que prohíbe `CLAUDE.md` §4.
+
+Alternatives:
+Que ganase el catálogo de `packages/database` (descartado: no puede representar
+la separación entre `export.finalize` y `export.download` que exige DEC-016, no
+tiene actor `SYSTEM` para distinguir un job de una persona en la auditoría, y
+carece de `requiresSecondApproval`).
+
+Reason:
+**Los dos agentes detectaron el conflicto por separado y los dos recomendaron
+la misma resolución**, sin haberse consultado. La regla 4 de este documento
+atribuye a `security-integration` la revisión de autorización, y `backend` ya
+había preparado el punto de indirección precisamente para que el cambio fuese
+barato.
+
+Affected areas: `packages/security`, `packages/database`, `apps/api`.
+
+Proposed by: security y backend (coincidencia independiente)
+Agreed by: Team Lead
+
+---
+
+## DEC-028
+
+Status: Accepted
+
+Date: 2026-08-25
+
+Decision:
+Se añade **`Identity`** al vocabulario canónico, como entidad intermedia:
+`participants` y `admin_users` cuelgan de `identities`.
+
+Sigue habiendo **un único sistema de identidad** (DEC-006). La diferencia es
+que un empleado que no participa **no tiene fila en `participants`**.
+
+Context:
+`backend` introdujo la tabla durante B0 y pidió decisión explícita antes de
+que existan datos.
+
+Alternatives:
+Una sola tabla de usuarios con un discriminador (descartado por el motivo de
+abajo).
+
+Reason:
+Sin esta separación, una cuenta de personal podría acabar dentro del
+`ExportSnapshot` que recibe el third-party administrator. Que un empleado
+aparezca en el universo de participantes de un sweepstakes no es un detalle de
+modelado: es un problema de integridad del sorteo.
+
+Affected areas: `packages/database`, `packages/sweepstakes`, `packages/tpa`.
+
+Proposed by: backend
+Agreed by: Team Lead
+
+---
+
+## DEC-029
+
+Status: Accepted
+
+Date: 2026-08-25
+
+Decision:
+**El segmento de ruta y la etiqueta de formato son cosas distintas y se
+declaran por separado.**
+
+- Segmentos de ruta: `/en` y `/es` (cortos, legibles).
+- Etiquetas de formato e identificadores de diccionario: **`en-US` y `es-US`**.
+- Todo formateo con `Intl` (fechas, números, moneda) usa la **etiqueta
+  completa**, nunca el segmento de ruta.
+
+Context:
+DEC-021 fijó las rutas y los diccionarios sin decir que eran identificadores
+distintos. `frontend` lo detectó al implementar.
+
+Alternatives:
+Usar `es` a secas para todo (**descartado**: `es` formatea `31/12/2026`,
+mientras que `es-US` formatea al modo estadounidense).
+
+Reason:
+Plantilla Sorteos es un producto para hispanohablantes **de Estados Unidos**.
+Formatear sus fechas al estilo español sería un error silencioso: nadie lo
+detecta hasta que un participante se equivoca de día, y en una promoción con
+fecha de cierre eso tiene consecuencias.
+
+Affected areas: `apps/web`, `packages/ui`, cualquier salida formateada.
+
+Proposed by: frontend
+Agreed by: Team Lead
+
+---
+
+## DEC-030
+
+Status: Accepted
+
+Date: 2026-08-25
+
+Decision:
+El **contenido dinámico localizado** —títulos de promoción, nombres de premio,
+descripciones de producto: datos que un administrador teclea— se almacena y se
+sirve **por locale desde el backend**, como objeto `{ "en-US": …, "es-US": … }`.
+
+No es copy de producto (que es de `frontend` por DEC-022) ni texto legalmente
+controlante (que viaja aparte con sus banderas). Es una **tercera categoría**
+con dueño propio: `backend` lo persiste, el admin lo edita, `frontend` lo
+renderiza sin traducirlo jamás.
+
+Ningún locale puede quedar vacío al publicar: la validación de publicación
+exige ambos idiomas completos.
+
+Context:
+DEC-021 lo dejó abierto y DEC-022 no lo cerró. `frontend` señaló que el nombre
+de un premio no encaja en ninguna de las dos categorías existentes.
+
+Alternatives:
+Que `frontend` lo traduzca (descartado: no puede traducir datos que aún no
+existen cuando se compila). Un solo idioma con traducción automática
+(descartado: viola el principio #4).
+
+Reason:
+Si un locale pudiera quedar vacío, el principio #4 se rompería en producción
+justo donde más se nota: el nombre del premio.
+
+Affected areas: `packages/database`, `apps/api`, `apps/web`, admin.
+
+Proposed by: frontend
+Agreed by: Team Lead
+
+---
+
+## DEC-031
+
+Status: Accepted
+
+Date: 2026-08-25
+
+Decision:
+En el envelope de error, **`code` es la clave canónica de traducción**.
+`message_key` queda eliminado del contrato para no tener dos campos con el
+mismo propósito.
+
+Los paquetes del workspace usan el prefijo **`@app/*`**, y los paquetes de
+frontend consumidos por Next son **source-only** (`exports` apuntando a
+`./src/index.ts` más `transpilePackages`), sin paso de build intermedio.
+
+Context:
+DEC-022 dejó ambos campos en el envelope sin decir cuál era la clave de
+traducción. La convención `@app/*` la adoptaron los tres agentes de forma
+espontánea, pero no estaba escrita en ninguna decisión.
+
+Alternatives:
+Conservar los dos campos (descartado: dos nombres para lo mismo es la semilla
+de que se desincronicen).
+
+Reason:
+DEC-022 ya describe `code` como el enum estable. Tener además `message_key`
+solo añade ambigüedad.
+
+Affected areas: `docs/API_CONTRACT.md`, `apps/api`, `apps/web`, todos los
+manifiestos.
+
+Proposed by: frontend
+Agreed by: Team Lead
+
+---
+
+## DEC-032
+
+Status: Accepted
+
+Date: 2026-08-25
+
+Decision:
+**Lista canónica de feature flags**, en `snake_case` minúscula, todos
+persistidos en base de datos (DEC-013) y **desactivados por defecto**, con una
+sola excepción.
+
+| Flag                                          | Default    | Gobierna                       |
+| --------------------------------------------- | ---------- | ------------------------------ |
+| `amoe_enabled`                                | `false`    | Existencia de la vía AMOE      |
+| `visible_entry_numbers_enabled`               | `false`    | Rangos "mis números" visibles  |
+| `internal_draw_enabled`                       | `false`    | Sorteo interno (DEC-017)       |
+| `state_eligibility_enforcement_enabled`       | `false`    | Restricción por jurisdicción   |
+| `age_gate_enabled`                            | `false`    | Verificación de edad mínima    |
+| `entry_multipliers_enabled`                   | `false`    | Multiplicadores                |
+| `entry_caps_enabled`                          | `false`    | Límites de entries             |
+| `entry_expiration_enabled`                    | `false`    | Caducidad de entries (DEC-033) |
+| `winner_publication_enabled`                  | `false`    | Publicación de ganadores       |
+| `manual_adjustments_enabled`                  | `false`    | Ajustes manuales de admin      |
+| `provisional_entries_enabled`                 | `false`    | Entries provisionales          |
+| `dual_approval_for_sensitive_actions_enabled` | **`true`** | Segunda aprobación             |
+
+Además, **`amoe_mode` es un enum, no un booleano**:
+`ONLINE_FORM` \| `MAIL_IN_REVIEW` \| `CODE` \| `EXTERNAL_INSTRUCTIONS`.
+
+Context:
+Resuelve `HO-003`. Los tres agentes usaban listas y convenciones distintas:
+`frontend` 6 flags en minúscula, `backend` 9 en mayúscula,
+`security` 8 en minúscula. Se fusionan sin perder ninguno.
+
+Fusiones aplicadas: `jurisdiction_gate_enabled` y
+`state_eligibility_enforcement_enabled` eran el mismo flag con dos nombres;
+`DUAL_APPROVAL_ADJUSTMENTS` y `dual_approval_for_sensitive_actions_enabled`
+también.
+
+Alternatives:
+`SCREAMING_SNAKE_CASE` (descartado: dos de los tres agentes ya usaban
+minúscula, y coincide con la convención de columnas de base de datos y de
+claves JSON, que es donde estos flags viven de verdad).
+
+Reason:
+`dual_approval_for_sensitive_actions_enabled` es el único que arranca en
+`true`, por el principio #12: seguridad por encima de comodidad. Un flag que
+hay que acordarse de activar para estar protegido acabará desactivado.
+
+`amoe_mode` es enum porque un booleano no permite decidir **qué interfaz
+renderizar**, y las cuatro modalidades exigen pantallas distintas. Lo señaló
+`frontend`; el enum coincide exactamente con el modelado de `backend`.
+
+Affected areas: `packages/database`, `packages/security`, `apps/api`,
+`apps/web`, admin.
+
+Proposed by: Team Lead (fusionando las tres listas)
+Agreed by: pendiente de objeción de los tres
+
+---
+
+## DEC-033
+
+Status: Accepted
+
+Date: 2026-08-25
+
+Decision:
+**El entry ledger se construye ahora, soportando caducidad de entries como
+configuración desactivada.**
+
+- `entry_transaction` incluye `expires_at timestamptz NULL`.
+- El flag `entry_expiration_enabled` arranca en `false` (DEC-032).
+- La vista de saldo se escribe desde el principio para cubrir ambos casos:
+
+```sql
+SUM(quantity_delta)
+WHERE status = 'POSTED'
+  AND effective_at <= <corte>
+  AND (expires_at IS NULL OR expires_at > <corte>)
+```
+
+Con el flag apagado, `expires_at` es siempre `NULL` y la expresión se comporta
+exactamente como una suma pura.
+
+Context:
+`HO-006` sigue sin respuesta del abogado. `backend` advirtió, con razón, que si
+las Official Rules contemplan caducidad, el saldo deja de ser una suma pura y
+pasa a depender de ventanas temporales, lo que cambia el diseño del ledger. Eso
+bloqueaba el hito B1, que es **el núcleo del producto**.
+
+Alternatives:
+Esperar a la respuesta del abogado (**descartado**: paraliza indefinidamente lo
+más importante del sistema, y la fecha de respuesta no depende de nosotros).
+Construir sin caducidad y migrar después (descartado: sería una migración sobre
+una tabla append-only con datos reales, justo lo que DEC-007 hace costoso a
+propósito).
+
+Reason:
+Es exactamente lo que ordenan los principios #3 y #14: lo que depende de las
+Official Rules se modela como **configuración**, no como código. Una columna
+nullable y un predicado de más no tienen coste medible con el flag apagado.
+
+Si el abogado dice que no hay caducidad, el flag no se enciende jamás y no se
+ha perdido nada. Si dice que sí, ya está soportado. **La asimetría de riesgo es
+evidente en una sola dirección.**
+
+`HO-006` **no se cierra** con esta decisión: la respuesta sigue haciendo falta
+para activar cualquier promoción (DEC-012). Lo que se desbloquea es la
+construcción, no la activación.
+
+Affected areas: `packages/database`, `packages/sweepstakes`, `packages/tpa`.
+
+Proposed by: Team Lead (desbloqueando B1)
+Agreed by: pendiente de revisión de security por afectar a DEC-007 y DEC-016
+
+---
+
+## DEC-034
+
+Status: Accepted
+
+Date: 2026-08-25
+
+Decision:
+**Enmienda a DEC-033.** Una transacción de reversal **hereda `expires_at` de la
+transacción que revierte**, y el CHECK se relaja a:
+
+```sql
+CHECK (expires_at IS NULL
+       OR expires_at > effective_at
+       OR reverses_transaction_id IS NOT NULL)
+```
+
+Context:
+Al revisar la implementación de DEC-033, `security` encontró un **defecto de
+corrección real en la decisión del Team Lead**: con el flag de caducidad
+encendido, revertir una entry ya caducada deja el saldo **negativo**.
+
+- T1: `PURCHASE_EARNED` +10, `effective_at = T1`, `expires_at = T2`
+- T3 > T2: refund → `REFUND_REVERSAL` −10, `effective_at = T3`, `expires_at = NULL`
+- Saldo en cualquier corte posterior a T3: la original queda excluida por
+  caducidad, la reversal se cuenta → **−10**
+
+El arreglo evidente estaba bloqueado por el propio CHECK
+`entry_transactions_expiry_after_effect`, que prohibía copiar `expires_at` de
+la original cuando el refund llega después de la caducidad. No era una línea de
+trigger: era una decisión de diseño.
+
+Alternatives:
+Excluir las reversals del predicado de caducidad (descartado: obligaría a un
+join y el saldo dejaría de ser un `SUM` plano). Emitir un movimiento
+compensatorio al caducar (descartado por `backend` con mejor argumento: haría
+que el `ExportSnapshot` dependiera de que un job hubiera corrido antes del
+corte, rompiendo DEC-016).
+
+Reason:
+Correcto en las tres ventanas —antes de caducar +10, entre caducidad y refund
+0, después del refund 0— y el saldo sigue siendo una suma plana.
+
+Cuesta cinco líneas hoy, con `expires_at` siempre `NULL` porque el flag está
+apagado. Después de que existan datos costaría una migración sobre una tabla
+append-only, que DEC-007 hace deliberadamente cara.
+
+Affected areas: `packages/database`, `packages/sweepstakes`, `packages/tpa`.
+
+Proposed by: security (revisión de DEC-033)
+Agreed by: Team Lead
+
+Nota: `security` valida dos aciertos de la implementación de `backend`. Que
+`app_entry_balances_at()` sea **parametrizada por corte** en vez de una vista
+con `now()` incrustado evita la trampa que habría roto la reproducibilidad de
+DEC-016 en silencio. Y no emitir fila `EXPIRATION` es mejor que la alternativa
+que el propio `security` proponía.
+
+Dos apuntes registrados para S3 y S4: la caducidad es un cambio de saldo **sin
+fila**, invisible a la hash chain de DEC-008, así que el manifiesto del
+snapshot debe registrar el corte y la versión del predicado, y el informe de
+reconciliación debe sacar "entries excluidas por caducidad a este corte" como
+línea propia. Y la semántica de bordes (`effective_at <=` inclusivo,
+`expires_at >` exclusivo, intervalo semiabierto) pertenece a
+`canonicalization_version`.
+
+---
+
+## DEC-035
+
+Status: Accepted
+
+Date: 2026-08-25
+
+Decision:
+**Construcción del preimage de la hash chain (DEC-008), versión 1.**
+
+```
+"APP/CHAIN/v1\n"
+  || u8len(domain)  || domain
+  || u8len(promoId) || promoId
+  || u32be(version)
+  || u32be(len)     || canonical
+  || prevHash
+```
+
+Tres puntos que van más allá de la letra de DEC-008:
+
+1. **Longitudes explícitas y versión dentro del preimage.** DEC-008 decía
+   `canonical(payload) || prev_hash`, que describe la idea pero no una
+   construcción verificable. Sin la versión dentro, quien controle la fila
+   puede reetiquetarla como "v2" y presentar después una canonicalización más
+   permisiva que produzca el mismo hash.
+2. **El génesis no es cero.** Se deriva de `(dominio, promoción)`. Con 32
+   ceros, una fila de la promoción A serviría como primera fila de la B con su
+   hash intacto.
+3. **`sequence_no` queda fuera del payload**, por imposibilidad y no por
+   gusto: es `GENERATED ALWAYS AS IDENTITY`, la base de datos lo asigna
+   _durante_ el INSERT, y el hash debe existir _antes_ porque la tabla es
+   append-only (DEC-007). Queda protegido por la **topología** de la cadena —el
+   verificador recorre en ese orden y exige el encadenamiento— no por el
+   contenido.
+
+La forma canónica es **RFC 8785 (JCS)** más tres restricciones: `undefined`,
+`bigint`, `Date`, `Map` y `Buffer` producen error en vez de omisión silenciosa;
+solo enteros seguros, coma flotante rechazada (DEC-010), enteros grandes como
+cadena de dígitos; y **NFC sobre cadenas y claves**, única desviación de RFC
+8785 y necesaria porque el mismo nombre tecleado en macOS (NFD) y en Windows
+(NFC) daría dos hashes distintos.
+
+**Requisito sobre el camino de escritura:** `recorded_at` entra en el payload y
+tiene `DEFAULT now()`. Quien inserte **debe pasarlo explícitamente** y usar ese
+mismo valor al calcular el hash. Dejar actuar al `DEFAULT` hace que el hash
+cubra un instante y la fila guarde otro: **la cadena nace rota**.
+
+Context:
+Al implementar DEC-008, `security` encontró que la fórmula era insuficiente
+como especificación verificable por un tercero.
+
+Alternatives:
+Concatenación simple sin longitudes (descartado: permite ambigüedad de
+frontera entre campos). Génesis de ceros (descartado por el motivo 2).
+
+Reason:
+Que un tercero pueda verificar la cadena con una librería estándar y sin
+nuestro código es el objetivo entero de DEC-008. Una fórmula que no fija la
+construcción byte a byte no lo permite.
+
+Nota sobre el orden de columnas: la pregunta que planteó `HO-009` —si el orden
+del DDL era definitivo— **resultó ser la equivocada**. La forma canónica ordena
+las claves alfabéticamente, así que el orden físico es invisible al hash. Lo
+que se fija es el **conjunto** de campos: 21 incluidos y 4 excluidos, con un
+test de paridad que lee el DDL y exige que la suma cubra la tabla. Una columna
+nueva rompe ese gate el mismo día, forzando una decisión explícita sobre si el
+hash debe protegerla.
+
+Affected areas: `packages/audit`, `packages/database`, `packages/tpa`.
+
+Proposed by: security
+Agreed by: Team Lead
+
+---
+
+## DEC-036
+
+Status: Accepted
+
+Date: 2026-08-25
+
+Decision:
+**El paquete de exportación separa manifiesto de contenido y procedencia.**
+
+- **Manifiesto de contenido** — sin marcas de generación. Es lo que se hashea y
+  se firma, y produce el `contentDigest`.
+- **Procedencia** — quién generó el export, cuándo, con qué clave y con qué
+  versión del generador. Queda **fuera** del digest.
+
+Context:
+DEC-016 exigía dos cosas a la vez que no caben juntas: (a) que `generated_at`
+viviera solo en el manifiesto y no en las filas de datos, y (b) que regenerar
+el snapshot produjera **bytes idénticos**. Si el manifiesto se hashea, cualquier
+marca temporal dentro rompe (b).
+
+`security` lo detectó al implementar DEC-016 y no eligió una de las dos por su
+cuenta.
+
+Alternatives:
+Sacar `generated_at` del manifiesto (descartado: la procedencia es parte del
+expediente de auditoría y debe conservarse). Renunciar a la reproducibilidad
+byte a byte (descartado: es el fundamento del principio #10).
+
+Reason:
+La contradicción era real y sin resolverla DEC-016 no era implementable. La
+separación conserva las dos propiedades: el contenido es reproducible y
+verificable por un tercero, y la procedencia queda registrada sin contaminar
+el digest.
+
+Affected areas: `packages/tpa`, `packages/audit`.
+
+Proposed by: security
+Agreed by: Team Lead
+
+---
+
+## DEC-037
+
+Status: Accepted
+
+Date: 2026-08-25
+
+Decision:
+**Sin sello externo, el veredicto de integridad nunca es `INTACT`.** Es
+`UNSEALED`, un estado propio.
+
+El informe de reconciliación emite **siempre** la línea "entries excluidas por
+caducidad a este corte", con código propio: `INFO` cuando vale cero, `WARNING`
+en cuanto aparta algo. **No bloquea** finalizar el snapshot.
+
+Context:
+La hash chain detecta alteración de filas, borrado, reordenación e injerto
+desde otra promoción. **No detecta una reescritura completa y coherente**: un
+atacante con acceso total a la base de datos puede recalcular la cadena entera
+y `verifyChain` la aprueba. El test lo afirma explícitamente en vez de
+disimularlo. Solo el sello externo lo detecta, como `HISTORY_REWRITTEN`.
+
+Por otro lado, la caducidad de DEC-034 es un cambio de saldo **sin fila**, y
+por tanto invisible a la cadena: un tercero la verá íntegra y no encontrará
+nada que explique la caída del saldo.
+
+Alternatives:
+Devolver `INTACT` sin sello (**descartado**: un verde ahí invita a no montar
+nunca el almacén write-once, y entonces la única defensa contra la reescritura
+completa deja de existir). Emitir la línea de caducidad solo cuando aparte algo
+(descartado: su ausencia sería indistinguible de que no se comprobó).
+Bloquear la finalización cuando hay caducadas (descartado: excluirlas es el
+comportamiento correcto, y un gate que se dispara al hacer lo correcto acaba
+desactivado).
+
+Reason:
+El sistema debe declarar sus propios límites. Un estado `UNSEALED` explícito
+dice la verdad: la cadena es consistente consigo misma, y eso no basta.
+
+Affected areas: `packages/audit`, `packages/tpa`, infraestructura.
+
+Proposed by: security
+Agreed by: Team Lead
+
+---
+
+## DEC-038
+
+Status: Accepted
+
+Date: 2026-08-25
+
+Decision:
+**Rebrand visual completo a la identidad del logo: negro + dorado, dark-first.**
+
+- La paleta del design system pasa a la del logo (`Logo/logo.jpeg`): negros
+  profundos como superficie, dorado como acento, un solo tema oscuro.
+- Tipografía bold de alto impacto, titulares en mayúsculas, al estilo de la
+  referencia aportada por el usuario (un sitio de referencia).
+- **Queda superseded la nota de los tokens que prohibía el oro.** Esa
+  prohibición protegía contra la estética de casino; la protección real nunca
+  fue el color sino el **lenguaje**, y esa parte se mantiene íntegra (ver
+  abajo).
+- El logo se incorpora en cabecera, pie y favicon.
+
+**Límite vinculante — "look de la referencia, copy legal":** se adopta la energía visual de
+la referencia (hero a pantalla completa con el premio, cuenta atrás dramática,
+badges dorados, secciones de gran impacto) pero **no su encuadre comercial**.
+Siguen prohibidos: multiplicadores o cifras de entries en las tarjetas del
+catálogo (el contrato no las expone), CTAs que vendan la compra como
+participación ("ENTER NOW" sobre un producto), y cualquier copy que describa
+la compra como boletos u oportunidades de ganar (`CLAUDE.md` §1). Las cifras
+de participaciones siguen apareciendo solo donde las produce el backend: el
+carrito.
+
+Imágenes: fotografía placeholder generada por IA cuando haya créditos
+disponibles; hasta entonces, dirección de arte SVG premium coherente con la
+identidad. Ambas marcadas como provisionales.
+
+Context:
+Decisión del usuario (2026-08-25), con referencia visual explícita
+(un sitio de referencia) y logo entregado en `Logo/logo.jpeg`. Las tres preguntas de
+alcance se respondieron: rebrand total, look de la referencia con copy legal, fotos
+generadas.
+
+Alternatives:
+Híbrido hero oscuro / tienda clara (descartado por el usuario). Mantener
+paleta actual (descartado por el usuario). Réplica total de la referencia incluyendo
+multiplicadores por producto (descartada: exigía cambiar contrato y flags y
+acercaba el copy al límite legal).
+
+Reason:
+El logo es negro y oro; la referencia es dark-first. La coherencia de marca lo
+decide. La separación look/copy permite adoptar la fuerza visual sin heredar el
+riesgo de compliance que `security` ya señaló sobre el lenguaje del checkout.
+
+Affected areas: `packages/design-system`, `packages/ui`, `apps/web`.
+
+Proposed by: usuario
+Agreed by: Team Lead; el copy sigue sujeto a la revisión de compliance de
+`security` antes de INTEGRATE
+
+---
+
+## DEC-039
+
+Status: Accepted
+
+Date: 2026-08-25
+
+Decision:
+**Enmienda a DEC-038: las secciones de mercancía van sobre banda CLARA.**
+
+El usuario, viendo la captura móvil real de la referencia, señaló que la sección de
+productos sobre fondo blanco "lo hace ver limpio" y que la disposición móvil
+(grid de 2 columnas, tarjetas con imagen dominante, chip arriba-izquierda,
+botón "+" abajo-derecha, nombre bold debajo) es lo que busca.
+
+- El grid del catálogo (`/shop`) y la franja de mercancía destacada de la
+  portada pasan a **banda clara** (blanco cálido), con tinta oscura para
+  texto y el oro como acento.
+- El resto del sitio (cabecera, hero, marcador, banda del premio, pie)
+  sigue oscuro. El resultado es exactamente la estructura real de la referencia:
+  bandas oscuras de promoción + secciones de producto claras.
+- Grid móvil de **2 columnas desde 360px** con gutters estrechos.
+- Los tokens de banda clara viven en el design system, no hardcodeados.
+
+Context:
+DEC-038 fijó dark-first total. Esta enmienda no la revierte: ajusta las
+secciones de mercancía al patrón que el usuario aprobó con captura en mano.
+La opción "híbrido" se le ofreció al inicio y la descartó; al ver el
+resultado y la referencia real, la eligió para la mercancía. Su criterio
+visual manda (DEC-038 lo establece).
+
+Alternatives:
+Mantener el grid oscuro (descartado por el usuario con referencia visual).
+
+Reason:
+En la referencia real las tarjetas de producto viven sobre blanco y es lo que produce
+la sensación "limpia" que el usuario quiere. El contraste banda oscura ↔
+banda clara además hace que ambas golpeen más.
+
+Affected areas: `packages/design-system`, `apps/web` (shop, franja destacada).
+
+Proposed by: usuario (con captura de referencia)
+Agreed by: Team Lead
+
+---
+
+## DEC-040
+
+Status: Accepted
+
+Date: 2026-08-25
+
+Decision:
+**Ampliación del alcance de DEC-039.** La banda clara y el estudio claro de
+imágenes se extienden a:
+
+- la **galería de la ficha de producto** (`/products/[slug]`), como panel
+  claro dentro de una página que por lo demás sigue oscura;
+- la **miniatura de línea del carrito**, con marco claro;
+- el **módulo de media entero**: el estudio de los placeholders pasa a fondo
+  claro para todo el sitio, no solo para las dos secciones de DEC-039.
+
+El resto de DEC-039 no cambia: cabecera, hero, marcador, banda del premio y
+pie siguen oscuros.
+
+Context:
+La revisión adversarial de cumplimiento detectó que la implementación de
+DEC-039 tocaba tres sitios que su "Affected areas" no cubría, y que la
+justificación vivía en un comentario del código
+(`products/[slug]/page.tsx`) en vez de en este registro. Es el orden inverso
+al protocolo de `CLAUDE.md` §3: se implementó y se documentó después.
+
+Alternatives:
+Revertir esos tres cambios para ceñirse a la letra de DEC-039 (descartado: la
+extensión es coherente — un producto fotografiado sobre estudio claro en la
+tienda y sobre estudio oscuro en su ficha sería la incoherencia real, y la
+miniatura del carrito debe coincidir con la tarjeta de la que viene).
+
+Reason:
+La decisión es correcta; lo que faltaba era registrarla. Este DEC la hace
+oficial y deja constancia de cómo se detectó, para que el patrón no se
+repita: **cualquier extensión de alcance durante la implementación se
+registra aquí antes de commitear, no en un comentario.**
+
+Affected areas: `apps/web` (ficha de producto, carrito), `packages/ui`
+(`MediaFrame`), módulo de media.
+
+Proposed by: frontend (por criterio propio durante DEC-039)
+Agreed by: Team Lead, tras el hallazgo B1 del revisor de cumplimiento
+
+---
+
+## DEC-041
+
+Status: Accepted
+
+Date: 2026-08-25
+
+Decision:
+Tres cambios estructurales en el design system, salidos de la corrección de
+los hallazgos de la auditoría adversarial de DEC-039:
+
+1. **`Badge` gana un eje `surface: dark | light`.** Cada tono tiene su
+   combinación clara, y una unión de tipos impide `surface="light"` con
+   tonos de estado que no existen en paleta clara. El relleno sólido claro es
+   de tinta, espejo exacto del oscuro.
+2. **La geometría del patrón topográfico vive una sola vez**, en
+   `packages/design-system/tailwind-preset.mjs` (`TOPO_PATHS` +
+   `topoPattern()`); un plugin `addBase` emite los cuatro tokens en `:root`.
+   `tokens.css` conserva la prosa de diseño y apunta al preset. El CSS
+   compilado sale byte a byte igual que las cadenas a mano (verificado).
+3. **`--app-color-light-border-strong` pasa de `#c7bfb0` a `#938d82`**:
+   de 1.72:1 a **3.11:1** sobre la banda clara y 3.30:1 sobre blanco. Es el
+   token de los contornos que identifican un control; `light-border` sigue
+   tenue a propósito para la separación de tarjetas.
+
+Además, `ProductCard` solo se renderiza desde `MerchandiseBand`, que pinta la
+banda clara siempre; una red DOM y otra estática lo garantizan.
+
+Context:
+La auditoría adversarial de DEC-039 (tres revisores independientes: cumplimiento,
+accesibilidad, fidelidad) encontró cuatro bloqueantes que los cinco gates en
+verde no detectaban: chips con paleta oscura sobre tarjeta blanca en el estado
+por defecto, chip truncado en todos los anchos, anillo de foco a 1.35:1 y texto
+seleccionado a 1.15:1. Más una veintena de menores. Los tres cambios de arriba
+son los que alteran el sistema, no solo el sitio de uso.
+
+Alternatives:
+Arreglar cada chip en su sitio de uso (descartado: el fallo se repetiría en el
+siguiente componente que usara `Badge` sobre claro). Mantener tres copias del
+SVG topográfico con un comentario que las vincule (descartado: ya habían
+divergido).
+
+Reason:
+Los cuatro bloqueantes compartían una causa: las capas que el sistema y el
+navegador pintan por encima (foco, selección, badges por defecto) venían
+calibradas para negro y ninguna red las miraba. Los arreglos van al sistema y
+llevan red propia, para que el siguiente componente sobre banda clara no
+repita el fallo.
+
+Affected areas: `packages/design-system`, `packages/ui`, `apps/web`.
+
+Proposed by: frontend (corrección de hallazgos)
+Agreed by: Team Lead
+
+---
+
+## DEC-042
+
+Status: Accepted
+
+Date: 2026-08-26
+
+Decision:
+**Nueva promoción destacada: una camioneta como premio, con un universo total de
+10,000 participaciones.** Y un segundo acento de color, **rojo**, para
+llamadas a la acción y textos de atención, junto al oro de marca.
+
+- La promoción entra como fixture **provisional** y protagoniza el hero al
+  estilo de la referencia (foto de la camioneta a sangre, titular gigante,
+  CTA rojo, línea de disclaimer debajo del botón).
+- El tope de 10,000 participaciones es **configuración de la promoción**
+  (`entry_pool_cap`), no texto fijo. Se muestra como dato de las Reglas
+  Oficiales; cualquier cifra de "emitidas" o "restantes" la produce el
+  backend, nunca el frontend.
+- El rojo es un token semántico nuevo (`accent` / "hot"), distinto de
+  `danger`. Se usa en: CTA principal del hero, botones de compra, fragmentos
+  destacados del titular, barra de progreso y flechas de la barra de anuncio.
+  El oro sigue siendo la marca.
+- La palabra es **promoción**, nunca "rifa", "boletos" ni "sorteo de
+  boletos" (`CLAUDE.md` §1). El CTA rojo principal lleva a la mercancía
+  ("Comprar ahora"), no a "participar": comprar mercancía no es participar.
+- La línea "_No se requiere compra — Nulo donde esté prohibido — Ver Reglas
+  Oficiales_" **es data-driven**: solo se renderiza cuando `amoe_enabled` y
+  la configuración lo respaldan; si no, la línea es "Sujeto a las Reglas
+  Oficiales".
+
+Context:
+Dirección del usuario (2026-08-26) con dos capturas del hero del sitio de referencia
+("WIN THIS 682HP ESCALADE V", botón rojo "ENTER NOW", disclaimer debajo,
+barra de anuncio "ENTER NOW TO WIN…"). El usuario usó la palabra "rifa" de
+forma coloquial; el producto sigue siendo lo que define la constitución.
+
+Alternatives:
+Hardcodear el tope (descartado: principio #14). Copiar "ENTER NOW" como CTA
+sobre la tienda (descartado: encuadra la compra como participación, DEC-038).
+
+Reason:
+El tope de participaciones es un parámetro que fijan las Reglas Oficiales
+(`docs/LEGAL_PENDING.md`, "Entry limits"); mostrarlo como dato configurado es
+legítimo, inventar urgencia sobre él no. El rojo es puro énfasis visual y no
+toca el lenguaje.
+
+Affected areas: `packages/design-system` (token `accent`), `packages/ui`
+(variantes rojas de `Button`/`Badge`), `apps/web` (hero, fixtures, barra de
+anuncio, ficha de producto).
+
+Proposed by: usuario
+Agreed by: Team Lead; el tope de 10,000 queda anotado en LEGAL_PENDING
+
+Nota de implementación (2026-08-26): el token `accent` ya existía con
+semántica de "oro intenso"; ese papel vuelve a `brand` y `accent` pasa a ser
+el rojo. El rojo de la referencia (#e8232a) da 4.46:1 con blanco encima, a cuatro
+centésimas de AA, así que el valor final es #cf1a22 (5.49:1). Ratios de los
+siete tokens medidos por test (`accent-tokens.test.ts`). La edición
+"Workshop Build-Out" se retira del fixture para conservar la invariante de
+una promoción por estado: Road Trip pasa a SCHEDULED.
+
+---
+
+## DEC-043
+
+Status: Accepted
+
+Date: 2026-08-26
+
+Decision:
+**Railway aloja los tres componentes**: `apps/web`, `apps/api` y PostgreSQL,
+dentro de un mismo proyecto y comunicados por la **red privada** de Railway.
+El despliegue se declara como código, un `railway.json` por servicio.
+
+Tres consecuencias que no son cosméticas y que se aceptan explícitamente:
+
+1. **`apps/api` deja de exponer su superficie al público por necesidad.**
+   El navegador nunca llama a la API: todo el consumo es server-side (server
+   components y server actions). Por eso `web` llega a `api` por
+   `http://${api.RAILWAY_PRIVATE_DOMAIN}:8080/api/v1`, y `API_HOST` es `::`
+   —no `0.0.0.0`— porque la red privada de Railway es IPv6 y un proceso que
+   solo escuche en IPv4 es invisible dentro de ella.
+
+2. **TLS contra PostgreSQL: nueva variable `DATABASE_NETWORK` (`public` |
+   `private`).** Railway emite certificados autofirmados, así que
+   `verify-full` es inalcanzable contra su base gestionada. La salida NO es
+   bajar a `require`: `require` cifra pero no verifica, no defiende de un
+   intermediario y además _aparenta_ que sí. Con `DATABASE_NETWORK=private`
+   el único modo admitido es `disable`, y la garantía la aporta el
+   aislamiento de red. El valor por defecto es `public`, que sigue exigiendo
+   `verify-full` en producción: la excepción solo existe si alguien la
+   escribe a propósito.
+
+3. **En una base gestionada `migrator` y propietario del esquema colapsan en
+   el superusuario del proveedor.** DEC-003 pedía tres roles diferenciados;
+   Railway no cede la propiedad de `public`, así que las migraciones las
+   aplica su superusuario mediante `db:bootstrap`. **La separación que sí se
+   conserva es la que protege el ledger**: la aplicación corre como `app_runtime`,
+   que nunca recibe UPDATE/DELETE sobre ledger ni auditoría (DEC-007). Eso lo
+   garantizan los GRANT explícitos de cada migración, que se aplican sea quien
+   sea quien las ejecute —verificado: las diez migraciones conceden permisos a
+   `app_runtime` de forma explícita, ninguna depende de `ALTER DEFAULT PRIVILEGES
+FOR ROLE app_migrator`.
+
+Context:
+Decisión del usuario (2026-08-26): "todo el proyecto será alojado en Railway,
+backend, frontend y base de datos". Hasta ahora el hosting estaba
+deliberadamente sin decidir (`CLAUDE.md` §7) y DEC-004 evitó dar por supuesto
+Vercel precisamente para no cerrar esta puerta.
+
+Alternatives:
+Imágenes Docker propias por servicio (descartado en esta pasada: no hay Docker
+en el entorno donde se preparó el cambio, así que habrían sido artefactos sin
+verificar; Railpack detecta el monorepo pnpm y evita esa deuda). Postgres
+gestionado fuera de Railway con TLS verificable (descartado: contradice la
+instrucción de alojarlo todo en Railway, y añade una salida a Internet donde
+ahora no la hay).
+
+Reason:
+El punto 2 es el único que rebaja una garantía existente, y se documenta como
+tal en vez de esconderse en un valor por defecto. La lectura honesta es que se
+sustituye una garantía criptográfica por una topológica: aceptable mientras la
+base sea inalcanzable desde fuera del proyecto, e inaceptable en cuanto se le
+abra un endpoint público. **Requiere revisión de `security` antes de
+INTEGRATE** (ver `docs/AGENT_HANDOFF.md`, HO-022).
+
+~~El punto 3 no rebaja nada: lo que DEC-003 protege de verdad es el ledger
+frente a la aplicación, no frente al operador de la base.~~
+
+**Corrección (2026-08-26, auditoría de HO-022).** La frase tachada era falsa y
+se deja visible en vez de borrarla, porque afirmaba algo incorrecto sobre la
+garantía central del sistema y quien lea este ADR debe ver la corrección en el
+mismo sitio, no enmendada desde lejos.
+
+Lo cierto de la frase: la invariante de DEC-007 se sostiene. Verificado por la
+auditoría —ningún privilegio de `app_runtime` depende de `ALTER DEFAULT PRIVILEGES
+FOR ROLE app_migrator`; los únicos privilegios por defecto de
+`0000_baseline.sql:100-106` conceden `SELECT ON TABLES` a `app_readonly_report`
+y `USAGE, SELECT ON SEQUENCES` a `app_runtime`, y ninguno puede conceder
+UPDATE/DELETE. Todo privilegio DML es un GRANT explícito tabla a tabla, y
+`0006_entry_ledger.sql:1132-1134` añade `REVOKE UPDATE, DELETE, TRUNCATE`
+redundantes sobre las tres tablas del ledger.
+
+Lo que la frase ocultaba: `scripts/railway-env.mjs` coloca
+`DATABASE_URL_SUPERUSER` entre las variables **del servicio `api`**, y en
+Railway el `preDeployCommand` comparte entorno con el proceso que sirve. Esa
+credencial vive, por tanto, en el `process.env` de un proceso de larga
+duración expuesto a Internet, no confinada a un job de un solo uso. Importa
+porque DEC-007 y DEC-012 se aplican con **triggers**, y un trigger no defiende
+del propietario de la tabla: `app_reject_mutation`
+(`0000_baseline.sql:138`), `promotions_enforce_lifecycle`
+(`0002_promotions.sql:394`) y el cerrojo de activación de DEC-012 se
+neutralizan con `SET session_replication_role = 'replica'` o
+`ALTER TABLE ... DISABLE TRIGGER` desde el rol de esa URL.
+
+La formulación honesta es: **el punto 3 no rebaja nada para el rol de
+aplicación, y concentra una credencial capaz de saltarse los triggers en el
+proceso más expuesto a Internet.**
+
+Matiz adicional de la misma auditoría: `0000_baseline.sql:105` es el
+`ALTER DEFAULT PRIVILEGES` **sin `FOR ROLE`**, así que se registra contra quien
+ejecute la migración 0000 —bajo Railway, el superusuario— y las variantes
+`FOR ROLE app_migrator` de `:101` y `:106` quedan como peso muerto. Hoy es
+inocuo porque la única secuencia del esquema es una columna identidad
+(`0006_entry_ledger.sql:317`), que no requiere USAGE separado. Pero "los GRANT
+se aplican sea quien sea quien las ejecute" es cierto para tablas e
+**incidentalmente** cierto para secuencias: nadie debe apoyarse en la
+formulación fuerte.
+
+Pendiente, no resuelto aquí: sacar `DATABASE_URL_SUPERUSER` del entorno de
+ejecución de `api` si Railway permite acotarla al pre-deploy, o —mejor— usar
+`DATABASE_URL_MIGRATOR` con recurso al superusuario solo en arranque en frío,
+lo que reduce la ventana de "cada despliegue, para siempre" a "el primer
+despliegue".
+
+Nota de alcance:
+Este despliegue publica lo que hoy existe: catálogo, promociones, Reglas
+Oficiales y carrito. **No** hay identidad, checkout, pago, AMOE, sorteo ni
+export, y los dieciséis puntos de `docs/LEGAL_PENDING.md` siguen en TBD. Nada
+de lo que se publique puede presentarse como una promoción en curso hasta que
+existan Official Rules aprobadas.
+
+---
+
+## DEC-044
+
+Status: Accepted
+
+Date: 2026-08-26
+
+Decision:
+**Correcciones de compliance del copy y del hero, salidas de la auditoría de
+`security-integration` (HO-022, punto 3) sobre el despliegue de DEC-043.**
+
+1. **El hero completo de promoción ("GANA…", CTA rojo, cuenta atrás, chip
+   "Promoción vigente") solo se renderiza si la promoción trae una versión de
+   Reglas Oficiales publicada** (`rules_version_id` no nulo y documento
+   disponible). Si la API devuelve una promoción `ACTIVE` sin reglas, el
+   frontend muestra un estado contenido ("Reglas Oficiales pendientes de
+   publicación") sin invitación de compra ligada a la promoción. Es defensa en
+   profundidad sobre DEC-012: el cerrojo de activación es de `backend`, pero el
+   frontend no publica una invitación que las reglas no respaldan.
+2. **La cifra de participaciones emitidas (`entry_pool.issued`) no se
+   renderiza.** Mostrar `cap` e `issued` juntos publica un contador de
+   restantes por implicación, exista o no campo `remaining`. Se muestra solo
+   el universo total como dato de las Reglas.
+3. **`metadata.description` simétrica en ambos idiomas**: el inglés decía
+   "sweepstakes" y el español omitía la categoría. Deben coincidir.
+4. **`availability.LOW_STOCK`**: el español "Quedan pocas unidades" es una
+   afirmación de escasez que el inglés "Low stock" no hace. Pasa a etiqueta
+   neutra equivalente.
+5. **La banda de confianza no afirma garantías en presente** sobre un ledger
+   sin tráfico (no hay checkout, pago ni AMOE operando). Describe cómo está
+   construido el sistema, no lo que garantiza en producción, hasta que exista
+   tráfico real y revisión.
+
+Context:
+El auditor midió sobre condiciones de render en el código (no con `grep`) y
+confirmó: sin lenguaje de escasez, sin "enter now", claves simétricas (295 en
+cada idioma). Su corrección de fondo: **la seguridad del copy era dependiente
+de datos**, a un `INSERT` de invertirse. Y su veredicto sobre la clave
+"No se requiere compra" detrás de flag: **correcta como forma de guardar copy
+no autorizado**; la alternativa —escribirla cuando se apruebe AMOE— es peor.
+
+Alternatives:
+Añadir la línea "No se requiere compra" al hero (descartado: con AMOE en TBD
+sería inventar un requisito legal, principio #2). Dejar el hero como estaba
+confiando solo en el cerrojo de DEC-012 (descartado: ese cerrojo cubre doce
+claves y `LEGAL_PENDING.md` tiene dieciocho epígrafes; ver HO-024).
+
+Reason:
+El principio #2 prohíbe inventar requisitos legales; el #12 pone la seguridad
+por encima del atajo. Un hero que solo es correcto porque la base de datos
+está vacía no es correcto.
+
+Observación no accionada: "vigente" (`home.eyebrow` y ocho claves más) tiene
+registro jurídico que "current" no tiene. No es problema vivo; si se
+cuestiona, se cuestiona en nueve sitios a la vez. Queda anotado.
+
+Affected areas: `apps/web` (hero, diccionarios, banda de confianza).
+
+Proposed by: security-integration (auditoría en la sesión paralela), vía
+Team Lead
+Agreed by: Team Lead
+
+---
+
+## DEC-045
+
+Status: Accepted
+
+Date: 2026-08-26
+
+Decision:
+Implementación de identidad de DEC-006. Tres piezas nuevas de esquema y dos
+dependencias.
+
+**Esquema (migración `0010`).** Las credenciales NO se añaden como columnas de
+`identities`:
+
+- `identity_credentials` — hash Argon2id, uno por identidad. Tabla aparte
+  porque una credencial tiene ciclo de vida propio (rotación, expiración,
+  bloqueo por intentos) y porque así un `SELECT` sobre `identities` —la tabla
+  que más se lee— nunca arrastra el hash.
+- `identity_mfa_factors` — factores TOTP. Varios por identidad: sustituir un
+  autenticador perdido no puede exigir borrar el histórico del anterior.
+- `sessions` — sesión opaca y revocable. Se almacena **solo el hash** del
+  token, nunca el token: una filtración de la tabla no debe permitir suplantar
+  a nadie. La misma razón por la que se guarda el hash de una contraseña.
+
+**Dependencias.**
+
+- `@node-rs/argon2` para Argon2id. Node no trae Argon2, y `crypto.scrypt` no es
+  lo que pide DEC-006. Se elige sobre `argon2` (node-argon2) porque distribuye
+  binarios precompilados por plataforma y **no ejecuta script de instalación**:
+  `pnpm-workspace.yaml` restringe `onlyBuiltDependencies` a `lefthook` y `msw`
+  como decisión de seguridad, y meter un compilador nativo en esa lista para
+  poder hashear contraseñas sería pagar un precio desproporcionado.
+- `otpauth` para TOTP (RFC 6238). Cero dependencias y usa WebCrypto.
+
+Context:
+DEC-006 fija el diseño desde 2026-08-25 pero nada estaba implementado: no
+existía tabla de sesiones ni columna de contraseña. El usuario pidió el panel
+de administración (2026-08-26) al ver la tienda vacía tras el despliegue de
+DEC-043.
+
+Alternatives:
+Columnas de credenciales dentro de `identities` (descartado: mezcla dos ciclos
+de vida y hace que la tabla más leída cargue el hash). Guardar el token de
+sesión en claro para poder buscarlo (descartado: convierte un volcado de la
+tabla en suplantación inmediata). `hash-wasm` (candidato razonable, WASM puro y
+sin riesgo de plataforma; se prefiere `@node-rs/argon2` por ser el camino
+habitual para autenticación de servidor, con la nota de que si el binario de
+Linux diera problemas en el contenedor, `hash-wasm` es el reemplazo directo).
+
+Reason:
+Ninguna de las dos dependencias obliga a relajar la política de scripts de
+instalación, que es la que impide que un paquete cualquiera ejecute código
+durante `pnpm install`. Guardar el hash del token de sesión, y no el token, es
+lo que hace que la tabla `sessions` sea inútil para un atacante que la lea.
+
+Nota de alcance:
+Esta decisión cubre la **fase 1**: esquema y primitivas criptográficas con sus
+tests. Las rutas HTTP, la resolución de principal, los endpoints
+administrativos y las pantallas van en fases posteriores. Nada de lo que aquí
+se construye habilita por sí solo un inicio de sesión.
+
+---
+
+## DEC-046
+
+Status: Accepted
+
+Date: 2026-08-26
+
+Decision:
+**Plan para desarrollar todo lo que falta, y proveedor de pagos.**
+
+1. **Reparto entre sesiones** (detalle en HO-025): la sesión paralela
+   construye identidad completa —participante y administrador sobre el mismo
+   módulo, roles y políticas distintas— y los endpoints de admin, con
+   migraciones 0010–0019. Esta sesión construye comercio, pipeline de
+   participaciones, AMOE, ajustes, controles de sorteo, entrega al TPA, portal
+   del participante, checkout, pantallas de cuenta y admin (fase 4), con
+   migraciones desde 0020.
+2. **Dominio puro primero, adaptadores después.** Mientras la fase 2 de
+   identidad no tenga contrato, comercio, participaciones y sorteo se
+   construyen como dominio con puertos (`LedgerRepository`, `Clock`,
+   `Csprng`, `PaymentProvider`, `SealStore`…) e implementaciones en memoria
+   con tests; los adaptadores a Drizzle, objeto-storage y las rutas HTTP
+   entran en la ronda siguiente sobre el registro de rutas de `apps/api`
+   (`build<Modulo>Routes` + una línea en `app.ts`).
+3. **Proveedor de pagos: `MockPaymentProvider` ahora; el real es decisión
+   del usuario.** El adaptador `PaymentProvider` (sesión de checkout en modo
+   `hosted_redirect` o `embedded_component`, verificación de firma sobre raw
+   body, parseo de eventos, refund) se implementa completo con un proveedor
+   mock determinista y firma HMAC real. Elegir Stripe, Adyen u otro es un
+   DEC pendiente que requiere al usuario: un modelo de sweepstakes es alto
+   riesgo para muchos procesadores y no puede darse por aprobado ninguno.
+4. **Verificación de email** (`eligibility.email_verification_required`):
+   mecanismo construido por identidad; consecuencia sobre las participaciones
+   leída por el pipeline de award desde la configuración de la promoción,
+   default `false`, TBD legal (HO-024). Con `true`, la concesión queda
+   retenida hasta la verificación, con la misma clave de idempotencia.
+5. **Sin dependencias nuevas ni `pnpm install` desde esta sesión** hasta
+   que aterrice el lockfile de identidad; después, un único `pnpm install`
+   con los agentes parados.
+
+Context:
+El usuario ordenó "desarrolla todo" (2026-08-26) con la sesión paralela ya
+dentro de identidad. `CLAUDE.md` §4 prohíbe dos sistemas de autenticación y
+dos modelos de entries; el reparto evita ambos.
+
+Alternatives:
+Construir auth de participante en esta sesión (descartado: segundo sistema
+de identidad). Elegir proveedor de pagos por criterio técnico (descartado:
+decisión comercial y de riesgo del cliente).
+
+Reason:
+Cada sesión avanza en territorio disjunto y todo lo que toca base de datos o
+HTTP espera al contrato de identidad, que es la única dependencia real.
+
+Affected areas: todo el repositorio, por fases.
+
+Proposed by: Team Lead (sesión frontend)
+Agreed by: sesión paralela (reparto y rango de migraciones confirmados)
+
+---
+
+## DEC-047
+
+Status: Accepted
+
+Date: 2026-08-26
+
+Decision:
+Dos reglas de escritura del ledger salidas de la implementación del pipeline
+de participaciones (B3/B4):
+
+1. **`entry_transactions.id` se pasa explícitamente al insertar**, igual que
+   `recorded_at` (DEC-035). Tiene `DEFAULT gen_random_uuid()` **y** forma parte
+   de `LEDGER_CANONICAL_FIELDS_V1`: si el escritor deja actuar al DEFAULT no
+   conoce el `id` hasta después del INSERT, y para entonces la tabla es
+   append-only. La cadena nace rota igual. `LedgerAppendInput.id` es
+   obligatorio.
+2. **La descalificación emite una fila por cohorte `(procedencia,
+expires_at)`**, con `source_ref = disqualification:<decisionId>:<expiryKey>`.
+   Una descalificación no se ancla a una transacción concreta, así que no
+   hereda `expires_at` como los reversals de DEC-034: con `+10` que caduca en
+   T5, descalificación en T3 con `expires_at = NULL`, en T6 el saldo sería
+   −10. Por cohortes, cada fila negativa caduca con lo que anula, y de paso
+   el desglose por procedencia (principio #9) sobrevive a la
+   descalificación. Con el flag de caducidad apagado degenera en el caso
+   simple.
+
+Context:
+Ambas las encontraron los tests del dominio puro antes de que exista el
+adaptador a base de datos, que es el momento barato.
+
+Alternatives:
+Un solo reversal de descalificación sin `expires_at` (descartado: saldo
+negativo demostrado en test). Leer el `id` después del INSERT (descartado:
+imposible en tabla append-only con hash en la propia fila).
+
+Reason:
+Mismo criterio que DEC-034 y DEC-035: las reglas del ledger se fijan antes
+de que existan datos, porque después cuestan una migración sobre una tabla
+que no admite `UPDATE`.
+
+Affected areas: `packages/sweepstakes`, `packages/database` (adaptador
+Drizzle, ronda siguiente), `packages/audit`.
+
+Proposed by: backend-sweepstakes
+Agreed by: Team Lead
+
+---
+
+## DEC-048
+
+Status: Accepted
+
+Date: 2026-08-26
+
+Decision:
+**El panel de administración vive en `/admin/[locale]/...`, no en
+`/[locale]/admin/...`.** `/admin` queda excluido del matcher de i18n del
+escaparate (como `/healthz`) y monta su propia negociación de locale dentro.
+Sigue siendo bilingüe.
+
+Context:
+`SESSION_POLICIES.STAFF.cookie.path` es `/admin` (DEC-006: scope estrecho
+para que la cookie de personal **no viaje con cada petición del
+escaparate**, y con `SameSite=Strict` tampoco en navegaciones que vengan de
+fuera). El enrutado bilingüe del escaparate pone prefijo de locale a todo,
+así que una página de admin sería `/es/admin/...`, que **no empieza por
+`/admin`**: el navegador nunca enviaría la cookie y el panel quedaría
+permanentemente deslogueado, con el síntoma "inicio sesión y me devuelve al
+login". La cookie vive en el origen de `apps/web`, no en el de la API, así
+que el prefijo `/api/v1/admin/...` no interviene. Detectado por la sesión
+paralela antes de que existiera una sola página de admin.
+
+Alternatives:
+A — admin sin prefijo de locale en `/admin/...` (descartado: panel en un solo
+idioma, roza el principio #4). C — cambiar el `path` de la cookie a `/`
+(descartado: es la de una línea, pero rebaja deliberadamente DEC-006 y amplía
+la superficie de exposición del token más sensible del sistema a cambio de
+comodidad de enrutado).
+
+Reason:
+B conserva las dos propiedades que importan: el alcance estrecho de la cookie
+de personal y el bilingüismo del panel. El coste es un segundo punto de
+negociación de locale, acotado a `/admin`.
+
+Affected areas: `apps/web` (middleware, árbol de rutas de admin, i18n),
+`packages/security` (sin cambios: `SESSION_POLICIES` se queda como está).
+
+Proposed by: sesión paralela (lone-star-c4)
+Agreed by: Team Lead
+
+## DEC-049
+
+Status: Accepted
+
+Date: 2026-08-27
+
+Decision:
+**La Content-Security-Policy de `apps/web` se emite por petición desde el
+middleware, con un nonce nuevo por petición; no existe —ni puede existir— una
+CSP estática en `headers()` de `next.config.mjs`.** Las demás cabeceras de
+seguridad sí son estáticas en `headers()`: `X-Content-Type-Options: nosniff`,
+`Referrer-Policy: strict-origin-when-cross-origin`, `X-Frame-Options: DENY`,
+`Permissions-Policy` restrictiva, `Cache-Control: no-store` en `/healthz` y
+HSTS (`max-age=63072000; includeSubDomains`, sin `preload`) **solo en
+producción**.
+
+La política emitida es:
+
+```text
+default-src 'self'; script-src 'self' 'nonce-<16 bytes base64>' [+ 'unsafe-eval' solo fuera de producción];
+style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self';
+connect-src 'self' [+ origen de NEXT_PUBLIC_API_BASE_URL si existe] [+ ws: solo fuera de producción];
+frame-ancestors 'none'; form-action 'self'; object-src 'none'; base-uri 'self'
+```
+
+Context:
+Next 15.5 emite el payload RSC como `<script>` en línea (153 en la portada).
+Con `script-src 'self'` el navegador los bloquea todos y la página **se ve pero
+no se hidrata**, sin un solo error en el servidor: un fallo indistinguible del
+éxito mirando el HTML o el código de estado. Next lee el nonce de la cabecera
+de la petición (`app-render/get-script-nonce-from-header`), así que el
+middleware puede generarlo y Next lo estampa en cada script. Tres restricciones
+que condicionan la forma:
+
+- **Dos cabeceras CSP se aplican por intersección.** Una estática en
+  `headers()` con `script-src 'self'` volvería a bloquear los scripts con
+  nonce. Hay un test que falla si alguien añade una segunda CSP a
+  `next.config.mjs`.
+- **`style-src 'unsafe-inline'` hace falta de verdad**, y no por Tailwind: son
+  atributos `style` en línea (`next/image` emite `style="color:transparent"`;
+  la barra de la línea de tiempo lleva su anchura). Un atributo no admite
+  nonce.
+- **`connect-src` no lleva el origen de `API_BASE_URL`**, solo el de
+  `NEXT_PUBLIC_API_BASE_URL`. `API_BASE_URL` es deliberadamente no pública
+  (`src/lib/api/http.ts`); escribirla en una cabecera servida al navegador
+  publicaría lo que esa decisión mantiene privado, a cambio de nada, porque
+  ninguna petición de cliente va ahí. Hay test.
+
+Alternatives:
+A — `'unsafe-inline'` en `script-src` (descartado: autoriza cualquier script
+en línea, la CSP queda como decoración). B — CSP estática en `headers()` más
+nonce (descartado: intersección; aplicación muerta en el navegador). C —
+hashes de los scripts (descartado: el payload RSC cambia por petición y por
+render; los hashes no son estables). D — nonce por petición desde el
+middleware (elegida).
+
+Reason:
+D es la única que mantiene la CSP como control real y la aplicación
+funcionando tanto en rutas dinámicas como en las que salen como SSG del
+build. Verificado con build de producción aislado servido con `next start`
+(HSTS presente, `sin_nonce=0` en `/es/faq`, `/es/shop`, `/es/official-rules`,
+`/es/promotions`) y con el humo, que comprueba contra el servidor real que el
+nonce de la cabecera coincide con el de **cada** `<script>` del HTML en 54
+rutas. Esa comprobación es la red: la cadena tiene cuatro eslabones y, si se
+rompe cualquiera, el servidor sigue respondiendo 200 con el HTML completo.
+
+Affected areas: `apps/web` (`src/middleware.ts`,
+`src/lib/security-headers.ts`, `next.config.mjs`, `scripts/smoke.mjs`,
+`src/test/security-headers.test.ts`). Sin cambios en `apps/api`, que ya emitía
+sus cabeceras.
+
+Proposed by: frontend-ux (HO-034.3)
+Agreed by: Team Lead
+
+## DEC-050
+
+Status: Accepted
+
+Date: 2026-08-27
+
+Decision:
+**La API acepta la cabecera `Cookie` tal como la reenvía `apps/web` —con
+pseudo-cookies `Path=/` intercaladas y valores percent-encoded— y fija esa
+tolerancia con un test de contrato sobre la aplicación real
+(`apps/api/test/cookie-header-contract.test.ts`). La forma normativa sigue
+siendo la del navegador (`name=value; name=value`, sin atributos), cubierta
+por el mismo test con las mismas afirmaciones.** (HO-035, opción b.)
+
+Context:
+`apps/web` no es un navegador: es un segundo proceso (DEC-004) que reenvía la
+sesión del visitante a `apps/api` con `cookies().toString()` de Next, que no
+produce una cabecera `Cookie` de RFC 6265 sino algo con forma de
+`Set-Cookie`:
+
+```text
+app_session=<token>; Path=/; app_dev_staff_actor=compliance%40example.com; Path=/
+```
+
+Hoy funciona porque `@fastify/cookie` decodifica y tolera las pseudo-cookies,
+pero era un comportamiento heredado, no decidido. El riesgo se materializó una
+vez en el mock de desarrollo de `apps/web`: el parser no decodificaba, no
+encontraba el actor y caía a un respaldo en silencio — un panel válido con la
+persona equivocada, indistinguible de "esa persona no tiene ese permiso".
+
+Alternatives:
+A — `apps/web` construye la cabecera desde `cookies().getAll()` en
+`readSession` y la API deja de depender de la tolerancia del parser
+(descartada como única medida: no es verificable desde donde vive el riesgo
+—`apps/api`—, y no elimina la dependencia que importa, porque `getAll()`
+devuelve valores decodificados y reenviarlos exige `encodeURIComponent`, así
+que el percent-decoding se ejerce igual; además la API tiene más de un
+cliente —el navegador llama directo con CORS y `credentials`— y normalizar
+en `apps/web` no cubriría a los demás). B — la API declara lo que acepta y lo
+vigila (elegida). A sigue siendo válida como mejora de `apps/web` y no rompe
+B.
+
+Reason:
+No es que la API no pueda rechazar la forma —un 400 ante una `Cookie` que no
+cumple RFC 6265 sería legítimo—: es que rechazarla rompería a un cliente que
+controlamos, la forma es demostrablemente inocua, y declarar y vigilar lo que
+se acepta cuesta menos que obligar a cada cliente a normalizar. Es una
+tolerancia medida, con un test que la fija; no una renuncia a imponer
+(matiz aportado por la sesión paralela, propietaria de §10). El test levanta
+la app real y afirma, sobre la
+cabecera literal: que ambas cookies de sesión se encuentran entre las
+pseudo-cookies, que el token sobrevive intacto (`looksLikeSessionToken`), que
+los valores se decodifican, que las pseudo-cookies no desplazan a ninguna
+cookie real, que un `;` codificado no inyecta una cookie extra, y que la forma
+de navegador produce el mismo resultado. Sin él, una actualización de
+`@fastify/cookie` respondería 401 a una sesión válida o atendería a la
+persona equivocada sin aviso.
+
+Affected areas: `apps/api` (test de contrato), `docs/API_CONTRACT.md` §10
+(párrafo pendiente de la sesión paralela, propietaria de la sección; texto
+entregado en HO-035). Sin cambios en `apps/web`.
+
+Proposed by: backend-sweepstakes (HO-035)
+Agreed by: Team Lead
+
+## DEC-051
+
+Status: Accepted
+
+Date: 2026-08-27
+
+Decision:
+**Una superficie anónima no publica más que la superficie autenticada sobre
+el mismo dato.** Aplicado al inventario: `GET /products` y
+`GET /products/{slug}` dejan de publicar `stock_quantity` en crudo y publican
+por variante `availability: { status: "IN_STOCK" | "LOW_STOCK" |
+"OUT_OF_STOCK" }`, el mismo objeto que la línea del carrito (§5), derivado del
+mismo predicado (`apps/api/src/services/availability.ts`: `fitsStock`,
+`availabilityFor`) y evaluado para una unidad. `quantity_available` no se
+publica en ninguna ruta; `is_purchasable` sigue pendiente y no se deriva de
+`availability`.
+
+Context:
+Al cerrar HO-017, backend detectó una incoherencia: el carrito, con sesión,
+publicaba deliberadamente solo `status` (HO-017 pedía no publicar inventario),
+mientras el catálogo, anónimo, publicaba el número exacto de unidades por
+variante. Una de las dos rutas estaba mal, y el inventario exacto de una
+tienda es información comercial que no tiene por qué ser pública ni servir
+para que un tercero mida las ventas rastreando la cifra. Ningún fichero de
+`apps/web` leía `stock_quantity`, así que el cambio no rompió nada en el
+escaparate.
+
+Alternatives:
+A — publicar el número en las dos rutas (descartado: filtra inventario a
+cualquiera y contradice HO-017). B — dejar cada ruta como estaba (descartado:
+dos verdades sobre el mismo dato, y la más indiscreta en la superficie
+anónima). C — `status` en las dos rutas, con un solo predicado (elegida).
+D — umbral "quedan menos de N" para `LOW_STOCK` (descartado: N sería una
+constante de negocio que nadie aprobó, principio 2; el umbral es la propia
+cantidad pedida, y en el catálogo esa cantidad es una unidad).
+
+Reason:
+La regla general es la que evita repetir la discusión con el siguiente dato:
+lo que un anónimo puede ver es, como mucho, lo que ve un usuario con sesión
+sobre lo mismo. El predicado único garantiza que catálogo, carrito y el `409
+INSUFFICIENT_STOCK` no puedan divergir. Tests con afirmación negativa
+explícita de que `stock_quantity` y `quantity_available` no aparecen en la
+respuesta.
+
+Affected areas: `apps/api` (`services/availability.ts`, `routes/storefront.ts`,
+`routes/cart.ts`, `http/schemas.ts`), `docs/API_CONTRACT.md` §4, `apps/web`
+(tipos provisionales del catálogo alineados por frontend-ux).
+
+Proposed by: backend-sweepstakes (HO-017, punto abierto)
+Agreed by: Team Lead
+
+---
+
+## DEC-052
+
+Status: Accepted
+
+Date: 2026-08-29
+
+Decision:
+**Los paquetes de participaciones son productos del catálogo con
+`kind = ENTRY_PACKAGE`; la tasa de participaciones se declara por tipo de
+producto en la versión de reglas; el tope por participante se aplica también
+al AMOE; el "universo total" de DEC-042 se retira.**
+
+1. `products.kind` (`product_kind`: `MERCHANDISE` | `ENTRY_PACKAGE`). Un
+   paquete es una fila más del catálogo: pasa por el mismo carrito, checkout,
+   pedido, reembolso y reversal que la mercancía. **Ninguna columna del
+   producto dice cuántas participaciones da** (la frontera de `0003_catalog`
+   se mantiene); lo dice la versión de reglas. `order_items.product_kind` se
+   congela en el pedido, como `sku` y `name_snapshot`.
+2. Nuevo modo de fórmula `ENTRIES_PER_CURRENCY_UNIT_BY_PRODUCT_KIND`:
+   `rates.{MERCHANDISE,ENTRY_PACKAGE} = { amount_unit_minor, entries_per_amount_unit }`
+   (cada tasa nullable; al menos una), más `rounding_policy` única. Un tipo
+   sin tasa no genera participaciones y la traza lo anota
+   (`PRODUCT_KIND_NOT_RATED`). `CalculationItemInput` gana `productKind`. Los
+   modos anteriores no cambian. `ENTRY_CALCULATION_ENGINE_VERSION` pasa a
+   **2**: los resultados de configuraciones antiguas son idénticos, pero la
+   entrada y la traza cambian de forma y un auditor debe poder distinguirlo.
+3. Los periodos de multiplicador ganan `product_kind_scope: ProductKind[] | null`
+   junto a `sku_scope` (`null` = todos; ambos presentes = intersección). Así
+   un bonus "solo paquetes" no depende de enumerar SKUs que aún no existen.
+4. Clave opcional `bonus_rules` en la versión de reglas:
+   `{ max_multiplier, applies_to_product_kinds, applies_to_amoe: false }`. La
+   API rechaza un periodo bonus que supere `max_multiplier` o salga del ámbito
+   declarado. Es un techo legal (DRAFT v2: hasta 10×), no un valor del motor.
+5. **La concesión AMOE respeta `entry_limits.per_participant_max`** cuando
+   `entry_caps_enabled` está encendido, con la misma aritmética de "espacio
+   restante" que aplica el motor a las compras: se concede `min(valor, espacio)`,
+   la transacción anota el recorte en `metadata.applied_cap`, y con espacio
+   cero la aprobación se rechaza (`AMOE_ENTRY_CAP_REACHED`). Las Official
+   Rules aplican el tope "regardless of method"; conceder 2,000 a quien ya
+   tiene 10,000 sería concederlas dos veces.
+6. **`entry_pool` se retira** del contrato, de las fixtures y de las
+   pantallas. El 10,000 de DEC-042 era el tope **por participante**, no un
+   universo total. Lo público es `entry_offer.per_participant_max`, como dato
+   de las Reglas, sin "emitidas" ni "restantes".
+7. El catálogo público publica por variante un `entry_offer` **calculado por
+   el backend** con el motor real (cantidad 1, sin topes,
+   `participantEntriesBefore = 0`): `base_entries` (sin multiplicador) y
+   `entries_now` (con los bonus vigentes si el flag lo permite). Es lo que
+   exige DRAFT v2 Opción 2: "the number of entries included in each package
+   is stated on the page where the package is offered". `null` cuando no hay
+   promoción activa, versión de reglas, tasa para ese tipo, o la
+   configuración no parsea: nunca una cifra inventada.
+
+Context:
+DRAFT v2 de las Official Rules (2026-08-29) y tres mensajes del cliente:
+1 por $1 en mercancía, 2 por $1 en paquetes de $10/$20/$50/$100, tope de
+10,000 **por persona**, AMOE postal de 2,000 por ficha (5 fichas), bonus
+2X/5X/10X con duración. El motor tenía una sola tasa por promoción, ningún
+concepto de paquete, y la concesión AMOE ignoraba el tope. Ver
+`docs/LEGAL_PENDING.md` §"Segundo borrador".
+
+Alternatives:
+A — Paquetes como entidad aparte con su propio flujo de compra (descartado:
+segundo modelo de entries y segundo checkout, prohibidos por `CLAUDE.md` §4).
+B — Tasa por SKU en `ALLOW_LIST` (descartado: cada paquete nuevo obligaría a
+una versión de reglas nueva; el tipo es revisable por una persona igual que un
+SKU). C — Cantidad de participaciones en el producto (descartado: es
+exactamente lo que `0003_catalog` prohíbe; cambiaría el pasado). D — Aplicar
+el tope al AMOE por revisión humana en vez de por código (descartado: el
+revisor no ve el saldo hasta la proyección, y el ledger debe cuadrar solo).
+
+Reason:
+Un paquete es mercancía **para el sistema** —se compra, se cobra, se
+reembolsa— y su única particularidad es la tasa, que es una regla legal y por
+tanto vive en la versión de reglas. El tope "regardless of method" solo se
+cumple si lo aplican las dos vías de escritura del ledger. El `entry_offer`
+calculado por el backend evita que el escaparate multiplique por su cuenta
+(R13 de `security`, `no-client-entry-math`).
+
+Affected areas: `packages/sweepstakes` (config, engine, AMOE, versión de
+motor), `packages/database` (migración `0026`, repositorios, seed),
+`apps/api` (carrito, pedidos, escaparate, cotización), `apps/web` (catálogo,
+portada, ficha, hero, AMOE), `docs/API_CONTRACT.md` §3/§4/§5/§13,
+`tests/e2e`, `tests/security`. Supersede parcialmente DEC-042 (universo total).
+
+Proposed by: Team Lead (a partir de DRAFT v2)
+Agreed by: backend-sweepstakes, frontend-ux, security-integration (HO-041)
+
+---
+
+## DEC-053
+
+Status: Accepted
+
+Date: 2026-08-29
+
+Decision:
+**El catálogo gana categorías, nombre de variante por idioma e imágenes por
+URL; el panel puede gestionar N variantes por producto.**
+
+- Tabla `product_categories (key, position)` +
+  `product_category_translations (category_key, locale, name)`, y
+  `products.category_key` (nullable, FK). Las siete categorías iniciales del
+  cliente se **siembran como datos** en la migración (son catálogo del
+  negocio, como los flags en `0005`), y el panel puede crear más
+  (`POST /admin/product-categories`).
+- `product_variant_translations (variant_id, locale, name)`: "Rojo" / "Red".
+  Los dos idiomas obligatorios (principio 4).
+- `products.image_url` y `product_variants.image_url` (nullable, `https:` o
+  ruta raíz `/…` del propio sitio). **No hay almacén de medios**: el proveedor
+  de almacenamiento sigue sin decidir (`CLAUDE.md` §7). Mientras tanto las
+  imágenes son ficheros estáticos en `apps/web/public/products/` que el
+  usuario entrega, y la URL es el enlace. El `alt` se deriva del nombre del
+  producto/variante; no se inventa texto.
+- Admin: `POST/PATCH /admin/products/:id/variants[/:variant_id]`; el alta de
+  producto acepta `variants[]` opcional (si falta, una variante sin nombre,
+  como hoy).
+- Escaparate: `kind`, `category`, `image_url`, `variants[].name`,
+  `variants[].image_url`, filtros `?kind=&category=`.
+
+Context:
+El cliente entregó la lista de mercancía inicial y "gorras premium en ≈5
+modelos × 5 colores". El esquema tenía variantes sin nombre y el panel solo
+creaba una; no había categorías ni imágenes (HO-019 abierto desde el primer
+e2e real).
+
+Alternatives:
+Enum de categorías en código (descartado: una categoría nueva sería una
+migración). Tabla de medios con subida de ficheros (descartado por ahora: exige
+decidir almacenamiento; DEC pendiente). Atributos JSON libres en la variante
+(descartado: el nombre por idioma es el único dato que hoy hace falta y un
+JSON libre no impone los dos idiomas).
+
+Reason:
+Es lo mínimo que hace vendible el catálogo real sin adelantar decisiones de
+infraestructura. Cierra HO-019 salvo la subida de imágenes.
+
+Affected areas: `packages/database` (migración `0026`), `apps/api` (§4, §12,
+§13), `apps/web` (tienda, ficha, panel), `docs/API_CONTRACT.md`.
+
+Proposed by: Team Lead
+Agreed by: backend-sweepstakes, frontend-ux
+
+---
+
+## DEC-054
+
+Status: Accepted
+
+Date: 2026-08-29
+
+Decision:
+**Las versiones de reglas, los periodos bonus, los feature flags y la
+transcripción de fichas postales tienen superficie de escritura en la API y
+en el panel.** Sin ella, ninguna de las reglas del cliente es operable desde
+la plataforma.
+
+1. **Versiones de reglas** (`rules.version.read` / `rules.version.create` /
+   `rules.version.activate`): listar, crear borrador (vacío o **clonado** de
+   otra versión, documentos incluidos), editar `config` y documentos mientras
+   sea `DRAFT`, y **activar** con motivo y step-up. Activar archiva la versión
+   `ACTIVE` anterior, fija `effective_at` y
+   `promotions.active_rules_version_id`, todo en una transacción; los
+   cerrojos siguen siendo los triggers de `0002` (DEC-012), la API solo
+   traduce el 409. La API valida las rebanadas que el dominio sabe parsear
+   (`calculationConfigSchema`, `amoeConfigSchema`, `bonus_rules`) y devuelve
+   422 con rutas; **no rellena ningún valor**.
+2. **Atajo "periodo bonus"** (`rules.version.activate`, motivo + step-up):
+   clona la versión activa, añade un periodo (`multiplier`, `starts_at`,
+   `ends_at`, `product_kind_scope`, `sku_scope`, `priority` siguiente) y
+   activa la nueva versión. Exige que la versión activa declare
+   `multipliers.conflict_strategy` (o que el cuerpo la aporte) y respeta
+   `bonus_rules`. Es el gesto "5X durante 12 horas" del cliente, expresado
+   como lo que DEC-012 dice que es: **una versión de reglas nueva**, con su
+   traza.
+3. **Feature flags**: `GET /admin/feature-flags` (`flag.read`) y
+   `PATCH /admin/feature-flags/:key` (`flag.update`, o
+   `flag.update.legally_material` + step-up cuando `is_legally_material`),
+   con motivo; `PATCH /admin/settings/amoe-mode`
+   (`flag.update.legally_material`). Cada cambio deja `audit_events` con
+   antes/después.
+4. **Transcripción de fichas postales**: `POST /admin/amoe-submissions`
+   (`amoe.submission.transcribe`, capacidad nueva en `packages/security`,
+   asignada a `PROMOTION_MANAGER` y `COMPLIANCE_OFFICER`). El operador teclea
+   los datos de la ficha; el participante se resuelve por email y, si no
+   existe, se crea con `identity.status = PENDING_VERIFICATION` y sin
+   credenciales, porque las Official Rules no exigen cuenta para la vía
+   gratuita. El envío entra en la misma cola de revisión (`PENDING_REVIEW`)
+   y quien transcribe **no puede aprobar su propia transcripción**
+   (`metadata.transcribed_by_admin_user_id` ≠ aprobador). La configuración
+   AMOE gana el bloque opcional
+   `mail_in { max_cards_per_envelope, postmark_by, received_by }`,
+   informativo para el revisor y el público.
+
+Context:
+HO-038 dejó escrito que la `PromotionRulesVersion` "no existe todavía como
+superficie de escritura"; los flags solo tenían lectura. El cliente pide poder
+"activar promociones temporales… configurar estos multiplicadores y su
+duración" y el AMOE postal exige que alguien meta las fichas.
+
+Alternatives:
+Editar la versión activa en sitio (descartado: DEC-012 e inmutabilidad por
+trigger). Periodos bonus en una tabla aparte fuera de la versión de reglas
+(descartado: segunda fuente de verdad sobre cuánto vale una compra, y la traza
+del motor dejaría de reproducirse con `rules_version_id`). Cargar la
+configuración por SQL (descartado: el dueño no ejecuta comandos y no deja
+traza).
+
+Reason:
+Convierte cada cambio legalmente material en una versión auditable, con
+motivo, step-up y separación de funciones ya catalogadas en
+`packages/security` (`rules.version.activate` y
+`flag.update.legally_material` pertenecen a `COMPLIANCE_OFFICER`;
+`rules.version.create` a `PROMOTION_MANAGER`). Quién ocupa cada rol es
+decisión del usuario.
+
+Affected areas: `packages/security` (capacidad nueva), `packages/sweepstakes`
+(AMOE `mail_in`, transcripción), `packages/database` (repositorios de
+versiones y flags), `apps/api` (§13), `apps/web` (panel: Reglas, Bonus, Flags,
+Transcribir), `docs/API_CONTRACT.md` §13, `tests/security`, `tests/e2e`.
+
+Proposed by: Team Lead
+Agreed by: backend-sweepstakes, frontend-ux, security-integration (HO-041)
+
+---
+
+## DEC-055
+
+Status: Accepted
+
+Date: 2026-08-29
+
+Decision:
+**Los cambios de configuración legalmente material (flags con
+`is_legally_material` y `amoe_mode`) pasan por control dual, como los
+ajustes manuales; los flags no materiales se cambian en el acto.** Dos
+caminos, uno por capacidad, en vez de una ruta cuya capacidad dependa del
+parámetro:
+
+- `PATCH /admin/feature-flags/:key` — solo flags **no** materiales,
+  capacidad estática `flag.update` (motivo, sin step-up). Sobre un flag
+  material responde `409 FLAG_LEGALLY_MATERIAL` y no toca nada.
+- `POST /admin/settings/change-requests` + `approve` / `reject` —
+  `flag.update.legally_material` (motivo + step-up), con
+  `secondApprovalEnforcedBy` declarado en la ruta y la segunda aprobación
+  impuesta por el dominio (`PENDING_APPROVAL` hasta que **otra** persona
+  aprueba) y por PostgreSQL (`setting_change_requests_approver_differs`).
+  **Nunca se aplica en el acto**: `flag.update.legally_material` es
+  `CRITICAL` y `packages/security/src/flags.ts` fija que apagar
+  `dual_approval_for_sensitive_actions_enabled` no relaja
+  `requiresSecondApproval`; ese flag, además, solo puede cambiarse por
+  solicitud (`flagRequiresDualControl`): desarmar el control dual exige
+  control dual (hallazgo S-02 de la security review de HO-041). Cada
+  aplicación deja `audit_events` con `before`/`after`; `amoe_mode` se valida
+  contra la versión de reglas activa **al aplicar**. Una solicitud decidida
+  es inmutable (trigger en `0028`, S-06).
+- `PATCH /admin/settings/amoe-mode` no existe: `amoe_mode` es material y va
+  por solicitudes.
+
+Context:
+HO-041, fase 1 de security: `flag.update.legally_material` declara
+`requiresSecondApproval: true` desde DEC-032 y el autorizador deniega toda
+ruta que no declare dónde se impone la segunda aprobación (HO-034.1). El
+contrato §13.9 original —un `PATCH` que cambiaba de capacidad según la clave—
+habría respondido 403 siempre para lo material y habría tenido una capacidad
+dinámica que la puerta no puede evaluar en `preHandler`.
+
+Alternatives:
+A — Rebajar `requiresSecondApproval` a `false` (descartado: exactamente el
+atajo que el principio 12 prohíbe; un flag como `amoe_enabled` decide si
+existe la vía gratuita). B — Una ruta con capacidad dinámica resuelta en el
+handler (descartado: la puerta dejaría pasar con `flag.update` y sin step-up
+antes de que el handler mirase la clave). C — Dos caminos con control dual
+para lo material (elegida).
+
+Reason:
+Reutiliza el mecanismo que ya existe para ajustes —ruta que declara, dominio
+que impone, CHECK que lo garantiza aunque la aplicación falle— y deja la
+capacidad de cada ruta estática y auditable. El coste operativo (dos
+personas con `COMPLIANCE_OFFICER` para encender un flag material o para
+desarmar el control dual) es el que DEC-032 fijó; quién ocupa esos roles lo
+decide el usuario.
+
+Affected areas: `packages/database` (migración `0028`,
+`src/schema/settings.ts`), `apps/api` (`routes/admin-rules.ts`,
+`services/admin-rules.ts`, `http/errors.ts`), `packages/security`
+(`capabilityForFlagUpdate`, `flag.update` sin step-up), `apps/web` (pantalla
+Flags), `docs/API_CONTRACT.md` §13.9, `tests/security`.
+
+Proposed by: security-integration (hallazgo), Team Lead (resolución)
+Agreed by: backend-sweepstakes (implementado), frontend-ux, security-integration
+
+---
+
+## DEC-056
+
+Status: Accepted
+
+Date: 2026-09-21
+
+Decision:
+**Las imágenes de productos y variantes se suben desde el dispositivo; el panel
+deja de pedir una URL.** Sustituye el punto de DEC-053 que decía "no hay almacén
+de medios: las imágenes son ficheros estáticos que el usuario entrega".
+
+- `POST /admin/media` (`product.write`) recibe los bytes en base64 dentro de un
+  cuerpo JSON y devuelve `{ id, url, content_type, byte_size }`.
+  `GET /media/:file` (PUBLIC) los sirve. Contrato en §14.
+- **Los bytes viven en PostgreSQL** (`media_assets`, migración `0029`), con
+  tope de 5 MiB por CHECK, `sha256` único (deduplica) y filas **inmutables**:
+  `app_runtime` solo tiene `SELECT` e `INSERT`.
+- **El tipo lo decide la firma de los bytes**, no lo que declare el cliente.
+  JPEG, PNG y WebP. SVG queda fuera: puede llevar script.
+- **`image_url` no cambia** ni de forma ni de CHECK: la ruta devuelta es
+  `/media/<id>.<ext>`, una ruta raíz del propio sitio. `apps/web` la expone en su
+  origen con un manejador que reenvía a la API, porque el navegador no habla con
+  `apps/api` y la CSP fija `img-src 'self'`.
+- En el panel, la foto es un `<input type="file">` **dentro del formulario de
+  siempre** y la sube la Server Action: funciona sin JavaScript. Con JavaScript,
+  además, hay vista previa y la foto se reduce a 2000 px antes de enviarse.
+  El límite de cuerpo de Next sube a 16 MB (`serverActions.bodySizeLimit` y
+  `middlewareClientMaxBodySize`, que tienen que coincidir).
+
+Context:
+El dueño edita el catálogo desde el teléfono. Lo que tiene es la foto, no una
+URL: el campo de DEC-053 le pedía alojar el fichero y escribir su ruta, y cada
+foto era un despliegue. DEC-053 ya dejaba escrito que cerraba HO-019 "salvo la
+subida de imágenes".
+
+Alternatives:
+A — Almacén de objetos (S3, R2) (descartado **por ahora**: exige elegir
+proveedor y credenciales, y `CLAUDE.md` §7 sigue sin decidirlo; esta decisión
+no lo cierra). B — Disco del contenedor o volumen de Railway (descartado: el
+disco es efímero y un redeploy lo vacía; un volumen ata la API a una sola
+réplica). C — `multipart/form-data` en la API (descartado: un parser multipart
+es una dependencia nueva que valida fuera de Zod, contra DEC-014; quien llama es
+el servidor de Next, así que el 33 % del base64 viaja por red interna). D —
+Subir desde el navegador directamente a la API (descartado: rompe "el navegador
+no habla con `apps/api`" y obligaría a abrir CORS y CSP). E — PostgreSQL
+(elegida).
+
+Reason:
+Es lo único que funciona hoy sin adelantar una decisión de infraestructura: usa
+la base de datos que ya está decidida (DEC-043), entra en sus copias de
+seguridad y sobrevive a los despliegues. El catálogo es corto —decenas de
+productos— y cada imagen está acotada, así que el tamaño es del orden de la
+traza de auditoría. El contrato está escrito para que el día que haya almacén de
+objetos cambie de dónde lee la API y nada más.
+
+Affected areas: `packages/database` (migración `0029`, `src/schema/media.ts`),
+`apps/api` (`routes/media.ts`, `services/media.ts`, `bodyLimitBytes` y
+`binaryResponses` en el registro de rutas, `PAYLOAD_TOO_LARGE`), `apps/web`
+(`app/media/[file]`, `components/admin/image-upload-field.tsx`,
+`lib/admin/image-upload.ts`, acciones de catálogo, `next.config.mjs`),
+`docs/API_CONTRACT.md` §14.
+
+Proposed by: usuario (dueño del producto)
+Agreed by: pendiente de revisión por backend-sweepstakes, frontend-ux y
+security-integration (ver HO-043)
+
+---
+
+## DEC-057
+
+(El número 056 se deja libre: el código de la subida de imágenes ya lo cita y
+su entrada la escribe esa sesión.)
+
+Status: Proposed
+
+Date: 2026-09-21
+
+Decision:
+**El alta de participante (`POST /api/v1/auth/register`) crea la cuenta
+`ACTIVE` con el correo sin verificar, abre sesión en el acto y responde `409
+EMAIL_ALREADY_REGISTERED` ante un correo ya existente.** Cuatro puntos:
+
+1. **`ACTIVE` sin verificar.** El login exige `identities.status = 'ACTIVE'` y
+   no existe verificación de correo (no hay proveedor de email, `CLAUDE.md` §7).
+   Nacer `PENDING_VERIFICATION` dejaría a todo el público sin poder entrar.
+   `email_verified_at` queda a `null` y se publica como dato; que tenga
+   consecuencias sobre las participaciones sigue en `docs/LEGAL_PENDING.md`.
+2. **El alta SÍ revela que un correo está registrado; el login sigue sin
+   hacerlo.** Abrir sesión en el acto hace imposible responder igual a "ya
+   existe" y a "creada" sin entregar la cuenta a quien no es su dueño. La
+   variante que no enumera ("revisa tu correo") exige proveedor de email.
+3. **`consents` solo se admite vacío.** La configuración pública no publica
+   `required_consents` y no hay tabla donde persistir una aceptación. Una lista
+   con contenido se rechaza (`422`) en vez de aceptarse y perderse: falla
+   cerrado hasta que exista la persistencia.
+4. **Un expediente postal no se reclama registrándose.** Las identidades
+   `PENDING_VERIFICATION` sin credenciales que crea la transcripción AMOE
+   (§13.10) responden `409` como cualquier correo existente. Sin verificación
+   de correo, reclamarlas sería quedarse con participaciones ajenas tecleando
+   una dirección.
+
+Context:
+HO-034 punto 4 dejó abierto `POST /auth/register`: la pantalla
+`/{locale}/account/register` existía en `apps/web` sin backend y el e2e
+sembraba el participante por SQL. El usuario pidió abrir el alta al público
+como paso previo a la compra.
+
+Alternatives:
+A — Alta sin sesión + verificación de correo obligatoria, que no enumera
+(descartada HOY: no hay proveedor de email; es el destino cuando lo haya).
+B — Nacer `PENDING_VERIFICATION` y relajar el login (descartada: cambia la
+semántica de un control existente para todas las identidades, incluidos los
+expedientes postales sin credencial). C — Aceptar `consents` y descartarlos
+(descartada: pierde en silencio un acto con valor legal, principios 5 y 12).
+D — La elegida.
+
+Reason:
+Es lo mínimo que permite al público crear cuenta sin inventar requisitos
+legales ni debilitar el login. Cada concesión está acotada y escrita donde se
+toma (`ApiErrors.emailAlreadyRegistered`, `registerBodySchema`,
+`registerParticipant`), y las tres se retiran con la misma pieza: verificación
+de correo.
+
+Riesgos abiertos, para `security-integration`:
+
+- **Rate limiting por cliente.** `apps/web` llama a la API desde su servidor,
+  así que la IP que ve el límite global es la de Next, no la del visitante.
+  Un límite estricto por IP en el alta frenaría a todo el público a la vez; sin
+  él, la enumeración por `409` y el coste de Argon2 solo los acota el límite
+  global. Requiere decidir cómo reenviar una IP de cliente de confianza.
+- **Sin `audit_events` en el alta** (tampoco los emite el login). La
+  procedencia es reconstruible desde `identities.created_at` y la fila de
+  `sessions` (IP, user agent), pero no está en la cadena de auditoría.
+
+Affected areas: `apps/api` (`routes/auth.ts`, `services/identity-ports.ts`,
+`services/drizzle-identity.ts`, `http/errors.ts`, `test/auth-register.test.ts`,
+`openapi/`), `apps/web` (`lib/auth-actions.ts`, `lib/action-result.ts`,
+`components/auth-form-shell.tsx`, `lib/api/resources.ts`, `messages/`),
+`docs/API_CONTRACT.md` §10.
+
+Proposed by: sesión del usuario (2026-09-21)
+Agreed by: pendiente — backend-sweepstakes, security-integration, frontend-ux
+
+## DEC-058
+
+Status: Proposed
+
+Date: 2026-09-29
+
+Decision:
+**Proveedor de correo transaccional: Resend, por su API HTTP y sin SDK. Con él
+se implementan la verificación de correo y el restablecimiento de contraseña
+(`POST /auth/verify-email`, `/auth/verify-email/resend`, `/auth/password/forgot`,
+`/auth/password/reset`).** Cinco puntos:
+
+1. **Resend.** Lo eligió el cliente y ya abrió la cuenta a nombre del negocio.
+   El dominio remitente se verifica con registros SPF/DKIM en `send.` y
+   `resend._domainkey.`, que no tocan el correo entrante del dominio. Sin SDK:
+   la integración es un `POST` con dos cabeceras (`services/email.ts`).
+2. **Enlaces de un solo uso en tabla, no tokens firmados.** `identity_email_tokens`
+   (migración `0030`) guarda el SHA-256 del token, el propósito, la dirección a
+   la que se envió, la caducidad y `consumed_at`. Consumir es un `UPDATE ...
+WHERE consumed_at IS NULL AND expires_at > now`: atómico y de un solo uso.
+   Un token firmado no se puede gastar ni revocar.
+3. **"Olvidé mi contraseña" no enumera.** Responde `200` antes de buscar la
+   cuenta; la búsqueda y el envío corren en segundo plano, así que tampoco el
+   tiempo de respuesta revela nada. El alta también envía en segundo plano.
+4. **Tope por identidad, no por IP.** 3 enlaces por propósito cada 15 minutos,
+   contados en la tabla. La API ve la IP del servidor de `apps/web` (riesgo ya
+   abierto en DEC-057); el tope por identidad protege lo que importa: el buzón
+   de la persona y la cuota del proveedor.
+5. **En producción `EMAIL_PROVIDER=console` no arranca.** Con `console` la
+   recuperación respondería "revisa tu correo" y no llegaría nada. Fuera de
+   producción `console` es el valor por defecto e imprime el enlace para poder
+   recorrer el flujo en local; en producción nunca lo imprime.
+
+Lo que esta decisión NO cambia: la cuenta sigue naciendo `ACTIVE` y el `409` del
+alta sigue existiendo (DEC-057). Si verificar el correo condiciona las
+participaciones sigue en `docs/LEGAL_PENDING.md`; los correos no afirman nada
+al respecto.
+
+Context:
+El cliente entregó el acceso a Resend. `apps/web` ya tenía las cuatro pantallas
+y llamaba a estas rutas como `PROVISIONAL`; solo respondían los mocks.
+
+Alternatives:
+A — SDK oficial de Resend (descartada: una dependencia más para una sola
+llamada). B — Token firmado sin tabla (descartada: no se puede consumir ni
+revocar). C — Rate limit por IP (descartada: la IP es la de `apps/web`). D — La
+elegida.
+
+Reason:
+Cierra la alternativa A de DEC-057 en su parte de correo sin inventar
+requisitos legales, con el token tratado como la credencial que es: solo hash
+en base de datos, nunca en logs, un solo uso.
+
+Affected areas: `apps/api` (`routes/auth.ts`, `services/email.ts`,
+`services/email-templates.ts`, `services/identity-ports.ts`,
+`services/drizzle-identity.ts`, `config/env.ts`, `http/errors.ts`, `test/`,
+`openapi/`), `packages/database` (`drizzle/0030_email_tokens.sql`,
+`schema/email-tokens.ts`), `docs/API_CONTRACT.md` §10, `.env.example`,
+`scripts/railway-env.mjs`.
+
+Proposed by: sesión del usuario (2026-09-29)
+Agreed by: pendiente — backend-sweepstakes, security-integration, frontend-ux
+
+## DEC-059
+
+Status: Proposed
+
+Date: 2026-09-30
+
+Decision:
+**Procesador de pagos: Stripe Checkout (`hosted_redirect`), con un adaptador
+propio sobre el puerto `PaymentProvider` y sin SDK. Apagado por defecto
+(`PAYMENT_PROVIDER=none`).** Seis puntos:
+
+1. **Adaptador en `packages/commerce/src/stripe-provider.ts`.** Abre sesiones de
+   Checkout, lee PaymentIntents y reembolsa con `fetch` y
+   `application/x-www-form-urlencoded`; verifica la firma `Stripe-Signature`
+   (`t=…,v1=…`, HMAC-SHA256 del cuerpo crudo, tolerancia de reloj, varias `v1`
+   durante una rotación). El dominio no cambia: el puerto ya tenía la forma
+   correcta, que era lo que DEC-046 quería comprobar.
+2. **Eventos.** `checkout.session.completed` (solo `paid`),
+   `async_payment_succeeded/failed`, `checkout.session.expired`,
+   `refund.created/updated` (solo `succeeded`) y `charge.dispute.created/closed`.
+   Cualquier otro se normaliza a `UNKNOWN` y se registra como `IGNORED` con 200,
+   en vez de rechazarse: un 401 haría que Stripe reintentara días y desactivara
+   el endpoint. El reembolso se lee de `refund.*` porque desde la API
+   2022-11-15 el Charge ya no trae la lista de reembolsos.
+3. **Tres fallos del flujo que impedían cobrar, corregidos.** (a) El pedido
+   pasaba de `DRAFT` a `CONFIRMED`, transición que la máquina no admite: ahora
+   pasa a `PENDING_PAYMENT` al abrirse la sesión. (b) La sesión de checkout
+   nunca salía de `PENDING`: ahora se liquida con el desenlace. (c) La URL de
+   vuelta no llevaba el pedido: la API añade `?draft=<id>`. Además, un reembolso
+   de un pedido que nunca calificó ya no lanza, y todo reembolso deja el estado
+   de pago en `PARTIALLY_REFUNDED`/`REFUNDED`.
+4. **Clave de prueba en producción solo declarándolo.** `sk_test_` en producción
+   exige `PAYMENT_TEST_MODE=true`, y ese valor con una clave real no arranca. Hay
+   un único entorno desplegado y el checkout se prueba antes del lanzamiento.
+5. **El número de tarjeta nunca pasa por la plataforma.** Solo identificadores
+   e importes.
+6. **Riesgo abierto, no técnico.** La lista de negocios restringidos de Stripe
+   menciona "sweepstakes and contests". Está en `docs/LEGAL_PENDING.md` para el
+   abogado; esta decisión no lo resuelve.
+
+Affected areas: `packages/commerce` (`stripe-provider.ts`, `index.ts`, test),
+`apps/api` (`routes/orders.ts`, `config/env.ts`, `app.ts`, `server.ts`, test),
+`.env.example`, `packages/security` (registro de variables).
+
+Proposed by: sesión del usuario (2026-09-30)
+Agreed by: pendiente — backend-sweepstakes, security-integration, frontend-ux
+
+## DEC-060
+
+Status: Proposed
+
+Date: 2026-09-30
+
+Decision:
+**Registro, inicio de sesión y recuperación de contraseña con celular
+verificado por SMS (Twilio Verify), protegidos por Cloudflare Turnstile.
+Apagado por defecto (`SMS_PROVIDER=none`).** Siete puntos:
+
+1. **Correo O celular.** Lo eligió el cliente: una cuenta puede no tener correo.
+   La CHECK `identities_email_present_unless_anonymized` se sustituye por
+   `identities_contact_present_unless_anonymized` (correo o celular).
+2. **El celular que identifica va en `identities`** (`phone_e164`,
+   `phone_verified_at`, índice único), no en `participants.phone_e164`, que es un
+   dato de contacto sin verificar —puede venir de una ficha postal— y no puede
+   servir para entrar en una cuenta (migración `0031`).
+3. **Twilio Verify, no SMS propios.** Twilio genera, envía, caduca y comprueba
+   el código; la plataforma nunca lo ve. Twilio aplica además sus límites por
+   número y su detección de fraude.
+4. **Solo números de EE. UU.** La promoción es estadounidense y abrir otros
+   países invita al "SMS pumping".
+5. **Turnstile antes de cada SMS, obligatorio en producción.** Pedir un código
+   es la única acción pública que cuesta dinero; sin la clave secreta de
+   Turnstile, la API no arranca con `SMS_PROVIDER=twilio` en producción. La CSP
+   admite `https://challenges.cloudflare.com` en `script-src` y `frame-src`.
+6. **Sin enumeración donde se puede evitar.** La recuperación por SMS responde
+   igual exista o no la cuenta y envía en segundo plano. El alta revela
+   `PHONE_ALREADY_REGISTERED` —la misma concesión que DEC-057 hace con el
+   correo— y lo hace ANTES de enviar, para no cobrar un código inútil.
+7. **Pendiente legal.** El aviso de que se enviará un SMS y su consentimiento
+   deben revisarse por el abogado (`docs/LEGAL_PENDING.md`).
+
+Affected areas: `apps/api` (`routes/auth.ts`, `services/sms.ts`,
+`services/bot-check.ts`, `services/phone.ts`, `services/identity-ports.ts`,
+`services/drizzle-identity.ts`, `services/participant-lookup.ts`,
+`http/errors.ts`, `http/schemas-b5.ts`, `config/env.ts`, test), `apps/web`
+(registro, inicio de sesión, recuperación, widget de Turnstile, CSP, mensajes
+en-US/es-US, test), `packages/database` (`0031_verified_phone.sql`,
+`schema/identity.ts`), `docs/API_CONTRACT.md` §10, `.env.example`.
+
+Proposed by: sesión del usuario (2026-09-30)
+Agreed by: pendiente — backend-sweepstakes, security-integration, frontend-ux
+
+## DEC-061
+
+Status: Proposed
+
+Date: 2026-09-30
+
+Decision:
+**El límite de peticiones de la API es por visitante, no por servidor web, y
+al pasarse responde 429.** Cuatro puntos:
+
+1. **El defecto, medido en producción.** El navegador nunca habla con la API:
+   lo hace `apps/web` por la red privada. Con `trustProxy: false` la IP de todos
+   los visitantes era la del servidor web, y `API_RATE_LIMIT_MAX_REQUESTS` (120
+   por minuto) era un único cupo para la tienda entera. En las pruebas previas
+   al lanzamiento, un solo visitante lo agotó y las fichas de producto salieron
+   con "No hemos podido cargar esta sección".
+2. **La web reenvía la IP del visitante.** `apiRequest` manda en
+   `X-Forwarded-For` la ÚLTIMA entrada de la cabecera entrante, que es la que
+   añade el proxy de Railway (`lib/api/visitor-address.ts`). Como `http.ts`
+   lee `next/headers`, un componente `"use client"` ya no puede importar
+   VALORES del índice `@/lib/api`: los toma de las hojas (`localized`,
+   `contract`, `admin-contract`). Lo vigila `client-imports.test.ts`; el primer
+   intento (d2d3c85) rompió `next build` por esto.
+3. **La API solo la cree del salto inmediato, y solo si es de red privada**
+   (`http/trusted-proxy.ts`). Un cliente que llegara desde fuera no puede
+   declarar su propia IP, y las entradas anteriores de la cabecera, que las
+   escribe cualquiera, no eligen cubo. Fastify 5 trata un `trustProxy` numérico
+   como "no confiar en nadie" por ese mismo motivo, así que se usa una función.
+4. **429, no 500.** `errorResponseBuilder` devolvía el sobre y el plugin lo
+   lanzaba sin `statusCode`, así que el manejador lo trataba como error no
+   controlado. Ahora devuelve el `ApiError`. Al pasarse se registra
+   `rate_limit.exceeded` con la IP enmascarada (`203.0.x.x`).
+
+Affected areas: `apps/api` (`app.ts`, `http/trusted-proxy.ts`, test),
+`apps/web` (`lib/api/http.ts`, `lib/api/visitor-address.ts`, test).
+
+Proposed by: sesión del usuario (2026-09-30), pruebas previas al lanzamiento
+Agreed by: pendiente — security-integration, backend-sweepstakes, frontend-ux
+
+## DEC-062
+
+Status: Proposed
+
+Date: 2026-10-01
+
+Decision:
+**Un pago confirmado no puede quedarse sin participaciones, y una versión de
+reglas no se activa sin decir en qué estado de pago califica un pedido.**
+Revisión previa al lanzamiento de la primera edición. Cinco puntos:
+
+1. **Primero se otorga y después se confirma el pedido**
+   (`applyQualifyingPayment`, `routes/orders.ts`). Todo el webhook corre en
+   una transacción y el procesador CAPTURA el error del manejador para marcar
+   el evento `FAILED` y confirmarla. Con el orden anterior, un award que
+   fallaba dejaba el pedido `PAID` y calificado sin ledger, y el reintento no
+   otorgaba (`justQualified` salía `false`). Ahora un fallo deja el pedido en
+   `PENDING_PAYMENT`, y si lo que falla es confirmar el pedido tras otorgar, el
+   reintento encuentra `ALREADY_AWARDED` (idempotencia por `order:<id>`).
+2. **Pago fuera del periodo = pagado sin participaciones, no un fallo.**
+   `PROMOTION_WINDOW_CLOSED` y `PROMOTION_NOT_ACCEPTING_ENTRIES` registran el
+   cobro sin calificar (`paidOutsidePromotion`); el presentador lo enseña como
+   `NOT_APPLICABLE` en vez de "pendiente de confirmación de pago".
+3. **Un evento `FAILED` responde 500**, para que el proveedor reintente. Antes
+   se respondía 200 porque reintentar no arreglaba nada; con el punto 1 sí lo
+   hace (un corte de la base, una versión de reglas corregida), y si el fallo
+   persiste el proveedor avisa por correo.
+4. **`order_qualification.qualifying_payment_state` la exige la activación.**
+   No está entre las claves del trigger de DEC-012, así que una versión podía
+   activarse sin ella y cada webhook fallaba con
+   `ORDER_QUALIFICATION_NOT_CONFIGURED`. La API la exige al activar (409
+   `LIFECYCLE_REFUSED` con `details.engine`), en el atajo de bonificación, y
+   `activatable` la tiene en cuenta; `validation.calculation` sale
+   `UNRESOLVED` sin ella. El VALOR (PAID o AUTHORIZED) sigue siendo del
+   abogado: la API no pone ninguno.
+5. **El panel la escribe sin JSON**, junto con `product_eligibility` y
+   `amoe.requires_review`; y `GET /config` publica `password_policy` para que
+   el alta diga el mínimo de la contraseña antes de enviar.
+
+Alternatives:
+A — Punto de guardado (SAVEPOINT) alrededor del manejador (descartado: exige
+ampliar el puerto `UnitOfWork` en tres paquetes para lo que resuelve el orden
+de dos llamadas). B — Añadir `order_qualification` a las claves del trigger
+(descartado por ahora: es una migración que aquí no se puede probar contra
+PostgreSQL, y la API ya la cierra en el único camino de activación).
+
+Affected areas: `apps/api` (`routes/orders.ts`, `routes/admin-rules.ts`,
+`routes/storefront.ts`, `http/schemas.ts`, `services/order-presenter.ts`,
+tests, `openapi/openapi.json`), `apps/web` (formularios de contraseña,
+configuración de reglas, transcripción AMOE, segundo factor del panel),
+`docs/API_CONTRACT.md`.
+
+Proposed by: sesión del usuario (2026-10-01), revisión previa al lanzamiento
+Agreed by: pendiente — backend-sweepstakes, security-integration, frontend-ux
+
+**Addendum 2026-10-03 — casos de negocio que no son fallos.** El punto 3 (500
+en `FAILED`) hizo visibles fallos que antes se tapaban con un 200, y Stripe
+avisó de que el endpoint de sandbox fallaba. La causa: `applyRefund` y
+`applyDispute` construían la intención de reversal ANTES de mirar si el pedido
+tenía promoción, y `buildRefundReversalIntent`/`buildChargebackReversalIntent`
+lanzan sin ella. Con ninguna promoción abierta, todo reembolso de prueba
+fallaba, y el reembolso ni siquiera quedaba registrado. Ahora el reembolso y la
+disputa se registran siempre; la reversal solo se construye si el pedido
+calificó, y `ORIGIN_TRANSACTION_NOT_FOUND` (calificó sin concesión: tope o
+retención) no es un fallo. Un "fallido"/"caducado" o un "pagado" que llega
+cuando el pedido ya está en un estado que no admite ese cambio se ignora
+(`IGNORED`, 200). Lo que siga fallando es un fallo de verdad y responde 500.
+
+## DEC-063
+
+Status: Proposed
+
+Date: 2026-10-04
+
+Decision:
+**Términos, Privacidad y Aviso de California se publican tal cual llegaron, y
+`/privacychoices` es un formulario que manda la solicitud al buzón del
+negocio.** Los tres documentos del 2026-09-30 se convierten del Word a datos
+(`scripts/legal/`) y se pintan como texto, sin HTML, en `/terms`, `/privacy` y
+`/california-notice`, con aviso de que solo existen en inglés. La Política y
+el Aviso publican `https://<dominio>/privacychoices` como vía para
+ejercer derechos: `POST /api/v1/privacy-requests` (PUBLIC, con Turnstile si
+está configurado) envía el expediente a `PRIVACY_REQUEST_INBOX` con la persona
+como `reply_to` y un acuse en su idioma; 503 si el buzón no lo recibió. No se
+guarda en la base: se atiende desde el correo, que es lo que la Política
+describe. El pie enlaza los cuatro y publica el contacto del negocio con la
+dirección de las Reglas del 2026-10-04.
+
+Alternatives:
+A — Tabla de solicitudes con panel de seguimiento (descartada por ahora: el
+volumen esperado es bajo y la Política promete atención humana por correo).
+B — Esperar a la versión corregida de los documentos (descartada por decisión
+del usuario: publicar con el texto actual; los Términos aún dicen "[DIRECCIÓN]"
+y "[INSERT BOX NUMBER]", pendiente del abogado).
+
+Affected areas: `apps/web` (`src/legal/`, `components/legal-*.tsx`,
+`components/privacy-request-form.tsx`, `components/site-footer.tsx`, páginas
+legales, mensajes), `apps/api` (`routes/privacy-requests.ts`,
+`services/privacy-request-email.ts`, `config/env.ts`), `docs/API_CONTRACT.md`.
+
+Proposed by: sesión del usuario (2026-10-01/04), lanzamiento de la primera edición
+Agreed by: pendiente — frontend-ux, backend-sweepstakes, security-integration
+
+## DEC-064
+
+Status: Proposed
+
+Date: 2026-10-03
+
+Decision:
+**El catálogo público tiene un orden elegido, no el alfabético.** Al cargar el
+catálogo real, el cliente pidió la mercancía con foto primero y los paquetes al
+final, de menor a mayor (Bronce, Plata, Gold, Diamante). `GET /products` ordena
+por una clave compuesta (`services/catalog-order.ts`): tipo (mercancía antes
+que paquetes), con imagen antes que sin ella, `position` de la categoría (sin
+categoría al final), precio "desde" de la variante activa más barata y `slug`.
+Los tramos son de ancho fijo, así que la clave es una cadena comparable y el
+cursor opaco la guarda sin cambiar de forma. Se ordena en memoria tras leer lo
+publicado: el catálogo es de decenas de productos.
+
+Alternatives:
+A — Columna `position` por producto editable en el panel (descartada por
+ahora: migración que aquí no se puede probar contra PostgreSQL y un campo más
+en el formulario; el orden pedido sale de datos que ya existen). B — Ordenar
+en la web (descartada: la paginación es del servidor y la segunda página no
+sabría qué hubo en la primera).
+
+Affected areas: `apps/api` (`services/catalog-order.ts`,
+`services/drizzle-repositories.ts`, `routes/storefront.ts`, tests),
+`docs/API_CONTRACT.md`.
+
+Proposed by: sesión del usuario (2026-10-03), carga del catálogo
+Agreed by: pendiente — backend-sweepstakes, frontend-ux
+
+## DEC-065
+
+Status: Proposed
+
+Date: 2026-10-04
+
+Decision:
+**La portada presenta el premio con su fotografía y los paquetes de
+participaciones en una banda propia, por niveles.** Lo pidió el cliente con una
+referencia delante. Cinco puntos:
+
+1. **Foto del premio subida desde el panel.** Migración `0032`:
+   `promotions.hero_image_url` (solo ruta del propio sitio, CHECK
+   `promotions_hero_image_url_shape`) y `promotion_translations.hero_image_alt`
+   (descripción por idioma). Se sube con el mismo `POST /admin/media` que las
+   fotos de producto (DEC-056) y se fija con `PATCH /admin/promotions/{id}`,
+   que también acepta `tagline` (el lema bajo el titular). El detalle público
+   (`GET /promotions/{slug}`) publica `media: { hero_url, square_url: null, alt }`
+   o `null`: la forma que el frontend pidió en HO-039. No se admite `https://`
+   porque el hero la pinta con `next/image`, que rechaza dominios no declarados.
+2. **Sin promoción activa, la próxima.** Si `/promotions/active` da 404, la
+   portada presenta la promoción SCHEDULED que abre antes (del listado
+   público). El hero ya pintaba ese estado: cuenta atrás hacia la apertura y,
+   sin Reglas activas, el estado contenido de DEC-044.
+3. **Los paquetes salen de la rejilla de mercancía.** La portada y `/shop` sin
+   filtros piden `kind=MERCHANDISE` para la rejilla y `kind=ENTRY_PACKAGE` para
+   la banda nueva (`entry-package-band.tsx`). Quien filtra en `/shop` por tipo o
+   categoría ve lo que pidió, paquetes incluidos.
+4. **Se copia el aspecto, no el vocabulario.** Un pase con el metal del nivel
+   (bronce, plata, oro, diamante, por orden de precio), troquel con muescas,
+   banda de bonus y botón de compra en la tarjeta. La referencia dibuja un
+   boleto con código de barras; aquí la palabra sigue siendo "paquete de
+   participaciones" y donde iba el código va la cifra. La cifra es la que
+   evalúa el backend (`entry_offer`); sin promoción activa se muestra el nombre
+   del paquete, que la declara. "Recomendado" marca el tercer nivel: es una
+   recomendación, no un dato de ventas.
+5. **Añadir al carrito desde la tarjeta** solo si el paquete tiene una variante
+   (`PackageQuickAdd`, la misma server action que la ficha). Con varias, la
+   tarjeta enlaza a la ficha.
+
+Alternatives:
+A — Foto fija en el código de la web por edición (descartada por el usuario:
+cada edición exigiría un despliegue). B — Mostrar paquetes y mercancía en la
+misma rejilla con otra tarjeta (descartada: es lo que el cliente pidió quitar).
+
+Affected areas: `packages/database` (`0032_promotion_hero_image.sql`,
+`schema/promotions.ts`), `apps/api` (`http/schemas.ts`, `routes/storefront.ts`,
+`routes/admin-catalog.ts`, `services/admin-catalog.ts`,
+`services/drizzle-repositories.ts`, `services/ports.ts`, tests), `apps/web`
+(portada, `/shop`, `entry-package-band.tsx`, `package-quick-add.tsx`,
+formulario y acción de promoción del panel, mensajes en-US/es-US),
+`docs/API_CONTRACT.md`.
+
+Proposed by: sesión del usuario (2026-10-04), pedido del cliente
+Agreed by: pendiente — frontend-ux, backend-sweepstakes, security-integration
+
+## DEC-066
+
+Status: Proposed
+
+Date: 2026-10-04
+
+Decision:
+**El hero muestra varias fotos del premio en un carrusel.** Lo pidió el usuario
+tras subir la foto principal (DEC-065): el premio es elegir entre dos
+camionetas y una foto no las enseña. Cuatro puntos:
+
+1. **La foto principal no se mueve.** `promotions.hero_image_url` sigue siendo
+   la primera del carrusel. Migración `0033`: tabla `promotion_hero_images`
+   con hasta 5 fotos ADICIONALES (posición 1–5, ruta del propio sitio,
+   descripción en los dos idiomas o en ninguno). Nada que migrar: lo publicado
+   sigue igual.
+2. **Se reemplaza la lista entera.** `PATCH /admin/promotions/{id}` acepta
+   `hero_gallery` (lista ordenada); la API borra e inserta en una transacción.
+   `app_runtime` tiene SELECT, INSERT y DELETE sobre la tabla, sin UPDATE.
+3. **El detalle público publica `media.gallery`**: todas las fotos en orden,
+   empezando por la de `hero_url`. Si no hay principal pero sí adicionales, la
+   primera adicional hace de principal.
+4. **Carrusel por fundido, no por desplazamiento** (`hero-carousel.tsx`): el
+   degradado y el titular no se mueven, así que el contraste medido en DEC-042
+   vale para todas las fotos. Cambia cada 6 s, se puede pausar (WCAG 2.2.2), se
+   detiene con el foco en sus controles, no rota con `prefers-reduced-motion` y
+   solo la foto visible existe para un lector de pantalla. Con una sola foto se
+   pinta como antes.
+
+Alternatives:
+A — Galería de miniaturas bajo el hero (descartada por el usuario frente al
+carrusel). B — Mover la foto principal a la tabla nueva (descartada: exige
+migrar datos y deja una columna muerta sin ganar nada).
+
+Affected areas: `packages/database` (`0033_promotion_hero_gallery.sql`,
+`schema/promotions.ts`), `apps/api` (`routes/storefront.ts`,
+`routes/admin-catalog.ts`, `services/admin-catalog.ts`,
+`services/drizzle-repositories.ts`, `services/ports.ts`, `http/schemas.ts`,
+tests), `apps/web` (`hero-carousel.tsx`, `promotion-hero.tsx`, formulario y
+acción de promoción del panel, mensajes, tests), `docs/API_CONTRACT.md`.
+
+Proposed by: sesión del usuario (2026-10-04)
+Agreed by: pendiente — frontend-ux, backend-sweepstakes
+
+## DEC-067
+
+Status: Proposed
+
+Date: 2026-10-05
+
+Decision:
+**Fecha de nacimiento y estado se declaran al darse de alta; la elegibilidad se
+evalúa al otorgar.** Las Official Rules de la primera edición (sección 1)
+definen al "Entrant" por edad mínima, mayoría de edad de su estado y estado de
+residencia no excluido, y dicen que la compra de quien no lo es "does not
+constitute an entry". Por eso:
+
+1. **El alta pide fecha de nacimiento, estado (50 + DC) y los documentos de
+   `required_consents`** (`GET /config`: Reglas 2026-10-04, Términos y
+   Privacidad 2026-09-30). Se guardan en `participants` y
+   `participant_consents` (0034, esta se añade y no se edita). NO se rechaza a
+   un menor ni a un residente de un estado excluido: comprar mercancía está
+   permitido.
+2. **El webhook evalúa al calificar el pedido** (`services/eligibility.ts`):
+   `minimum_age`, `allowed_jurisdictions.excluded_states` y
+   `age_of_majority_by_state` de la versión de reglas, con la edad contada en
+   el día legal de la promoción (DEC-011). Quien no es elegible -o no declaró-
+   queda pagado sin participaciones, como una compra fuera del periodo.
+3. **Solo con `age_gate_enabled` / `state_eligibility_enforcement_enabled`
+   encendidos** (DEC-032, control dual). Apagados, nada cambia. Encendidos y
+   sin el dato en las reglas, el evento falla y queda visible.
+4. **Las cuentas anteriores declaran una vez** (`PUT /me/eligibility`): el
+   checkout lo pide antes de cobrar si algún interruptor está encendido. No se
+   reescribe: cambiar fecha o estado después de comprar sería volverse
+   elegible a posteriori.
+
+Alternatives:
+A — Bloquear el alta a menores y estados excluidos (descartada: las Reglas no
+lo exigen y la tienda vende mercancía). B — Decidir la elegibilidad al
+registrarse y guardarla (descartada: la decisión depende de las reglas de cada
+promoción y del día en que se compra).
+
+Pendiente del abogado: la mayoría de edad por estado (AL y NE 19, MS 21) se
+deriva del texto de la sección 1; confirmarla.
+
+Affected areas: `packages/database` (0034, `schema/identity.ts`), `apps/api`
+(`config/consents.ts`, `services/eligibility.ts`, `http/eligibility-input.ts`,
+`routes/auth.ts`, `routes/portal.ts`, `routes/orders.ts`,
+`routes/storefront.ts`, identidad, tests), `apps/web` (alta, checkout,
+`eligibility-fields.tsx`, mensajes `usStates` y `eligibility`, tests),
+`docs/API_CONTRACT.md`.
+
+Proposed by: sesión del usuario (2026-10-04), lanzamiento de la primera edición
+Agreed by: pendiente — backend-sweepstakes, frontend-ux, security-integration
+
+## DEC-068
+
+Status: Proposed
+
+Date: 2026-10-04
+
+Decision:
+**Rediseño visual con el estilo de las referencias de carreras del cliente**
+(sitios de referencia). El usuario pidió copiar "letras, botones, animaciones" y
+que el vehículo se vea. Solo cambia la presentación; nada de lo que se afirma:
+
+1. **Letra de titular nueva: Saira** (900/800/700, normal e itálica, por
+   `next/font`, variable `--font-app-headline`, token `--app-font-headline`,
+   clase Tailwind `font-headline`). `.app-headline` = itálica negra en caja
+   alta. La usan los titulares de sección, el hero, los botones, el marcador y
+   las cifras. Oswald sigue en navegación, antetítulos y el panel.
+2. **Hero:** la foto del premio pasa a un cuadrado a todo el ancho en teléfono
+   (4:3 en tableta, 60 % del ancho en escritorio) y el degradado solo funde el
+   pie: antes tapaba el 70 % del vehículo. Titular en cromo (`.app-chrome`,
+   relleno metálico con respaldo de color sólido). El aviso de Reglas sin
+   publicar (DEC-044) pasa de alerta a nota, con el mismo texto y en el mismo
+   sitio; la acción neutra sigue siendo `subtle`.
+3. **Botones:** Saira itálica, volumen con degradado translúcido sobre el color
+   del token (los contrastes medidos en DEC-042 no cambian en el centro, donde
+   va el texto), resplandor y un destello al pasar el ratón. Sin destello con
+   `prefers-reduced-motion`. Los verbos no cambian: el rojo sigue diciendo
+   "comprar" y nunca "ENTER NOW".
+4. **Marcador sin cajas:** cifras enormes en itálica con la unidad debajo; la
+   barra de progreso lleva rayas en movimiento (decoración: su longitud sigue
+   siendo el tramo real transcurrido).
+5. **Carrusel (DEC-066):** los puntos pasan a una barra por foto que se llena
+   mientras esa foto está en pantalla. El temporizador es por foto, para que la
+   barra y el cambio coincidan. Pausa, nombres accesibles y movimiento reducido
+   igual que antes.
+
+Alternatives:
+A — Copiar la tipografía exacta de las referencias (descartada: son fuentes con
+licencia de terceros). B — Cambiar `.app-display` en todo el sitio (descartada:
+también la usan navegación, formularios y el panel, donde la itálica de
+titular estorba).
+
+Affected areas: `packages/design-system` (`tokens.css`, `tailwind-preset.mjs`),
+`packages/ui` (`button.tsx`, `countdown.tsx`), `apps/web` (`fonts.ts`, los dos
+`layout.tsx`, `globals.css`, `promotion-hero.tsx`, `hero-carousel.tsx`,
+`promotion-countdown.tsx`, `promotion-progress.tsx`, `section-heading.tsx`,
+`entry-package-band.tsx`, `package-quick-add.tsx`, `prize-band.tsx`,
+`marquee-band.tsx`, portada, detalle de promoción y de producto, carrito).
+
+Proposed by: sesión del usuario (2026-10-04)
+Agreed by: pendiente — frontend-ux
+
+## DEC-069
+
+Status: Proposed
+
+Date: 2026-10-05
+
+Decision:
+**Portada recortada para que el camino del premio a la compra sea corto.** El
+cliente pidió quitar lo innecesario, cambiar la lista "Abre / Cierra" por un
+contador como el de las referencias, y quitar los recuadros de aviso. El
+usuario eligió cada punto:
+
+1. **El marcador sube al hero, bajo los botones.** Debajo va el plazo escrito
+   en una línea ("Cierra el …", con hora y zona legal, DEC-011). Desaparecen la
+   lista "Abre / Cierra", la nota de zona horaria y, solo en el hero, la nota
+   "la cuenta atrás es una comodidad". El detalle de promoción no cambia. Sin
+   Reglas publicadas sigue sin haber marcador (DEC-044); el plazo escrito se
+   queda.
+2. **El aviso de estado solo aparece cuando una compra NO cuenta**: todos los
+   estados salvo ACTIVE. Va dentro del hero, como nota compacta. Abierta, lo
+   dicen el chip y el "CIERRA EN". El descargo "las participaciones se otorgan
+   conforme a las Reglas Oficiales" pasa a la letra pequeña bajo la línea
+   legal.
+3. **"COMPRAR AHORA" baja a la banda de paquetes** (`#packages`) en la portada,
+   donde ya se añade al carrito. Solo cuando la promoción acepta
+   participaciones y hay paquetes publicados; si no, va a la tienda, como
+   antes. El verbo no cambia (DEC-042).
+4. **Salen "Cómo funciona" y "Antes de participar"** (`trust-band.tsx` y sus
+   textos). Las Reglas y las preguntas frecuentes siguen en el menú y en el
+   pie. La banda de oferta deja de abrirse vacía cuando no hay oferta ni vía
+   gratuita.
+
+Los avisos de "Reglas no publicadas" y "todavía no ha abierto" NO se quitan a
+mano: desaparecen cuando se activan las Reglas y la promoción, que es lo que
+el cliente va a hacer.
+
+Alternatives:
+A — Ocultar los avisos sin activar las Reglas (descartada: son lo que impide
+invitar a comprar sin documento, DEC-044). B — Contador "ABRE EN" sin Reglas
+publicadas (no se planteó: la fecha de apertura ya pasó y la promoción espera
+solo a las Reglas).
+
+Affected areas: `apps/web` (`promotion-hero.tsx`, `promotion-countdown.tsx`,
+`entry-package-band.tsx`, portada, `trust-band.tsx` eliminado, mensajes
+`home.hero.opensOn/closesOn`, sin `home.howItWorks` ni `home.trust`, tests).
+
+Proposed by: sesión del usuario (2026-10-05)
+Agreed by: pendiente — frontend-ux
+
+## DEC-070
+
+Status: Proposed
+
+Date: 2026-10-05
+
+Decision:
+**Una promoción programada se puede retirar de la tienda: `SCHEDULED → DRAFT`.**
+Antes del lanzamiento había dos ediciones programadas: `invierno-2026`, de
+prueba, sin Reglas y con fechas que no coinciden con el documento, y
+la edición oficial del premio. La API solo tenía rutas para programar,
+activar y cerrar, así que la de prueba no se podía quitar y seguía siendo
+pública. El usuario decidió dejar solo la oficial.
+
+1. **`POST /admin/promotions/:id/unschedule`**, con `promotion.update` y sin
+   motivo, igual que `schedule`, del que es el reverso. La transición ya existía
+   en `promotion_status_transitions`; el motor sigue decidiendo. Desde
+   cualquier otro estado responde 409 `LIFECYCLE_REFUSED`.
+2. **A borrador y no a cancelada.** `CANCELLED` está entre los estados
+   públicos, así que la tienda la seguiría listando como "Cancelada". `DRAFT`
+   no es público. Nada se borra: `app_runtime` no tiene DELETE sobre `promotions`.
+3. **En el panel**, en la tarjeta "Estado" de una promoción programada, debajo
+   de "Activar": "Retirar de la tienda", con casilla de confirmación.
+
+Alternatives:
+A — Cancelarla (descartada: seguiría siendo pública). B — Borrarla (descartada:
+las promociones son registro y la base no lo permite).
+
+Affected areas: `apps/api` (`routes/admin-catalog.ts`, `openapi/`, tests),
+`apps/web` (`promotion-transition-form.tsx`, ficha de promoción del panel,
+`actions.ts`, `resources.ts`, mocks, mensajes `admin.promotions.unschedule*`,
+tests), `docs/API_CONTRACT.md`.
+
+Proposed by: sesión del usuario (2026-10-05)
+Agreed by: pendiente — backend-sweepstakes
+
+## DEC-071
+
+Status: Proposed
+
+Date: 2026-10-05
+
+Decision:
+**Hero compacto en teléfono y oferta en tarjetas.** Con la promoción ya
+abierta, el usuario pidió que el contador se vea en una sola pantalla del
+teléfono y que el recuadro de participaciones luzca mejor.
+
+1. **Hero en teléfono:**
+   - la foto pasa a 4:3, como en tableta; el cuadrado recortaba la camioneta
+     por los lados;
+   - las tasas solo se muestran desde tableta: en teléfono el panel de oferta las
+     repite justo debajo, en grande;
+   - lema más pequeño, botón secundario más bajo y menos aire entre bloques.
+
+   Del titular al plazo escrito ahora caben unos 560 px.
+
+2. **Panel de oferta:** título de titular con filete de oro, y las tasas como
+   tarjetas con la cifra grande en oro y debajo qué es y por qué importe.
+   - La frase completa de cada tasa sigue en el DOM para lectores de pantalla;
+     la parte visual va `aria-hidden`.
+   - Centrado en la portada cuando no hay vía gratuita.
+3. **"1 participación", no "1 participaciones".** Plural ICU en
+   `entryOffer.rate*`: solo la tasa entera 1/1 es singular. Es gramática, no
+   aritmética: no se divide nada.
+
+Alternatives:
+A — Mover el contador encima de los botones (descartada: el orden botón →
+contador es el de la referencia que eligió el cliente). B — Quitar las tasas
+del hero también en escritorio (descartada: ahí hay sitio y responden lo
+primero que se pregunta).
+
+Affected areas: `apps/web` (`promotion-hero.tsx`, `entry-offer-panel.tsx`,
+`entry-rate-lines.tsx`, portada, mensajes `entryOffer.rate*` y `tile*`, tests).
+
+Proposed by: sesión del usuario (2026-10-05)
+Agreed by: pendiente — frontend-ux
+
+## DEC-072
+
+Status: Proposed
+
+Date: 2026-10-05
+
+Decision:
+**En la portada, la oferta es una banda dorada a todo el ancho.** El usuario
+quería las tarjetas de DEC-071 más cortas, "algo en amarillo fuerte, un bloque
+grande de lado a lado", para que la página no se sienta larga.
+
+1. **`EntryOfferPanel variant="band"`.** Usa el oro de la banda del premio
+   (`.app-prize-band`), con tinta encima. La banda lleva:
+   - un antetítulo;
+   - las dos cifras en franja (`RateStrip`): número grande, unidad y "por cada
+     $1.00 en …", separadas por un corte en diagonal;
+   - la nota de que las cifras son informativas.
+
+   En teléfono mide unos 200 px; la tarjeta medía unos 560.
+
+2. **El detalle de promoción sigue con las tarjetas** (`variant="card"`, el
+   valor por defecto).
+3. **Si hay vía gratuita, va en su propia banda debajo.** Antes compartía rejilla
+   con la oferta. La insignia y el anuncio de bonus van sobre negro también en la
+   banda: oro sobre oro no se lee.
+
+Affected areas: `apps/web` (`entry-offer-panel.tsx`, `entry-rate-lines.tsx`,
+portada, mensaje `entryOffer.tilePerPackage`).
+
+Proposed by: sesión del usuario (2026-10-05)
+Agreed by: pendiente — frontend-ux
+
+## DEC-073
+
+Status: Proposed
+
+Date: 2026-10-05
+
+Decision:
+**Logotipo completo en la cabecera del teléfono y carrusel sin controles.** El
+usuario pidió el nombre junto a la estrella, centrado, con la segunda línea en
+oro y del mismo largo que la primera, y que las fotos se cambien con el dedo sin
+iconos encima.
+
+1. **`BrandLockup`.** La estrella va a la izquierda y el logotipo en dos líneas
+   también por debajo de 640 px; desaparece la opción `wordmark="sm-up"`.
+   - La segunda línea mide exactamente lo mismo que la primera con cualquier fuente:
+     su línea es `w-0 min-w-full` y cada letra se reparte con
+     `justify-between`.
+   - El logotipo visual va `aria-hidden` y el nombre se lee una vez con
+     `brand.name`.
+   - Medido: cabe centrado en 360 px junto a la hamburguesa, la cuenta y el
+     carrito.
+2. **`HeroCarousel`.** Ya no hay pausa ni barras a la vista.
+   - Es una tira con scroll horizontal nativo y `scroll-snap`: la foto sigue al
+     dedo y un gesto vertical sigue moviendo la página.
+   - Pasa sola cada 6 s y se detiene para siempre cuando el visitante la
+     desliza; también mientras tiene el dedo encima o el foco del teclado, y
+     con `prefers-reduced-motion`.
+   - WCAG 2.2.2: la pausa sigue existiendo, pero solo aparece con el teclado y
+     la leen los lectores de pantalla.
+3. **Los degradados del hero dejan pasar el toque** (`pointer-events-none`).
+   Estaban encima de las fotos y se quedaban el gesto: el deslizamiento de
+   DEC-066 no llegaba al carrusel.
+
+Alternatives:
+A — Indicador discreto de puntos (descartada por ahora: el cliente pidió
+quitar los iconos; la rotación automática ya avisa de que hay más fotos).
+B — Ajustar la segunda línea con `letter-spacing` (descartada: se descuadra con la
+fuente de respaldo).
+
+Affected areas: `apps/web` (`brand-lockup.tsx`, `site-header.tsx`,
+`hero-carousel.tsx`, `promotion-hero.tsx`, `globals.css` sin
+`.app-progress-fill`, mensaje `home.heroCarousel.goTo` retirado, tests).
+
+Proposed by: sesión del usuario (2026-10-05)
+Agreed by: pendiente — frontend-ux
+
+## DEC-074
+
+Status: Proposed
+
+Date: 2026-10-05
+
+Decision:
+**Foto del hero fundida con el fondo, rojo puro y botones más grandes.** El
+usuario quería que la foto no se viera "cortada", un rojo "más chillón" (el de
+antes se veía opaco) y letras más grandes o una tipografía mejor en los
+botones.
+
+1. **`.app-hero-photo-fade`.** La foto se desvanece con una máscara en lugar de
+   fundirse a negro liso.
+   - El fondo del hero lleva textura y luz, y el negro liso dejaba una línea
+     recta donde acababa la foto.
+   - En teléfono funde el último 40 %; en escritorio, además del borde
+     izquierdo de DEC-068, también el pie (las dos máscaras se intersecan).
+2. **Rojo puro.** `accent` pasa de #cf1a22 a #e10012 (saturación del 100 % frente
+   al 78 %), sin verde y casi sin azul.
+   - Escalones: `accent-hover` #ea0816, `accent-active` #c0000c y
+     `accent-text` #ff3838.
+   - Siguen pasando todas las medidas de `accent-tokens.test.ts`: blanco
+     encima 4,99:1, 4,62:1 y 6,47:1.
+   - El botón rojo pierde la mitad de la sombra del pie, que lo oscurecía, y
+     gana resplandor.
+3. **Botones.** Saira en su peso máximo (900, el del titular), con el tracking
+   a 0,02em.
+   - `xl`: 22 px (antes 18).
+   - `lg`: 17 px (antes 16), con 20 px de relleno lateral en teléfono. Es el
+     techo medido: "Ver el detalle de la promoción" cabe en 360 px con 16 px de
+     aire por lado.
+   - El secundario del hero pasa a 24 px de relleno desde tableta, para que los
+     dos botones sigan en una fila a 1366 px.
+
+Alternatives:
+A — Otra tipografía para los botones (descartada por ahora: Saira es la de las
+referencias de carreras que eligió el cliente en DEC-068; más gruesa y más
+grande ya cambia mucho). B — El rojo de la referencia, #e8232a (descartado: da
+4,46:1 con blanco, por debajo de AA).
+
+Affected areas: `packages/design-system` (`tokens.css`), `packages/ui`
+(`button.tsx`, comentarios de `badge.tsx` y tests), `apps/web` (`globals.css`,
+`promotion-hero.tsx`, `promotion-progress.tsx`, `announcement-bar.tsx`).
+
+Proposed by: sesión del usuario (2026-10-05)
+Agreed by: pendiente — frontend-ux
+
+## DEC-075
+
+Status: Proposed
+
+Date: 2026-10-05
+
+Decision:
+**Movimiento en la tienda: aparición al desplazarse, entrada del hero y pases
+de paquetes vivos.** El usuario pidió animaciones al deslizarse y en los
+objetos a la venta, para que la página quede "100% profesional". Reglas:
+
+- Solo `transform` y opacidad (el navegador no repinta). Sin librerías: CSS más
+  un componente de 50 líneas.
+- Nada de rebotes ni escalados llamativos: la regla del sistema de diseño
+  (estética de casino) sigue en pie.
+- Todo se apaga con `prefers-reduced-motion`.
+
+1. **`ScrollReveal`** (en el layout de la tienda). Marca ocultos SOLO los
+   nodos `data-reveal` que están por debajo de la primera pantalla al cargar, y
+   los muestra al entrar en vista: opacidad más un desplazamiento corto, 0,7 s,
+   escalonado con `--reveal-delay`.
+   - Al terminar pasan a "done", que no lleva estilo: el hover rápido de las
+     tarjetas no hereda la transición lenta.
+   - Sin JS, o con lo que ya se ve al cargar, no se oculta nada.
+   - Lo llevan los encabezados de sección (desde la izquierda), la cabecera y
+     los pases de paquetes, las tarjetas de mercancía y las cifras de la banda
+     dorada.
+   - En el carrusel horizontal del teléfono, los pases aparecen al deslizar.
+2. **Entrada del hero al cargar:**
+   - el titular entra desde la izquierda con una inclinación de carreras que se
+     endereza;
+   - chips, lema, botones y contador suben escalonados, todo en menos de un
+     segundo;
+   - las cifras del contador entran desde arriba al cambiar (`animate-app-tick`
+     en el preset).
+3. **Pases de paquetes:**
+   - el metal de cada nivel (bronce, plata, oro, diamante) fluye despacio, en
+     el marco y en el logotipo;
+   - un destello cruza cada pase por turnos, también en teléfono, donde no hay
+     hover;
+   - las estrellas titilan;
+   - el recomendado tiene un halo dorado que respira;
+   - al pasar el ratón se eleva un poco más.
+4. **Mercancía:** la tarjeta se eleva y la foto se acerca un 4 % al pasar el
+   ratón.
+5. **Banda dorada:** un reflejo de luz la recorre cada pocos segundos.
+6. **Barra de lectura** bajo la cabecera, de rojo a oro. Usa
+   `animation-timeline: scroll()`, solo CSS: donde el navegador no lo soporta,
+   no aparece.
+
+Alternatives:
+A — Una librería de animación (descartada: peso y otra dependencia para lo que
+CSS hace igual). B — Revelar también en el hero (descartada: es la primera
+pantalla y no puede esperar al desplazamiento).
+
+Affected areas: `packages/design-system` (preset: `app-tick`), `packages/ui`
+(`countdown.tsx`), `apps/web` (`globals.css`, `scroll-reveal.tsx`, layout de la
+tienda, `section-heading.tsx`, `entry-package-band.tsx`, `product-card.tsx`,
+`merchandise-band.tsx`, `entry-offer-panel.tsx`, `entry-rate-lines.tsx`,
+`promotion-hero.tsx`, `site-header.tsx`).
+
+Proposed by: sesión del usuario (2026-10-05)
+Agreed by: pendiente — frontend-ux
+
+## DEC-076
+
+Status: Proposed
+
+Date: 2026-10-05
+
+Decision:
+**La portada termina con un "Próximamente": la gorra APP Cap en siete
+colores.** El cliente aún no la vende y quiere generar expectativa.
+
+1. **Es un adelanto, no un producto a la venta.** No hay precio, ni botón de
+   compra, ni ficha: las tarjetas no son enlaces. El precio y la fecha se dicen
+   "por anunciar" en vez de inventarlos. La única acción es "Ver la tienda".
+   Nada sobre participaciones.
+2. **Presentación (`ComingSoonBand`):**
+   - negro con un foco rojo y un "COMING SOON" gigante en contorno que deriva
+     al fondo;
+   - antetítulo "Próximamente" con un punto que late, el título "APP Cap" en
+     cromo y las siete muestras de color, que aparecen una a una;
+   - en escritorio, la negra destacada en 2×2 y las otras seis alrededor; en
+     teléfono, carrusel horizontal.
+3. **Las gorras "se encienden".** Al llegar a la sección cada tarjeta está a
+   oscuras (silueta), con su "PRONTO" rojo encima, y se ilumina con un destello,
+   una tras otra (`data-reveal="lights"`, mismo `ScrollReveal` de DEC-075). Sin
+   JS o con `prefers-reduced-motion` se ven encendidas.
+4. **Las fotos son las del cliente tal cual**, con su rótulo "APP CAP · Color",
+   pasadas a WebP de 960 px (31–71 KB) en `public/coming-soon/`. No se
+   recortaron: cada mockup lleva una segunda gorra pequeña y un recorte la dejaba
+   asomando. El nombre del color se repite debajo en el idioma de la página.
+
+Alternatives:
+A — Recortar cada foto a la gorra principal (descartada: restos de la segunda
+gorra en los bordes). B — Añadirlas como productos "agotados" en la tienda
+(descartada: sugeriría que se vendieron, y no han salido).
+
+Affected areas: `apps/web` (`coming-soon-band.tsx`, `scroll-reveal.tsx`,
+`globals.css`, portada, `public/coming-soon/`, mensajes `home.comingSoon`,
+`coming-soon-band.test.tsx`).
+
+Proposed by: sesión del usuario (2026-10-05)
+Agreed by: pendiente — frontend-ux
+
+## DEC-077
+
+Status: Proposed
+
+Date: 2026-10-05
+
+Decision:
+**Menos texto en la portada: fuera las repeticiones.** El usuario pidió una
+página menos densa. En teléfono pasa de 690 a 476 palabras y unos 560 px menos
+de alto.
+
+1. **"Conforme a las Reglas Oficiales" se dice UNA vez cerca de la compra**: la
+   línea legal del hero con su enlace. Salen las copias:
+   - el descargo bajo esa línea;
+   - la coletilla de la entradilla de paquetes y la de la cinta;
+   - la segunda frase de la nota de la oferta (que queda en "Cifras
+     informativas: mandan las Reglas Oficiales");
+   - la línea "Cada promoción se rige por sus propias Reglas Oficiales" del pie,
+     que repetía el bloque de Reglas de justo encima, ahora en una frase.
+
+   AMOE y "No se requiere compra" no cambian (DEC-042).
+
+2. **Hero:**
+   - sale el antetítulo "Promoción vigente", que repetía el chip "Abierta";
+   - salen las tasas, que la banda dorada dice debajo;
+   - el plazo va en formato corto ("8 nov 2026, 11:59 p.m. CST",
+     `formatZonedDeadline`), misma zona legal (DEC-011).
+3. **Paquetes:**
+   - sale el chip "30 participaciones", que repetía la cifra del talón;
+   - nombre y precio en una línea ("Paquete Bronce · $15.00"), con el nombre
+     completo para lectores de pantalla;
+   - entradilla "Elige tu nivel." y sin antetítulo.
+4. **Mercancía destacada:** solo titular y "Ver todo".
+5. **La insignia "Sin promoción" ya no sale cuando la API no publica
+   `entry_eligibility`.** El campo AUSENTE no es `null`: decía "ahora mismo no
+   hay ninguna promoción abierta" con la promoción abierta. Con `null` (dato del
+   contrato) se sigue pintando.
+
+Affected areas: `apps/web` (`promotion-hero.tsx`, `entry-package-band.tsx`,
+`product-card.tsx`, `site-footer.tsx`, portada, `i18n/formatters.ts`, mensajes
+`entryOffer`, `entryPackages`, `marquee`, `footer`, `home.comingSoon`, tests).
+
+Proposed by: sesión del usuario (2026-10-05)
+Agreed by: pendiente — frontend-ux
+
+## DEC-078
+
+Status: Proposed
+
+Date: 2026-10-05
+
+Decision:
+**Pago en efectivo en un punto de venta físico, junto a la tarjeta.** El
+recorrido es Pendiente de pago en efectivo → Pagado → Participaciones generadas.
+
+1. **Checkout con dos opciones visibles.** Tras elegir producto y cantidad, el
+   checkout muestra "Tarjeta" (la pasarela de siempre, sin cambios) y "Efectivo
+   en punto de venta". Con efectivo, `POST /api/v1/checkout/cash-order` congela
+   el carrito con la MISMA función que la tarjeta (`freezeOpenCart`: precio,
+   SKU, tipo, elegibilidad), crea el pedido con `provider = 'cash'`, lo deja
+   `PENDING_PAYMENT` y cierra el carrito. Número de orden de la misma secuencia.
+   **Ninguna participación** hasta que se cobre.
+2. **Confirmación en el panel** con la capacidad nueva `order.cash.confirm`
+   (CRITICAL, motivo obligatorio, sin step-up por ser trabajo de mostrador —
+   mismo argumento que `amoe.review.*`—; la tienen PROMOTION_MANAGER y
+   COMPLIANCE_OFFICER). El panel busca por número de orden (también dictado:
+   `1234`, `APP-1234`) o por cliente (correo, nombre de la cuenta o de la
+   dirección), con la cola "Efectivo pendiente de pago".
+3. **Dos transacciones, a propósito.** La confirmación (cerrojo `FOR UPDATE`
+   sobre el pedido, fila inmutable en `cash_payment_confirmations` con quién,
+   cuándo, motivo, número de orden e importe, pedido a PAID y `AuditEvent`) va
+   en una; la calificación y el award, en otra. Si las participaciones fallan, el
+   cobro queda confirmado y se reintenta (`POST …/cash-payment/entries`) sin
+   registrar otro cobro. El desenlace queda en `cash_payment_entry_outcomes`:
+   sin esa fila, un pedido en efectivo pagado y sin calificar es "pendiente de
+   reintentar", no "no aplica".
+4. **Mismas reglas que la tarjeta, y el mismo código.** La calificación y el
+   award se sacan del webhook a `services/purchase-qualification.ts` y los usan
+   los dos: estado cualificante de la versión de reglas, elegibilidad
+   (DEC-067), periodo, `QualifiedOrder`, `AwardService`, `source_ref =
+order:<id>`, snapshot y números visibles. El instante del pago es el de la
+   confirmación. En el ledger, el actor de una concesión en efectivo es la
+   persona que confirmó (en la tarjeta, SYSTEM).
+5. **Sin duplicados.** Un pedido en efectivo por carrito (índice único parcial
+   `orders_one_cash_order_per_cart`), una confirmación y un desenlace por pedido
+   (`UNIQUE (order_id)`), el cerrojo de fila para confirmaciones simultáneas y la
+   idempotencia del ledger por `order:<id>`.
+6. **Export:** sin cambios de formato. Las participaciones de efectivo son
+   `PURCHASE` como las de tarjeta y salen en el mismo universo; un pedido
+   pendiente no aparece.
+7. **`payment_method` (`CARD` | `CASH`)** en `OrderSummary`/`OrderDetail` y en la
+   fila del listado del panel. Se deriva de `orders.provider`.
+8. **Arreglo encontrado por el camino (afecta también a la tarjeta).** La web
+   leía `entry_calculation` con una forma que la API nunca publicó
+   (`applied_multipliers`, `applied_caps`… en el primer nivel) y hacía
+   `.length` sobre `undefined`: la ficha de CUALQUIER pedido con participaciones
+   -portal y panel- caía con un error de servidor. El contrato publica la traza
+   del motor dentro de `trace`; ahora se lee de ahí (`readCalculationTrace`),
+   con comprobaciones en tiempo de ejecución. Lo destapó la e2e del efectivo, la
+   primera que pinta un pedido otorgado contra la API real.
+
+Migración `0035_cash_payments` (journal idx 26): la capacidad, el índice parcial
+y las dos tablas, de solo inserción (GRANT SELECT/INSERT y `app_reject_mutation`).
+Se estrena en el preDeploy de Railway.
+
+Alternatives:
+A — Calificar y otorgar en la misma transacción que la confirmación (descartada:
+un fallo del cálculo desharía también el cobro, con el dinero ya en la caja).
+B — Una sola tabla con columnas de desenlace mutables (descartada: un hecho es una
+fila, como reembolsos y disputas). C — Un feature flag para el efectivo
+(descartada por ahora: el catálogo exige que los flags nuevos arranquen
+apagados, y el usuario pidió el flujo activo; queda la capacidad como control de
+quién confirma).
+
+Affected areas: `packages/security` (capacidad y matriz),
+`packages/database` (0035, esquema, `DrizzleCashPaymentRepository`,
+`createCashDraft`, `lockForUpdate`, búsqueda del listado), `apps/api`
+(`purchase-qualification.ts`, `cart-freeze.ts`, `cash-payments.ts`, rutas de
+checkout y panel, `order-presenter.ts`, contrato), `apps/web` (checkout,
+confirmación, portal, panel de pedidos, mensajes), `docs/API_CONTRACT.md`, CI
+(integración de `@app/api`), e2e `12-cash-payment`.
+
+Proposed by: sesión del usuario (2026-10-05)
+Agreed by: pendiente — backend-sweepstakes, security-integration, frontend-ux
+
+## DEC-079
+
+Status: Proposed
+
+Date: 2026-10-05
+
+Decision:
+**Carrito sin cuenta, total con envío y cuenta obligatoria solo para pagar.**
+El visitante llena el carrito sin registrarse, ve subtotal, envío y total, y
+el checkout le pide crear la cuenta o iniciar sesión; al hacerlo, el carrito
+pasa a la cuenta y vuelve al pago.
+
+1. **Sesión de carrito, no una segunda autenticación (DEC-006).** El primer
+   `POST /api/v1/cart/items` sin sesión emite una sesión de carrito con las
+   mismas primitivas que las de persona (token opaco, SHA-256 en hex, cookie
+   `httpOnly`/`SameSite=Lax`, revocable), en una tabla APARTE, `cart_sessions`,
+   con su cookie `<SESSION_COOKIE_NAME>_cart` y su política
+   (`CART_SESSION_POLICY`, 30 días como máximo). No identifica a nadie: solo es
+   dueña de un carrito (`carts.session_ref`). Ninguna puerta de participante ni
+   de personal la lee; el resolvedor devuelve el principal de participante y, si
+   no lo hay, `ANONYMOUS_SESSION`. Las rutas del carrito pasan a `PUBLIC`, pero
+   el carrito sigue saliendo SIEMPRE del principal, nunca del cuerpo ni de la
+   URL. La sesión solo se emite tras validar la variante: un `POST` con una
+   variante inexistente no deja cookie, y `GET /cart` sin cookie responde el
+   carrito vacío sin emitir nada.
+2. **El carrito pasa a la cuenta al registrarse o iniciar sesión** (audiencia
+   `PARTICIPANT`), en una transacción: las líneas se suman a las de la cuenta
+   (con el tope de 10,000 por línea), las de otra moneda se descartan, el
+   carrito invitado queda `ABANDONED`, la sesión de carrito se revoca
+   (`adopted_by_account`) y su cookie se borra. Nunca se promueve: el login
+   abre una sesión de participante nueva (sin fijación de sesión). Si la
+   adopción falla, el login no falla.
+3. **Envío: tarifa fija por pedido, nunca gratis**, que fija el personal en
+   Panel → Envío (`GET`/`PUT /api/v1/admin/shipping-rate`, capacidades
+   `product.read`/`product.write`). `shipping_rates` es de solo inserción
+   (CHECK `> 0`, trigger `app_reject_mutation`); la vigente es la última fila y
+   queda el historial con quién y cuándo. Reglas (`services/shipping.ts`):
+   solo paquetes de participaciones o carrito vacío → `NOT_REQUIRED` (no se
+   envían); con mercancía → `CHARGED` con la tarifa; con mercancía y sin
+   tarifa → `NOT_CONFIGURED`, total `null` y el checkout con envío responde
+   `409 SHIPPING_NOT_CONFIGURED`. No se cobra un pedido con un envío inventado.
+   **En efectivo el envío es opcional** (pedido del usuario: "el objeto en
+   efectivo te lo dan ahí mismo donde pagues"). El checkout pregunta "¿Cómo
+   recibes tu pedido?": **recogerlo donde paga** (por defecto; sin envío, sin
+   dirección y sin necesitar tarifa: se cobra el subtotal) o **enviarlo a
+   domicilio** (dirección y envío). Queda en `orders.fulfillment_method`
+   (`DELIVERY` | `PICKUP`), que no se cambia después. Las CHECK impiden un
+   `PICKUP` con tarjeta o con envío. La ficha del pedido (portal y panel) dice
+   "Se recoge en el punto de venta" para que se entregue en mano. Con tarjeta
+   siempre es envío. Sin tarifa puesta, el carrito ya no bloquea el pago: avisa
+   de que el envío a domicilio no está disponible y deja pagar en efectivo
+   recogiendo.
+4. **El envío no genera participaciones** (pedido del usuario). El motor ya
+   calculaba sobre el subtotal elegible; ahora está escrito en el carrito, el
+   checkout y las Reglas pendientes (LEGAL_PENDING).
+5. **Impuestos: no se cobran por ahora** (decisión del usuario, pendiente del
+   contador/abogado). `tax_total_minor` queda `null`.
+6. **Pedido y proveedor.** `orders.shipping_total_minor` congela la tarifa
+   (`null` si no aplica) y `total = subtotal + envío`. A Stripe va como una
+   línea más con `metadata[line_kind]=shipping`.
+7. **Reembolso parcial sin desglose por línea:** lo que no es mercancía
+   (total − subtotal de líneas, es decir, el envío) se considera devuelto
+   primero; solo lo que pasa de ahí reduce participaciones. Devolver solo el
+   envío no quita ninguna.
+8. **Arreglo encontrado por el camino.** "Añadir al carrito" no funcionaba
+   antes de que la página terminara de hidratarse: el formulario envolvía la
+   acción en una función de cliente. Ahora `useActionState` recibe la acción de
+   servidor directamente y el formulario funciona desde el primer instante.
+
+Migración `0036_guest_cart_and_shipping` (journal idx 27): `cart_sessions`,
+`shipping_rates` y `orders.fulfillment_method`. Se estrena en el preDeploy de
+Railway. **Al desplegar no hay tarifa**: hasta que el personal la fije, la
+mercancía solo se puede pagar en efectivo recogiéndola (tarjeta y envío a
+domicilio responden 409); los paquetes, de cualquier forma.
+
+Alternatives:
+A — Filas anónimas en `sessions` (descartada: toda la autorización da por hecho
+que una sesión es una persona; un `identity_id` nulo abriría huecos en cada
+puerta). B — Carrito solo en el navegador (localStorage) que se sube al pagar
+(descartada: los precios y la elegibilidad los calcula la API, y un carrito del
+cliente es una fuente de verdad paralela). C — `shipping_options` de Stripe
+(descartada: el total y el envío deben salir de nuestra API y quedar en el
+pedido también para el pago en efectivo, que no pasa por Stripe). D — Envío
+gratis a partir de un importe (descartada por el usuario: nunca gratis).
+E — Deducir "recoge" de un pedido en efectivo sin dirección, sin columna
+(descartada: quien atiende tiene que leer un hecho, no una inferencia, y una
+dirección vacía por un fallo se confundiría con una recogida).
+
+Affected areas: `packages/database` (0036, esquema), `packages/security`
+(`CART_SESSION_POLICY`, `evaluateCartSession`), `packages/commerce` (línea de
+envío en Stripe, prorrateo de reembolsos), `apps/api` (sesión de carrito,
+resolvedor, rutas de carrito, adopción en auth, `shipping.ts`, `cart-freeze.ts`,
+checkout de tarjeta y efectivo, `admin-shipping.ts`, contrato), `apps/web`
+(carrito, checkout con cuenta obligatoria, totales, formularios de añadir,
+Panel → Envío, mensajes), `docs/API_CONTRACT.md`, e2e `13-guest-cart`.
+
+Proposed by: sesión del usuario (2026-10-05)
+Agreed by: pendiente — backend-sweepstakes, security-integration, frontend-ux
+
+## DEC-080
+
+Status: Proposed
+
+Date: 2026-10-05
+
+Decision:
+**Un número al azar por participación, para todas, y la misma regla de
+anulación en la cuenta y en el export.** El cliente quiere que cada
+participación tenga su número (10 participaciones = 10 números), que el
+participante los vea en su cuenta y que se publique el número ganador. El
+sorteo lo sigue haciendo el Administrador (Reglas, sección 7).
+
+1. **Se numera siempre.** Antes solo recibían bloque las compras, y solo con
+   `visible_entry_numbers_enabled` encendido; el correo y los ajustes nunca. Y
+   sin bloques el export no se podía finalizar (`EMPTY_UNIVERSE` /
+   `TOTAL_MISMATCH`, AGENT_HANDOFF "Finalizar un export exige la numeración
+   visible encendida"). Ahora:
+   - `AwardService` asigna el bloque de la compra siempre;
+   - un trigger de restricción DIFERIDO (`entry_transactions_ensure_numbers`)
+     numera al confirmar cualquier transacción positiva que llegue sin bloque
+     (correo, ajustes, scripts). Diferido para no chocar con la compra, que
+     inserta su bloque después de la fila;
+   - un trigger BEFORE INSERT (`entry_transactions_lock_numbers`) toma el
+     cerrojo de numeración al insertar la fila positiva. Sin él, el correo y los
+     ajustes lo tomarían al confirmar, después del cerrojo de la cadena de
+     auditoría y al revés que la compra: interbloqueo con operaciones
+     simultáneas (orden de cerrojos de la 0024);
+   - `app_allocate_entry_range` crea la secuencia de la promoción con su primera
+     participación (ningún código de producción la creaba);
+   - `app_number_unnumbered_entries()` numera lo ya otorgado en orden de
+     escritura; la migración la llama y se puede repetir (idempotente).
+
+   El flag decide solo si el participante VE sus números.
+
+2. **El número visible es una permutación con clave del ordinal interno.** Red
+   de Feistel de 10 rondas con cycle-walking sobre `[0, 10^d)`
+   (`entry-number-cipher.ts`, esquema `APP/ENTRY-NUMBER/FEISTEL/v1`), con una
+   clave de 32 bytes de CSPRNG por promoción (`number_key`). Biyección: no hay
+   repetidos por construcción y la unicidad sigue siendo la de la exclusión
+   GiST. 8 cifras por defecto (cien millones). La clave, el esquema y el ancho
+   no se pueden cambiar (trigger): cambiarlos cambiaría números ya mostrados.
+   Vectores conocidos en el test.
+3. **Qué números se anulan (`computeEntryNumberActivity`).** Un reversal anclado
+   (devolución, parcial, contracargo, fraude) anula números del lote de la
+   compra que revierte, desde el final; lo no anclado (descalificación, ajuste a
+   la baja) sale de los lotes más recientes (la política anterior del congelado).
+   Dentro de un lote los vigentes son los primeros: el ordinal `first + k` del
+   congelado es el número interno `lower(range) + k`. La usan el portal y el
+   congelado del export: lo que el participante ve vigente es lo que entra en el
+   universo.
+4. **"Mis números"** (`GET /account/entry-numbers`) pagina por números (500, hasta
+   1000), con procedencia, fecha y `active` por número. La cuenta los muestra por
+   compra/tarjeta/ajuste, tachados los anulados.
+
+Pendiente (siguiente entrega): el archivo de números para el Administrador, el
+registro del número ganador que reporte y su publicación en la página
+(`winner.publish`, `winner_publication_enabled`).
+
+Migración `0037_entry_numbers_always` (journal idx 28, después de la 0036 de
+DEC-079). Se estrena en el preDeploy de Railway.
+
+Alternatives:
+A — Guardar un número aleatorio por participación (descartada: una fila por
+participación, reintentos por colisión y abandonar los rangos sobre los que
+trabajan la exclusión GiST, el export y los reversals). B — Seguir con números
+consecutivos (descartada: el cliente los quiere al azar). C — Un número por
+compra que valga N veces (descartada por el cliente: menos claro).
+
+Affected areas: `packages/sweepstakes` (cifrador, actividad, puerto, award, en
+memoria), `packages/database` (0037, esquema, repositorios de números y de
+reconciliación), `apps/api` (`portal.ts`, esquemas, contrato), `apps/web`
+(cuenta, componente, mensajes, mocks), `docs/API_CONTRACT.md`,
+`docs/LEGAL_PENDING.md`.
+
+Proposed by: sesión del usuario (2026-10-05)
+Agreed by: pendiente — backend-sweepstakes, security-integration, frontend-ux
+
+## DEC-081
+
+Status: Accepted
+
+Date: 2026-10-06
+
+Decision:
+**El idioma se cambia desde una franja fina arriba del todo de cada página, en
+todas las anchuras.** Lo pidió el usuario: "ponlo al inicio de la página para
+que sea más fácil cambiar el idioma".
+
+1. **Dónde.** `LanguageBar` va antes de la banda roja de anuncio y de la
+   cabecera, en `app/[locale]/layout.tsx`. No es pegajosa, como la banda: dos
+   elementos fijos apilados se comerían la pantalla de un teléfono. El
+   conmutador se queda también en el panel de navegación (para cambiarlo con la
+   página desplazada) y en el pie.
+2. **Por qué no en la cabecera.** A 360px, hamburguesa, marca centrada, cuenta y
+   carrito ya llenan la fila. Antes, el idioma en teléfono solo estaba dentro
+   del panel de la hamburguesa y al final del pie. La cabecera de escritorio
+   pierde su conmutador: con la franja serían dos iguales uno encima del otro.
+3. **Cómo se ve.** Un globo, la palabra "Idioma"/"Language" y una pastilla con
+   las dos opciones, con la actual rellena en oro (`bg-brand text-on-brand`).
+   Cada idioma va con su propio nombre ("English", "Español") y su `lang`. La
+   pastilla mide 32px, pero el área de pulsación llega a 44px con un
+   pseudo-elemento; la franja mide 44px.
+
+Alternatives considered: A — Códigos "ES | EN" dentro de la cabecera
+(descartada: no caben a 360px con 44px de pulsación, y un código se entiende
+peor que el nombre). B — Franja solo en teléfono y conmutador en la cabecera de
+escritorio (descartada: el control cambiaría de sitio según la anchura). C —
+Dentro de la banda roja (descartada: la banda rota y desaparece cuando no hay
+promoción).
+
+Affected areas: `apps/web` (`language-bar.tsx` nuevo, `language-switcher.tsx`,
+`site-header.tsx`, `mobile-nav.tsx`, `app/[locale]/layout.tsx`,
+`test/components-i18n.test.tsx`).
+
+Proposed by: sesión del usuario (2026-10-06)
+Agreed by: frontend-ux (petición directa del usuario)
+
+## DEC-082
+
+Status: Accepted
+
+Date: 2026-10-07
+
+Decision:
+**La banda roja anuncia el periodo bonus con su cuenta atrás, y queda fija
+arriba junto con la cabecera.** Lo pidió el usuario para el 2X de una semana:
+"que se vea en la línea roja … con un contador … y que se quede pegada para
+que siempre esté presente".
+
+1. **Qué dice.** "BONUS 2× EN MERCANCÍA · TERMINA EN 6d 04:10:22", en una sola
+   frase y sin rotar. Si hay un bonus anunciado que aún no empieza, dice
+   "EMPIEZA EN …": las Reglas piden anunciarlo antes de que empiece. Sin bonus,
+   la banda dice lo de siempre (estado, cierre, Reglas Oficiales). En teléfono
+   la frase se parte en dos líneas: qué es y cuánto falta.
+2. **Cuándo.** Con los mismos cerrojos que el hero (`bandBonusFor`): Reglas
+   publicadas, `entry_multipliers_enabled` encendido en el sitio y en la
+   oferta, y una fase que admite participaciones. Con el interruptor apagado
+   no se anuncia nada, porque un "2X" que el motor no aplica sería una promesa
+   falsa en todas las páginas.
+3. **Cuenta atrás.** `AnnouncementCountdown`, de una línea, usa la misma
+   aritmética que `Countdown` (`computeCountdownParts`). El primer valor sale
+   del servidor (`nowIso`). Los dígitos van `aria-hidden` y el lector de
+   pantalla oye el plazo absoluto en la zona legal. Al llegar a cero muestra
+   ese plazo y no decide nada.
+4. **Fija.** La banda y la cabecera van en UN contenedor `sticky top-0` en
+   `app/[locale]/layout.tsx` (unos 110px en teléfono y 105px en escritorio).
+   La cabecera ya no se pega por sí sola. Se suben los `scroll-mt` de los
+   anclajes a `scroll-mt-32`. La franja de idioma (DEC-081) sigue sin fijar.
+
+Esto revisa una decisión anterior: la banda no se fijaba para no apilar dos
+elementos fijos en teléfono, y el bonus vivía solo en el hero. El hero
+conserva el anuncio completo.
+
+Alternatives considered: A — Solo en el hero (descartada: el usuario lo
+quiere en todas las páginas y siempre visible). B — Rotar el bonus con las
+frases de siempre (descartada: la cuenta atrás estaría oculta la mitad del
+tiempo). C — Banda fija y cabecera no (descartada: se perderían el carrito y
+el menú al desplazarse).
+
+Affected areas: `apps/web` (`announcement-bar.tsx`,
+`announcement-countdown.tsx` nuevo, `app/[locale]/layout.tsx`,
+`site-header.tsx`, `entry-package-band.tsx`, `legal-document-view.tsx`,
+`promotion-hero.tsx`, mensajes `announcement.*`,
+`test/announcement-bonus.test.tsx`).
+
+Proposed by: sesión del usuario (2026-10-07)
+Agreed by: frontend-ux (petición directa del usuario)
+
+## DEC-083
+
+Status: Accepted
+
+Date: 2026-10-07
+
+Decision:
+**La mercancía dice cuántas participaciones da: la cifra por unidad que
+publica el backend, y la del bonus cuando aplica.** El cliente creó un 2X solo
+en mercancía y creyó que los productos no generaban participaciones: la tienda
+no mostraba ninguna cifra en la mercancía, aunque el motor sí las otorgaba (30
+compras con tarjeta y 87 cobros en efectivo en dos días, todos con su
+concesión). El usuario decidió mostrarla y no compensar las compras hechas
+antes de encender `entry_multipliers_enabled`.
+
+1. **Qué cifra.** `base_entries` y `entries_now` de la variante, tal como los
+   evalúa el backend (§13.4). La interfaz no calcula nada (R13). Se dice
+   "por unidad": la cifra de un pedido se calcula sobre su total redondeando
+   hacia abajo una sola vez, así que varios artículos juntos nunca dan menos
+   que la suma de sus unidades.
+2. **Dónde.** En la tarjeta (`/shop` y mercancía destacada de la portada),
+   debajo del nombre y en el mismo oro que la de los paquetes. En la ficha, en
+   `EntryPackagePanel` con su propio título y una nota. Nunca como insignia
+   sobre la foto, que es lo que DEC-038 descartó de la referencia.
+3. **Cuándo no.** Si alguna variante no tiene oferta, o las variantes ofrecen
+   cifras distintas (`merchandiseOfferOf`), la tarjeta no dice nada. Sin
+   ninguna oferta publicada, la ficha tampoco muestra el bloque.
+4. **El bonus.** Se nombra solo si su `id` está en los `multiplier_ids` de la
+   variante y con los mismos cerrojos de siempre. La portada pasa ahora el
+   bonus también a la franja de mercancía.
+
+Revisa DEC-023/DEC-038 en un único punto: la mercancía ya no está obligada a
+callar su cifra. Queda pendiente de confirmar con el abogado
+(`docs/LEGAL_PENDING.md`, pregunta 21).
+
+Alternatives considered: A — Dejarla sin cifra y explicárselo al cliente
+(descartada por el usuario). B — Ponerla como insignia sobre la foto, como la
+referencia (descartada: es lo que DEC-038 excluyó). C — Una cifra "desde" para
+artículos con variantes de precio distinto (descartada: elegiría por el
+comprador).
+
+Affected areas: `apps/web` (`lib/entry-offer.ts`, `product-card.tsx`,
+`entry-package-panel.tsx`, `products/[slug]/page.tsx`, `[locale]/page.tsx`,
+mensajes `product.merchandise*`, `shop.merchandiseEntries` y
+`product.quoteNote`, pruebas), `docs/LEGAL_PENDING.md`.
+
+Proposed by: sesión del usuario (2026-10-07)
+Agreed by: frontend-ux (petición directa del usuario); pendiente: abogado
+
+## DEC-084
+
+Status: Accepted
+
+Date: 2026-10-08
+
+Decision:
+**Con un bonus vigente, el hero muestra un solo contador, el del bonus, y el
+panel puede alargar un periodo bonus sin rehacer las reglas a mano.** El
+cliente veía dos contadores en la portada ("Cierra en 31 días" y el del 2X,
+unos 6 días) y los leía como dos promociones. Pidió dejar uno, con el texto
+"Promoción 2x1 en mercancía cierra en:", y que el 2X llegue al 15 de octubre.
+
+1. **Un solo marcador.** Si hay un bonus vigente y el marcador apunta al
+   cierre, el marcador grande cuenta hasta el `ends_at` del bonus, con el
+   título `home.hero.bonusClosesIn` y la barra del tramo del bonus. El recuadro
+   `BonusAnnouncement` deja de pintar su propia cuenta atrás, pero sigue
+   anunciando los periodos que vienen. Debajo quedan escritos el fin del bonus y
+   el cierre del sorteo, con fecha, hora y zona (DEC-011): el cierre deja de
+   tener contador, pero no desaparece. Sin bonus, el hero es el de siempre. La
+   banda roja de DEC-082 no cambia.
+2. **Extender.** `POST /admin/promotions/:id/bonus-periods/:period_id/extend`
+   (`rules.version.activate`, motivo y step-up, como el alta de DEC-054)
+   clona la versión activa, cambia solo el `ends_at` de ese periodo y la
+   activa en la misma transacción, con el evento de auditoría
+   `bonus.period.extended`. Solo alarga, y nunca más allá del cierre de la
+   promoción. Acortar o quitar sigue exigiendo una versión nueva, porque recorta
+   algo ya anunciado al público.
+3. **Panel.** La ficha de la promoción lista los periodos de la versión activa
+   con su fase (vigente, anunciado o terminado) y, en los que no han terminado,
+   un formulario con la nueva fecha de fin en la hora legal de la promoción.
+
+Alternatives considered: A — Crear un segundo periodo pegado al primero
+(descartada: el público vería dos bonus y el contador saltaría). B — Dejar los
+dos contadores con otro texto (descartada por el cliente). C — Contar hasta el
+bonus solo en la banda roja (descartada: el cliente señaló el marcador
+grande).
+
+Affected areas: `apps/api` (`routes/admin-rules.ts`, pruebas, openapi y
+route-manifest), `apps/web` (`promotion-hero.tsx`, `promotion-countdown.tsx`,
+`admin/bonus-period-extend-form.tsx`, `lib/admin/bonus-periods.ts`,
+`lib/admin/actions.ts`, `promotions/[id]/page.tsx`, mensajes `home.hero.*` y
+`admin.bonus.*`), `docs/API_CONTRACT.md` §13.8.
+
+Proposed by: sesión del usuario (2026-10-08, petición del cliente)
+Agreed by: frontend-ux, backend (petición directa del usuario)
+
+## DEC-085
+
+Status: Accepted
+
+Date: 2026-10-08
+
+Decision:
+**El panel cancela pedidos que nunca se cobraron, marca la mercancía como
+enviada o entregada y da un corte de caja diario en hora de Nuevo México.**
+El cliente lo pidió para cuadrar la caja y despachar la mercancía: los pedidos
+duplicados o abandonados se acumulaban como "pendientes" y no había forma de
+sacarlos, ni de saber qué se cobró cada día.
+
+1. **Cancelar** (`POST /admin/orders/:id/cancel`, capacidad nueva
+   `order.cancel`, SENSITIVE, motivo obligatorio y sin step-up, como el cobro
+   en caja). Solo pedidos **sin `paid_at`** en DRAFT o PENDING_PAYMENT, en
+   efectivo o con tarjeta, comprobado con el pedido bloqueado. El pedido queda
+   CANCELLED y no se borra; la auditoría (`order.cancelled`) guarda quién, por
+   qué, el estado anterior y el importe. Un pedido cobrado no se cancela: eso es
+   un reembolso, que revierte sus participaciones (DEC-007).
+2. **En tarjeta, primero se cierra la pasarela.** Se caduca la sesión de Stripe
+   Checkout (`closeCheckoutSession` en el puerto de pago) **antes** de tocar el
+   pedido y fuera de la transacción. Si Stripe dice que el pago ya se completó o
+   está en curso, 409 `ORDER_PAYMENT_IN_PROGRESS` y no se cancela: sin esto, un
+   cliente podía pagar un pedido ya cancelado y el cobro quedaba sin pedido. Para
+   que un pago con tarjeta fallido también se pueda cancelar, la máquina de
+   pagos admite ahora `FAILED -> CANCELLED`; el `checkout.session.expired` de un
+   pago fallido, que antes se ignoraba, ahora también lo cancela.
+3. **Entregar** (`POST /admin/orders/:id/fulfillment`, capacidad nueva
+   `order.fulfillment.update`, SENSITIVE y sin motivo; también la tiene
+   SUPPORT). `fulfillment_state` pasa a FULFILLED con `fulfilled_at` y, solo si
+   se envía, transportista y guía como texto libre (migración 0038, con CHECK).
+   No hay integración con paquetería. La ficha (`OrderDetail.fulfillment`) lo
+   publica también al comprador. Solo pedidos cobrados con mercancía.
+4. **Corte de caja** (`GET /admin/reports/daily-cut?date=`, `order.read`). Día
+   de 12:00 a. m. a 11:59 p. m. en `America/Denver` (con su horario de verano),
+   que es la hora del punto de venta y no la zona legal de la promoción.
+   Efectivo, tarjeta y total con el número de pedidos cobrados (`paid_at`), los
+   reembolsos del día aparte y sin restar, y la mercancía de esos pedidos con
+   cliente, dirección o recogida, número de pedido y estado de envío. Sin
+   paquetes ni participaciones. Pantalla `/admin/daily-cut` con selector de
+   fecha, impresión y CSV (con defensa contra fórmulas).
+
+Alternatives considered: A — Borrar los pedidos duplicados (descartada: el
+registro contable no se borra, DELETE sigue revocado). B — Cancelar con
+tarjeta sin cerrar la sesión de Stripe (descartada: el cliente aún podía
+pagar). C — Una tabla de envíos aparte con historial (descartada por ahora: un
+envío por pedido y la auditoría guarda cada cambio). D — El corte en la zona
+legal de la promoción (descartada: el cliente pidió la de Nuevo México).
+
+Affected areas: `packages/commerce` (puerto de pago, Stripe, mock, sin
+proveedor, máquina de pagos), `packages/security` (dos capacidades y roles),
+`packages/database` (0038, `orders` y repositorios), `apps/api`
+(`routes/admin-orders.ts`, `services/order-admin-actions.ts`,
+`services/daily-cut.ts`, presentador, integración), `apps/web` (ficha del
+pedido, `/admin/daily-cut`, mensajes), `tests/e2e` (spec 14),
+`docs/API_CONTRACT.md`.
+
+Proposed by: sesión del usuario (2026-10-08, petición del cliente)
+Agreed by: backend, frontend-ux, security (petición directa del usuario)
+
+## DEC-086
+
+Status: Accepted
+
+Date: 2026-10-09
+
+Decision:
+**La tienda carga el píxel de Meta del cliente (`<ID_DEL_PIXEL>`) para medir
+visitas, con cuatro límites.** Es la primera decisión de analítica o
+publicidad del proyecto (CLAUDE.md §7 la dejaba abierta) y la pide el cliente
+para sus anuncios de Facebook e Instagram.
+
+1. **Solo la tienda.** El layout de `[locale]` monta `MetaPixel`; el panel no,
+   y su CSP no abre ningún origen de Meta. Tampoco en `/account`, `/checkout`
+   ni `/orders`: Meta recibe la URL entera, y ahí van tokens
+   (`reset-password?token=…`, `verify-email?token=…`) e identificadores de
+   pedido. Con los eventos automáticos de Meta apagados (`autoConfig`,
+   `disablePushState`), lo único que sale son los `PageView` del componente.
+2. **Solo el dominio real** (`<dominio>` y `www.`). En local, CI o
+   un despliegue de prueba no se carga, para no ensuciar las audiencias.
+3. **Respeta la exclusión.** No se carga con Global Privacy Control ni con la
+   cookie `app_ad_sharing_opt_out`, que pone el nuevo bloque "Publicidad en este
+   navegador" de `/privacychoices`. Al excluirse se llama a
+   `fbq('consent','revoke')` para lo que quede de la visita.
+4. **`PageView`**, al entrar y en cada cambio de ruta o idioma, y
+   **`CompleteRegistration` al pulsar "Comprar ahora"** en la portada (lo pidió
+   el cliente el 2026-10-09 como conversión de sus anuncios). El botón lleva
+   `data-meta-event` y `MetaPixel` escucha los clics, con una lista cerrada de
+   eventos. Sin parámetros, sin "advanced matching", sin correo ni teléfono ni
+   importes.
+
+El código de Meta se carga como fichero de `connect.facebook.net`, no como
+script en línea, así que la CSP con nonce no cambia: `script-src` y
+`connect-src` añaden `https://connect.facebook.net`, e `img-src` y
+`connect-src` añaden `https://www.facebook.com`, sin comodines.
+`NEXT_PUBLIC_META_PIXEL_ID` cambia el ID u `off` lo apaga.
+
+**Política corregida, pendiente del abogado (pregunta 22).** La Política de
+Privacidad y el Aviso de California decían que no había píxeles ni publicidad
+de terceros. Por instrucción del usuario se corrigieron a mano en la misma
+entrega (versión del 9 de octubre de 2026): declaran el píxel, el compartir
+con Meta para publicidad y la exclusión. Falta la revisión del abogado y que
+la incorpore a su Word.
+
+Alternatives considered: A — El fragmento oficial en línea (descartada: obliga
+a repartir el nonce o a abrir `'unsafe-inline'`). B — Google Tag Manager
+(descartada: abre la puerta a cualquier script sin pasar por el código). C —
+Cargarlo también en el panel (descartada: datos de clientes).
+
+Affected areas: `apps/web` (`lib/meta-pixel.ts`, `components/meta-pixel.tsx`,
+`components/ad-sharing-choice.tsx`, `lib/security-headers.ts`,
+`middleware.ts`, layout de `[locale]`, `/privacychoices`, mensajes, pruebas,
+`legal/privacy-policy.ts` y `legal/california-notice.ts`),
+`docs/LEGAL_PENDING.md`.
+
+Proposed by: sesión del usuario (2026-10-09, petición del cliente)
+Agreed by: frontend-ux, security (petición directa del usuario); pendiente:
+abogado (pregunta 22)

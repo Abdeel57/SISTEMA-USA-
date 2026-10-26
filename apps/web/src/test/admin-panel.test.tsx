@@ -1,0 +1,653 @@
+import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { NextIntlClientProvider } from "next-intl";
+import type { ReactNode } from "react";
+import { describe, expect, it, vi } from "vitest";
+
+/*
+ * Las acciones del panel son Server Actions: llaman a `next/headers` y
+ * redirigen. Se sustituyen por dobles que registran lo que reciben, que es lo
+ * que aqui interesa comprobar -que el formulario manda motivo y confirmacion- y
+ * no que el servidor las ejecute.
+ */
+const submitted: FormData[] = [];
+
+const IDLE_RESULT = {
+  status: "idle" as const,
+  code: null,
+  requestId: null,
+  field: null,
+  retryAfterSeconds: null,
+  detail: null,
+};
+
+vi.mock("@/lib/admin/actions", () => ({
+  staffLoginAction: (_previous: unknown, formData: FormData) => {
+    submitted.push(formData);
+    return Promise.resolve(IDLE_RESULT);
+  },
+  /*
+   * Contrasena nueva de un participante. El doble contesta como la API: una
+   * contrasena corta es un 422 `WEAK_PASSWORD` con el minimo, y cualquier otra
+   * se acepta.
+   */
+  setParticipantPasswordAction: (_previous: unknown, formData: FormData) => {
+    submitted.push(formData);
+    const typed = formData.get("password");
+    return Promise.resolve(
+      typeof typed === "string" && typed.length < 8
+        ? {
+            ...IDLE_RESULT,
+            status: "error" as const,
+            code: "WEAK_PASSWORD",
+            field: "password",
+            minimumPasswordLength: 8,
+          }
+        : { ...IDLE_RESULT, status: "ok" as const },
+    );
+  },
+  approveAmoeAction: (_previous: unknown, formData: FormData) => {
+    submitted.push(formData);
+    return Promise.resolve(IDLE_RESULT);
+  },
+  rejectAmoeAction: (_previous: unknown, formData: FormData) => {
+    submitted.push(formData);
+    return Promise.resolve(IDLE_RESULT);
+  },
+  createAdjustmentAction: (_previous: unknown, formData: FormData) => {
+    submitted.push(formData);
+    return Promise.resolve(IDLE_RESULT);
+  },
+  approveAdjustmentAction: (_previous: unknown, formData: FormData) => {
+    submitted.push(formData);
+    return Promise.resolve(IDLE_RESULT);
+  },
+  staffLogoutAction: () => Promise.resolve(),
+}));
+
+import { AdminSectionError, isSectionNotConnected } from "@/components/admin/admin-section-error";
+import { ParticipantPasswordForm } from "@/components/admin/participant-password-form";
+import { SensitiveConfirmForm } from "@/components/admin/sensitive-confirm";
+import { StaffLoginForm } from "@/components/admin/staff-auth-forms";
+import { formatEntryCount, formatZonedDateTime } from "@/i18n/formatters";
+import { LOCALES, type Locale } from "@/i18n/locales";
+import { adjustmentPreview, adjustmentPreviewNegative } from "@/mocks/fixtures/admin";
+
+import enMessages from "../../messages/en-US.json";
+import esMessages from "../../messages/es-US.json";
+
+/** Identificador con el que se pregunto. La previsualizacion contesta cifras. */
+const PARTICIPANT_ID = "par_0000000000000001";
+
+/**
+ * CONFIRMACION DE UNA MUTACION SENSIBLE (FE-M7).
+ *
+ * LO QUE ESTE FICHERO PROTEGE
+ * ---------------------------
+ * Que nadie pueda aprobar, rechazar ni ajustar sin ver ANTES, CAMBIO y DESPUES,
+ * sin dar un motivo y sin una confirmacion explicita. Las tres cosas son
+ * friccion deliberada: estas acciones no se deshacen con un `undo`, se corrigen
+ * con otra fila del ledger y otra entrada de auditoria.
+ *
+ * Y una segunda cosa, igual de importante: que el "despues" NO se calcule aqui.
+ * El fixture de previsualizacion trae un `after` TECLEADO, y la pantalla
+ * lo pinta tal cual. Si algun dia alguien sumara el delta al saldo, este test
+ * seguiria pasando -daria el mismo numero- pero
+ * `no-client-entry-math.test.ts` fallaria. Las dos redes se complementan.
+ */
+
+function messagesFor(locale: Locale) {
+  return locale === "en" ? enMessages : esMessages;
+}
+
+function renderIn(locale: Locale, ui: ReactNode) {
+  return render(
+    <NextIntlClientProvider locale={locale} messages={messagesFor(locale)} timeZone="UTC">
+      {ui}
+    </NextIntlClientProvider>,
+  );
+}
+
+/** Impacto de un ajuste, con las tres columnas servidas por el backend. */
+function adjustmentImpact(locale: Locale) {
+  const messages = messagesFor(locale);
+
+  return [
+    {
+      label: messages.admin.adjustments.impactEntries,
+      before: formatEntryCount(adjustmentPreview.before, locale),
+      delta: `+${formatEntryCount(adjustmentPreview.proposed_delta, locale)}`,
+      after: formatEntryCount(adjustmentPreview.after, locale),
+    },
+  ];
+}
+
+function reasonsFor(locale: Locale) {
+  const messages = messagesFor(locale);
+
+  return [
+    { value: "SYSTEM_ERROR_CORRECTION", label: messages.admin.reasons.SYSTEM_ERROR_CORRECTION },
+    { value: "OTHER", label: messages.admin.reasons.OTHER },
+  ];
+}
+
+describe("confirmacion de una mutacion sensible", () => {
+  it("ensena antes, cambio y despues, en los dos idiomas", () => {
+    for (const locale of LOCALES) {
+      const messages = messagesFor(locale);
+
+      const view = renderIn(
+        locale,
+        <SensitiveConfirmForm
+          locale={locale}
+          action={(_previous, formData) => {
+            submitted.push(formData);
+            return Promise.resolve(IDLE_RESULT);
+          }}
+          hiddenFields={{ participant_id: PARTICIPANT_ID }}
+          impact={adjustmentImpact(locale)}
+          reasons={reasonsFor(locale)}
+          submitLabel={messages.admin.adjustments.proposeSubmit}
+          confirmLabel={messages.admin.adjustments.proposeConfirm}
+        />,
+      );
+
+      // Las tres cabeceras de la tabla de impacto.
+      expect(screen.getByText(messages.admin.confirm.columnBefore)).toBeInTheDocument();
+      expect(screen.getByText(messages.admin.confirm.columnDelta)).toBeInTheDocument();
+      expect(screen.getByText(messages.admin.confirm.columnAfter)).toBeInTheDocument();
+
+      // Y las tres cifras, tal como llegan del backend.
+      expect(
+        screen.getByText(formatEntryCount(adjustmentPreview.before, locale)),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText(formatEntryCount(adjustmentPreview.after, locale)),
+      ).toBeInTheDocument();
+
+      view.unmount();
+    }
+  });
+
+  it("el boton no se puede pulsar hasta confirmar explicitamente", async () => {
+    const user = userEvent.setup();
+    const messages = enMessages;
+
+    renderIn(
+      "en",
+      <SensitiveConfirmForm
+        locale="en"
+        action={(_previous, formData) => {
+          submitted.push(formData);
+          return Promise.resolve(IDLE_RESULT);
+        }}
+        hiddenFields={{ participant_id: PARTICIPANT_ID }}
+        impact={adjustmentImpact("en")}
+        reasons={reasonsFor("en")}
+        submitLabel={messages.admin.adjustments.proposeSubmit}
+        confirmLabel={messages.admin.adjustments.proposeConfirm}
+      />,
+    );
+
+    const submit = screen.getByRole("button", { name: messages.admin.adjustments.proposeSubmit });
+    expect(submit).toBeDisabled();
+
+    await user.click(screen.getByLabelText(messages.admin.adjustments.proposeConfirm));
+    expect(submit).toBeEnabled();
+  });
+
+  it("el motivo es obligatorio y viaja como CLAVE, no como prosa", () => {
+    const messages = enMessages;
+
+    renderIn(
+      "en",
+      <SensitiveConfirmForm
+        locale="en"
+        action={(_previous, formData) => {
+          submitted.push(formData);
+          return Promise.resolve(IDLE_RESULT);
+        }}
+        hiddenFields={{ participant_id: PARTICIPANT_ID }}
+        impact={adjustmentImpact("en")}
+        reasons={reasonsFor("en")}
+        submitLabel={messages.admin.adjustments.proposeSubmit}
+        confirmLabel={messages.admin.adjustments.proposeConfirm}
+      />,
+    );
+
+    const reason = screen.getByLabelText(messages.admin.confirm.reasonLabel, { exact: false });
+    expect(reason).toBeRequired();
+    expect(reason).toHaveAttribute("name", "reason_key");
+
+    // Las OPCIONES llevan texto traducido; el VALOR es la clave estable.
+    const option = screen.getByRole("option", {
+      name: messages.admin.reasons.SYSTEM_ERROR_CORRECTION,
+    });
+    expect(option).toHaveValue("SYSTEM_ERROR_CORRECTION");
+  });
+
+  it('la nota se vuelve obligatoria cuando el motivo es "otro"', async () => {
+    const user = userEvent.setup();
+    const messages = enMessages;
+
+    renderIn(
+      "en",
+      <SensitiveConfirmForm
+        locale="en"
+        action={(_previous, formData) => {
+          submitted.push(formData);
+          return Promise.resolve(IDLE_RESULT);
+        }}
+        hiddenFields={{ participant_id: PARTICIPANT_ID }}
+        impact={adjustmentImpact("en")}
+        reasons={reasonsFor("en")}
+        submitLabel={messages.admin.adjustments.proposeSubmit}
+        confirmLabel={messages.admin.adjustments.proposeConfirm}
+      />,
+    );
+
+    // Una clave que significa "ninguna de las anteriores" sin explicar cual no
+    // registra nada. Sin esta regla, todo el mundo elegiria "otro".
+    const note = screen.getByLabelText(messages.admin.confirm.noteLabel, { exact: false });
+    expect(note).not.toBeRequired();
+
+    await user.selectOptions(
+      screen.getByLabelText(messages.admin.confirm.reasonLabel, { exact: false }),
+      "OTHER",
+    );
+
+    expect(
+      screen.getByLabelText(messages.admin.confirm.noteLabel, { exact: false }),
+    ).toBeRequired();
+  });
+
+  it('un "despues" no publicado se dice, no se calcula', () => {
+    const messages = enMessages;
+
+    renderIn(
+      "en",
+      <SensitiveConfirmForm
+        locale="en"
+        action={(_previous, formData) => {
+          submitted.push(formData);
+          return Promise.resolve(IDLE_RESULT);
+        }}
+        hiddenFields={{ submission_id: "amo_1" }}
+        impact={[
+          {
+            label: messages.admin.amoeReview.impactEntries,
+            /*
+             * El "antes" SIEMPRE es un numero; el "despues" no siempre existe.
+             * Es el caso real de la cola AMOE cuando la version de reglas DEL
+             * ENVIO ya no declara AMOE legible: la aprobacion fallaria, asi que
+             * el backend manda `entries_after_if_approved: null` en vez de una
+             * cifra que no se va a cumplir.
+             */
+            before: formatEntryCount(11_450, "en"),
+            delta: "+200",
+            after: null,
+          },
+        ]}
+        reasons={reasonsFor("en")}
+        submitLabel={messages.admin.amoeReview.approveSubmit}
+        confirmLabel={messages.admin.amoeReview.approveConfirm}
+      />,
+    );
+
+    // La alternativa -sumar 200 al saldo- es exactamente lo que DEC-023 prohibe.
+    expect(screen.getByText(messages.admin.confirm.afterNotPublished)).toBeInTheDocument();
+  });
+
+  it("las advertencias del motor se pintan, no se resumen", () => {
+    const messages = enMessages;
+
+    renderIn(
+      "en",
+      <SensitiveConfirmForm
+        locale="en"
+        action={(_previous, formData) => {
+          submitted.push(formData);
+          return Promise.resolve(IDLE_RESULT);
+        }}
+        hiddenFields={{ participant_id: PARTICIPANT_ID }}
+        impact={adjustmentImpact("en")}
+        reasons={reasonsFor("en")}
+        warnings={[
+          messages.admin.warnings.BALANCE_WOULD_GO_NEGATIVE,
+          messages.admin.warnings.ENTRY_CAP_REACHED,
+        ]}
+        submitLabel={messages.admin.adjustments.proposeSubmit}
+        confirmLabel={messages.admin.adjustments.proposeConfirm}
+      />,
+    );
+
+    expect(screen.getByText(messages.admin.confirm.warningsTitle)).toBeInTheDocument();
+    expect(screen.getByText(messages.admin.warnings.BALANCE_WOULD_GO_NEGATIVE)).toBeInTheDocument();
+    expect(screen.getByText(messages.admin.warnings.ENTRY_CAP_REACHED)).toBeInTheDocument();
+  });
+
+  it("el saldo se ensena CON su hora, porque es una foto", async () => {
+    const user = userEvent.setup();
+    const messages = enMessages;
+
+    /*
+     * Entre la previsualizacion y la firma puede entrar una compra o una
+     * descalificacion. Sin el instante, una pantalla abierta media hora parece
+     * hablar del presente, y quien firma cree estar leyendo el saldo de ahora.
+     */
+    const asOf =
+      formatZonedDateTime(adjustmentPreview.as_of, "en", {
+        timeZone: "UTC",
+        showTimeZoneName: true,
+      }) ?? "";
+
+    expect(asOf).not.toBe("");
+
+    renderIn(
+      "en",
+      <SensitiveConfirmForm
+        locale="en"
+        action={(_previous, formData) => {
+          submitted.push(formData);
+          return Promise.resolve(IDLE_RESULT);
+        }}
+        hiddenFields={{ participant_id: PARTICIPANT_ID }}
+        impact={adjustmentImpact("en")}
+        reasons={reasonsFor("en")}
+        balanceAsOf={asOf}
+        submitLabel={messages.admin.adjustments.proposeSubmit}
+        confirmLabel={messages.admin.adjustments.proposeConfirm}
+      />,
+    );
+
+    expect(screen.getByText(asOf, { exact: false })).toBeInTheDocument();
+
+    // Y sigue siendo firmable: la hora informa, no bloquea.
+    await user.click(screen.getByLabelText(messages.admin.adjustments.proposeConfirm));
+    expect(
+      screen.getByRole("button", { name: messages.admin.adjustments.proposeSubmit }),
+    ).toBeEnabled();
+  });
+
+  it("un ajuste que dejaria el saldo negativo NO se puede firmar", async () => {
+    const user = userEvent.setup();
+    const messages = enMessages;
+
+    /*
+     * `would_make_balance_negative` lo contesta LA MISMA funcion que rechaza el
+     * ajuste al aplicarlo. La pantalla no lo deduce de las cifras -restar aqui
+     * seria reimplementar el motor- y no ofrece la firma: no es el control, pero
+     * evita hacer leer, motivar y confirmar algo que ya se sabe que falla.
+     */
+    expect(adjustmentPreviewNegative.would_make_balance_negative).toBe(true);
+
+    renderIn(
+      "en",
+      <SensitiveConfirmForm
+        locale="en"
+        action={(_previous, formData) => {
+          submitted.push(formData);
+          return Promise.resolve(IDLE_RESULT);
+        }}
+        hiddenFields={{ participant_id: PARTICIPANT_ID }}
+        impact={[
+          {
+            label: messages.admin.adjustments.impactEntries,
+            before: formatEntryCount(adjustmentPreviewNegative.before, "en"),
+            delta: formatEntryCount(adjustmentPreviewNegative.proposed_delta, "en"),
+            after: formatEntryCount(adjustmentPreviewNegative.after, "en"),
+          },
+        ]}
+        reasons={reasonsFor("en")}
+        blockedReason={messages.admin.warnings.BALANCE_WOULD_GO_NEGATIVE}
+        submitLabel={messages.admin.adjustments.proposeSubmit}
+        confirmLabel={messages.admin.adjustments.proposeConfirm}
+        destructive
+      />,
+    );
+
+    // Se dice POR QUE, y se dice antes de la tabla.
+    expect(screen.getByText(messages.admin.warnings.BALANCE_WOULD_GO_NEGATIVE)).toBeInTheDocument();
+
+    const submit = screen.getByRole("button", { name: messages.admin.adjustments.proposeSubmit });
+    expect(submit).toBeDisabled();
+
+    // Ni siquiera marcando la casilla: el bloqueo no depende de la confirmacion.
+    await user.click(screen.getByLabelText(messages.admin.adjustments.proposeConfirm));
+    expect(submit).toBeDisabled();
+  });
+});
+
+describe("acceso del personal", () => {
+  it("el formulario de acceso pide correo y contrasena, y nada mas (plantilla)", () => {
+    for (const locale of LOCALES) {
+      const messages = messagesFor(locale);
+      const view = renderIn(locale, <StaffLoginForm locale={locale} returnPath={null} />);
+
+      expect(view.container.querySelector('input[name="email"]')).toHaveAttribute("type", "email");
+      expect(view.container.querySelector('input[name="password"]')).toHaveAttribute(
+        "type",
+        "password",
+      );
+      // Sin segundo factor: ningun campo de codigo de un solo uso.
+      expect(view.container.querySelector('input[autocomplete="one-time-code"]')).toBeNull();
+      expect(
+        screen.getByRole("button", { name: messages.admin.auth.signInSubmit }),
+      ).toBeInTheDocument();
+
+      view.unmount();
+    }
+  });
+
+  it("la contrasena no queda en estado de cliente", () => {
+    renderIn("en", <StaffLoginForm locale="en" returnPath={null} />);
+
+    const password = screen.getByLabelText(enMessages.admin.auth.passwordLabel, { exact: false });
+
+    // Sin `value` controlado: el navegador envia el formulario al servidor de
+    // Next y la contrasena no pasa por JavaScript de cliente (DEC-006).
+    expect(password).toHaveAttribute("type", "password");
+    expect(password).toHaveAttribute("autoComplete", "current-password");
+    expect(password).not.toHaveValue();
+  });
+
+  it("el destino de vuelta viaja como campo oculto y solo si es del panel", () => {
+    const { container } = renderIn(
+      "en",
+      <StaffLoginForm locale="en" returnPath="/admin/en/amoe" />,
+    );
+
+    const next = container.querySelector('input[name="next"]');
+    expect(next).toHaveValue("/admin/en/amoe");
+  });
+});
+
+/**
+ * CAMBIAR LA CONTRASENA DE UN PARTICIPANTE (plantilla).
+ *
+ * No hay recuperacion por correo: quien la olvida la pide a la tienda y el
+ * panel le fija una nueva. Lo que se protege: que el formulario mande el
+ * participante correcto, que el minimo se diga ANTES con el numero publicado, y
+ * que el rechazo `WEAK_PASSWORD` se pinte JUNTO al campo con el minimo que
+ * manda la API.
+ */
+describe("contrasena nueva de un participante", () => {
+  it.each(LOCALES)(
+    "dice el minimo publicado y no guarda la contrasena en estado (%s)",
+    (locale) => {
+      const messages = messagesFor(locale);
+      const { container } = renderIn(
+        locale,
+        <ParticipantPasswordForm
+          locale={locale}
+          participantId={PARTICIPANT_ID}
+          minimumLength={8}
+        />,
+      );
+
+      expect(screen.getByText(messages.admin.participants.passwordToggle)).toBeInTheDocument();
+      expect(container.querySelector('input[name="participant_id"]')).toHaveValue(PARTICIPANT_ID);
+
+      const password = container.querySelector('input[name="password"]');
+      expect(password).toHaveAttribute("type", "password");
+      expect(password).toHaveAttribute("autoComplete", "new-password");
+      expect(password).toHaveAttribute("minLength", "8");
+      expect(password).not.toHaveValue();
+      expect(container.textContent).toContain(
+        messages.admin.participants.passwordHintMinimum.replace("{count}", "8"),
+      );
+    },
+  );
+
+  it("sin minimo publicado no fija minLength y usa la pista generica", () => {
+    const { container } = renderIn(
+      "es",
+      <ParticipantPasswordForm locale="es" participantId={PARTICIPANT_ID} minimumLength={null} />,
+    );
+
+    expect(container.querySelector('input[name="password"]')).not.toHaveAttribute("minLength");
+    expect(container.textContent).toContain(esMessages.admin.participants.passwordHint);
+  });
+
+  it("el rechazo WEAK_PASSWORD se pinta junto al campo, con el minimo de la API", async () => {
+    const user = userEvent.setup();
+    const { container } = renderIn(
+      "en",
+      <ParticipantPasswordForm locale="en" participantId={PARTICIPANT_ID} minimumLength={null} />,
+    );
+
+    await user.click(screen.getByText(enMessages.admin.participants.passwordToggle));
+    const field = container.querySelector('input[name="password"]');
+    expect(field).not.toBeNull();
+    if (field === null) return;
+
+    await user.type(field, "short");
+    await user.click(
+      screen.getByRole("button", { name: enMessages.admin.participants.passwordSubmit }),
+    );
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      enMessages.auth.fields.passwordTooShort.replace("{count}", "8"),
+    );
+
+    const sent = submitted.at(-1);
+    expect(sent?.get("participant_id")).toBe(PARTICIPANT_ID);
+  });
+
+  it("una contrasena aceptada se confirma con su aviso", async () => {
+    const user = userEvent.setup();
+    const { container } = renderIn(
+      "es",
+      <ParticipantPasswordForm locale="es" participantId={PARTICIPANT_ID} minimumLength={8} />,
+    );
+
+    await user.click(screen.getByText(esMessages.admin.participants.passwordToggle));
+    const field = container.querySelector('input[name="password"]');
+    expect(field).not.toBeNull();
+    if (field === null) return;
+
+    await user.type(field, "una frase larga");
+    await user.click(
+      screen.getByRole("button", { name: esMessages.admin.participants.passwordSubmit }),
+    );
+
+    expect(
+      await screen.findByText(esMessages.admin.participants.passwordSaved),
+    ).toBeInTheDocument();
+  });
+});
+
+/**
+ * UN ENDPOINT QUE AUN NO EXISTE NO ES UNA AVERIA (HO-034 puntos 4 y 5).
+ *
+ * El panel llama a rutas de administracion que el backend todavia no sirve.
+ * Mientras no existen, la API responde 404 y la pantalla pintaba
+ * "no hemos podido cargar esta seccion", con identificador de peticion incluido,
+ * como si algo se hubiera roto. Eso manda a quien opera a reintentar y a abrir
+ * un ticket por algo que no esta averiado.
+ *
+ * La distincion NO es una heuristica: `apps/api/src/http/errors.ts` da un codigo
+ * PROPIO a cada 404 de dominio -`ORDER_NOT_FOUND`, `PROMOTION_NOT_FOUND`, ...-
+ * precisamente para que el frontend no tenga que mirar la url. El `NOT_FOUND`
+ * pelado solo lo emite `app.setNotFoundHandler`, es decir: ruta no montada.
+ */
+describe("seccion del panel todavia no conectada", () => {
+  const routeMissing = {
+    kind: "http" as const,
+    status: 404,
+    code: "NOT_FOUND",
+    requestId: "req_0000000000000001",
+    details: null,
+  };
+
+  it("un 404 de ruta inexistente se dice como estado deliberado, no como error", () => {
+    renderIn("es", <AdminSectionError failure={routeMissing} headingLevel="h2" />);
+
+    expect(screen.getByText(esMessages.admin.notConnected.title)).toBeInTheDocument();
+    expect(screen.queryByText(esMessages.states.loadFailed.title)).not.toBeInTheDocument();
+  });
+
+  it("no ofrece un identificador de peticion para un fallo que no existe", () => {
+    // Es lo que convierte esto en un ticket. No hay nada que investigar: el
+    // endpoint no esta escrito.
+    const { container } = renderIn("es", <AdminSectionError failure={routeMissing} />);
+
+    expect(container.textContent).not.toContain(routeMissing.requestId);
+  });
+
+  it("lo dice en los dos idiomas", () => {
+    for (const locale of LOCALES) {
+      const messages = locale === "en" ? enMessages : esMessages;
+      const view = renderIn(locale, <AdminSectionError failure={routeMissing} />);
+
+      expect(screen.getByText(messages.admin.notConnected.title)).toBeInTheDocument();
+      view.unmount();
+    }
+  });
+
+  it("un 404 CON codigo de dominio sigue siendo el recurso, no la ruta", () => {
+    /*
+     * `ORDER_NOT_FOUND` significa "ese pedido no existe" y tiene su propio
+     * texto. Tratarlo como "seccion no conectada" diria que el panel esta a
+     * medias cuando lo unico que pasa es que el identificador esta mal.
+     */
+    renderIn(
+      "es",
+      <AdminSectionError
+        failure={{ ...routeMissing, code: "ORDER_NOT_FOUND" }}
+        headingLevel="h2"
+      />,
+    );
+
+    expect(screen.getByText(esMessages.apiErrors.ORDER_NOT_FOUND)).toBeInTheDocument();
+    expect(screen.queryByText(esMessages.admin.notConnected.title)).not.toBeInTheDocument();
+  });
+
+  it("un fallo de red o un 500 siguen siendo un error de verdad", () => {
+    for (const failure of [
+      { ...routeMissing, status: 500, code: "INTERNAL_ERROR" },
+      { kind: "network" as const, status: null, code: null, requestId: null, details: null },
+    ]) {
+      const view = renderIn("es", <AdminSectionError failure={failure} headingLevel="h2" />);
+
+      expect(screen.getByText(esMessages.states.loadFailed.title)).toBeInTheDocument();
+      expect(screen.queryByText(esMessages.admin.notConnected.title)).not.toBeInTheDocument();
+      view.unmount();
+    }
+  });
+
+  it("la clasificacion es una funcion, comprobable sin renderizar", () => {
+    expect(isSectionNotConnected(routeMissing)).toBe(true);
+    expect(isSectionNotConnected({ ...routeMissing, code: "PROMOTION_NOT_FOUND" })).toBe(false);
+    expect(isSectionNotConnected({ ...routeMissing, status: 403, code: "FORBIDDEN" })).toBe(false);
+    expect(
+      isSectionNotConnected({
+        kind: "malformed",
+        status: 404,
+        code: null,
+        requestId: null,
+        details: null,
+      }),
+    ).toBe(false);
+  });
+});

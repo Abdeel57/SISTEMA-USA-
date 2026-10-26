@@ -1,0 +1,452 @@
+/**
+ * Puertos de lectura y escritura que consumen los handlers (hito B3).
+ *
+ * POR QUE HAY UN PUERTO Y NO UNA LLAMADA A DRIZZLE EN CADA HANDLER
+ *
+ *   No es por ortodoxia hexagonal. Es porque DEC-018 descarta los mocks para lo
+ *   que vive en el motor -triggers, exclusion GiST, `pg_advisory_xact_lock`- y
+ *   al mismo tiempo hay logica que NO vive en el motor y que si conviene poder
+ *   probar sin Docker: que la cotizacion se calcule sobre el carrito del
+ *   servidor y nunca sobre el cuerpo de la peticion (DEC-023), que un carrito
+ *   inexistente devuelva uno vacio en vez de un 404, que el codigo de error sea
+ *   el que dice el contrato.
+ *
+ *   Con el puerto, esa mitad se prueba en `apps/api` con dobles en memoria y la
+ *   otra mitad se prueba contra PostgreSQL real en `packages/database`. Sin el,
+ *   habria que elegir entre no probar ninguna o simular las dos, y simular un
+ *   trigger es escribir un test que pasa siempre.
+ *
+ * QUE NO ENTRA POR AQUI
+ *
+ *   Ninguna escritura en el ledger. Las entries no las genera una peticion HTTP
+ *   del participante: las genera el backend cuando el pedido alcanza el estado
+ *   que las Official Rules definan como cualificante, y eso llega con el hito de
+ *   commerce. Aqui solo se LEE el saldo.
+ */
+
+import type { FeatureFlagKey } from "../http/feature-flag-catalog.js";
+
+/**
+ * Contenido dinamico localizado (DEC-030).
+ *
+ * Las dos claves son obligatorias. Un opcional permitiria servir un hueco y
+ * obligaria a `frontend` a improvisar, que es justo lo que DEC-030 prohibe.
+ */
+export interface LocalizedText {
+  readonly "en-US": string;
+  readonly "es-US": string;
+}
+
+export interface MoneyMinor {
+  /** DEC-010: cadena de digitos. Un entero grande no sobrevive a `JSON.parse`. */
+  readonly amount_minor: string;
+  readonly currency: string;
+}
+
+// ---------------------------------------------------------------------------
+// Promociones
+// ---------------------------------------------------------------------------
+
+export type PromotionStatus =
+  | "DRAFT"
+  | "SCHEDULED"
+  | "ACTIVE"
+  | "CLOSED"
+  | "EXPORT_PREPARATION"
+  | "DRAW_PENDING"
+  | "POTENTIAL_WINNER_REVIEW"
+  | "COMPLETED"
+  | "CANCELLED";
+
+export interface PromotionRecord {
+  readonly id: string;
+  readonly slug: string;
+  readonly status: PromotionStatus;
+  readonly title: LocalizedText;
+  readonly summary: LocalizedText;
+  readonly legalTimezone: string;
+  readonly startsAt: Date | null;
+  readonly endsAt: Date | null;
+  /** `null` mientras no haya version de reglas activa. */
+  readonly rulesVersionId: string | null;
+  /**
+   * DEC-065: fotografia del premio para el hero, ruta del propio sitio.
+   * `null` = sin fotografia.
+   */
+  readonly heroImageUrl: string | null;
+  /**
+   * Descripcion de esa fotografia en los dos idiomas, o `null` si es
+   * decorativa. Nunca un idioma solo: el panel exige los dos o ninguno.
+   */
+  readonly heroImageAlt: LocalizedText | null;
+  /**
+   * DEC-066: fotos ADICIONALES del carrusel, en orden (hasta 5). La primera
+   * del carrusel es `heroImageUrl`; esta lista va detras.
+   */
+  readonly heroGallery: readonly PromotionHeroImage[];
+}
+
+/** Una foto adicional del carrusel del hero (DEC-066). */
+export interface PromotionHeroImage {
+  /** Ruta del propio sitio. */
+  readonly url: string;
+  /** Los dos idiomas o `null` (decorativa). */
+  readonly alt: LocalizedText | null;
+}
+
+export interface RulesDocumentRecord {
+  readonly locale: "en-US" | "es-US";
+  readonly title: string;
+  readonly body: string;
+  readonly isLegallyControlling: boolean;
+  readonly isInformationalTranslation: boolean;
+}
+
+export interface RulesVersionRecord {
+  readonly id: string;
+  readonly version: number;
+  readonly effectiveAt: Date | null;
+  /** `PromotionRulesVersion.config` tal cual. El motor lo parsea. */
+  readonly config: unknown;
+  readonly documents: readonly RulesDocumentRecord[];
+}
+
+export interface PromotionRepository {
+  /**
+   * La promocion ACTIVA. `null` es un estado normal del negocio -el periodo
+   * entre promociones-, no un fallo.
+   */
+  findActive(): Promise<PromotionRecord | null>;
+  findBySlug(slug: string): Promise<PromotionRecord | null>;
+  /**
+   * `after` ES EL PARAMETRO DEL PUERTO, NO EL DE HTTP.
+   *
+   * En el cable la paginacion se pide con `?cursor=`, que es lo que declaran
+   * `docs/API_CONTRACT.md` y `http/pagination.ts`. Aqui llega ya DECODIFICADO:
+   * el cursor HTTP es un valor opaco en base64url y este parametro es la
+   * posicion que lleva dentro. Son dos cosas distintas y por eso se llaman
+   * distinto; la coordinacion entre sesiones ya confundio una con otra una vez.
+   * Renombrar cualquiera de los dos haria que pareciesen lo mismo.
+   */
+  listPublic(options: { limit: number; after: string | null }): Promise<readonly PromotionRecord[]>;
+  findRulesVersion(rulesVersionId: string): Promise<RulesVersionRecord | null>;
+}
+
+// ---------------------------------------------------------------------------
+// Catalogo
+// ---------------------------------------------------------------------------
+
+/** DEC-052. Etiqueta de catalogo; la tasa por tipo vive en la version de reglas. */
+export type ProductKind = "MERCHANDISE" | "ENTRY_PACKAGE";
+
+export interface VariantRecord {
+  readonly id: string;
+  readonly sku: string;
+  readonly status: "DRAFT" | "ACTIVE" | "ARCHIVED";
+  readonly priceAmountMinor: bigint;
+  readonly currency: string;
+  /** `null` es "existencias no gestionadas", que no es lo mismo que cero. */
+  readonly stockQuantity: number | null;
+  /** `null` = variante sin nombre, el caso normal de un producto de variante unica. */
+  readonly name: LocalizedText | null;
+  /** `null` = sin imagen propia; la interfaz cae a la del producto. */
+  readonly imageUrl: string | null;
+  readonly position: number;
+}
+
+/** Categoria comercial ya resuelta con su nombre en los dos idiomas (DEC-053). */
+export interface ProductCategoryRecord {
+  readonly key: string;
+  readonly name: LocalizedText;
+  readonly position: number;
+}
+
+export interface ProductRecord {
+  readonly id: string;
+  readonly sku: string;
+  readonly slug: string;
+  readonly status: "DRAFT" | "ACTIVE" | "ARCHIVED";
+  readonly kind: ProductKind;
+  /** `null` = sin clasificar. No es una categoria residual llamada "otras". */
+  readonly category: ProductCategoryRecord | null;
+  readonly currency: string;
+  readonly name: LocalizedText;
+  readonly description: LocalizedText | null;
+  readonly imageUrl: string | null;
+  readonly variants: readonly VariantRecord[];
+}
+
+/**
+ * Filtros del catalogo publico (contrato 13.4).
+ *
+ * `null` significa "sin filtrar". Un valor DESCONOCIDO no llega hasta aqui: lo
+ * rechaza el handler con 422, porque `?category=inexistente` devolviendo una
+ * lista vacia seria indistinguible de "esa categoria existe y esta vacia".
+ */
+export interface CatalogFilters {
+  readonly kind: ProductKind | null;
+  readonly categoryKey: string | null;
+}
+
+export interface CatalogRepository {
+  listPublic(
+    options: { limit: number; after: string | null } & Partial<CatalogFilters>,
+  ): Promise<readonly ProductRecord[]>;
+  findBySlug(slug: string): Promise<ProductRecord | null>;
+  /** La variante mas el producto al que pertenece, para validar y para el SKU. */
+  findVariant(
+    variantId: string,
+  ): Promise<{ readonly product: ProductRecord; readonly variant: VariantRecord } | null>;
+  /**
+   * Categorias con al menos un producto `ACTIVE` (contrato 13.4).
+   *
+   * Se filtra AQUI y no en el cliente: publicar una categoria vacia invita a
+   * pulsarla para no ver nada, y ademas revela que el negocio piensa vender
+   * algo que todavia no vende.
+   */
+  listCategoriesWithActiveProducts(): Promise<readonly ProductCategoryRecord[]>;
+  /** Existe la categoria, sin mirar si tiene productos. Para distinguir 422 de lista vacia. */
+  categoryExists(key: string): Promise<boolean>;
+}
+
+// ---------------------------------------------------------------------------
+// Carrito (DEC-023)
+// ---------------------------------------------------------------------------
+
+export type CartOwnerRef =
+  | { readonly kind: "PARTICIPANT"; readonly participantId: string }
+  | { readonly kind: "SESSION"; readonly sessionRef: string };
+
+export interface CartLineRecord {
+  readonly id: string;
+  /**
+   * Producto padre de la variante. Viaja aparte porque el pedido lo necesita
+   * (`order_items.product_id` es clave ajena a `products`): sin el, el checkout
+   * escribia el id de la VARIANTE en esa columna y el motor lo rechazaba con
+   * 500 antes de llegar a decir que no hay proveedor de pago (e2e real).
+   */
+  readonly productId: string;
+  readonly productVariantId: string;
+  readonly productSlug: string;
+  readonly sku: string;
+  readonly name: LocalizedText;
+  /**
+   * La foto de la linea: la de la VARIANTE si tiene una propia y, si no, la del
+   * producto. Es la misma ruta que publica el catalogo (`/media/...` o
+   * `https:`), ya validada al escribirse. `null` = el producto no tiene foto.
+   */
+  readonly imageUrl: string | null;
+  /**
+   * DEC-052: el tipo del producto padre, leido de `products.kind`.
+   *
+   * Viaja hasta aqui porque el motor de calculo lo exige por linea y porque el
+   * checkout lo congela en `order_items.product_kind`. En el CARRITO se lee del
+   * catalogo -es un borrador, todavia no hay foto-; a partir del pedido, de la
+   * foto.
+   */
+  readonly productKind: ProductKind;
+  readonly quantity: number;
+  readonly unitAmountMinor: bigint;
+  readonly currency: string;
+  /**
+   * Existencias de la VARIANTE, tal cual estan en `product_variants`.
+   *
+   * `null` es "existencias no gestionadas", que no es cero. Es la MISMA
+   * columna con la que `POST /cart/items` decide el `409 INSUFFICIENT_STOCK`,
+   * y viaja hasta aqui precisamente para que `availability` no pueda salir de
+   * una segunda fuente: dos lecturas del inventario acabarian discrepando y el
+   * sintoma seria un carrito que dice "disponible" en la linea y responde 409
+   * al pulsar.
+   *
+   * NO se publica en crudo. La respuesta solo lleva el estado derivado;
+   * publicar el inventario exacto es informacion de negocio y HO-017 pide
+   * explicitamente no hacerlo.
+   */
+  readonly stockQuantity: number | null;
+}
+
+export interface CartRecord {
+  readonly id: string;
+  readonly promotionId: string | null;
+  readonly currency: string | null;
+  /**
+   * Ultima mutacion del carrito, LINEAS INCLUIDAS (trigger de la migracion
+   * 0025). `null` solo en el carrito sintetico que se devuelve cuando el
+   * solicitante no tiene ninguno: ahi no hay fila, y un instante inventado
+   * seria peor que la ausencia.
+   */
+  readonly updatedAt: Date | null;
+  readonly lines: readonly CartLineRecord[];
+}
+
+export interface CartRepository {
+  /** `null` si el dueno no tiene ninguno abierto. NO lo crea. */
+  findOpen(owner: CartOwnerRef): Promise<CartRecord | null>;
+  /**
+   * Devuelve el carrito abierto del dueno, creandolo si no existe.
+   *
+   * Es una sola operacion y no un `find` seguido de un `create` porque dos
+   * peticiones simultaneas del mismo dueno crearian dos carritos. El indice
+   * unico parcial de la migracion 0009 lo impide en el motor; esta firma existe
+   * para que el codigo no lo intente siquiera.
+   */
+  openFor(owner: CartOwnerRef, promotionId: string | null): Promise<CartRecord>;
+  /** Anadir una variante que ya esta SUMA cantidad; no duplica la linea. */
+  addItem(cartId: string, variantId: string, quantity: number): Promise<CartRecord>;
+  /**
+   * `null` significa "esa linea no esta en ESTE carrito".
+   *
+   * No distingue "no existe" de "es de otro": responder cosas distintas
+   * convertiria el endpoint en un oraculo con el que enumerar identificadores
+   * ajenos. Ambos casos acaban en el mismo 404.
+   */
+  setItemQuantity(cartId: string, itemId: string, quantity: number): Promise<CartRecord | null>;
+  removeItem(cartId: string, itemId: string): Promise<CartRecord | null>;
+  /**
+   * Cierra (`CONVERTED`) el carrito del que salio un pedido ya pagado.
+   *
+   * Sin esto el carrito seguia abierto despues de pagar, con lo mismo dentro, y
+   * un segundo "Finalizar pedido" cobraba otra vez lo ya cobrado. Se busca por
+   * `orders.cart_id` y no por el dueno: si el participante ya abrio un carrito
+   * nuevo, ese no se toca. Solo mueve un carrito OPEN, asi que repetir el
+   * webhook no hace nada.
+   */
+  convertForPaidOrder(orderId: string): Promise<void>;
+  /**
+   * DEC-079: pasa el carrito de una sesion ANONIMA al participante de esa
+   * identidad, al iniciar sesion o registrarse.
+   *
+   * Se SUMA al carrito que la cuenta ya tuviera, linea a linea, con el mismo
+   * tope de cantidad que `POST /cart/items`. Una linea en otra moneda que la del
+   * carrito de la cuenta se queda fuera: un carrito con dos monedas no tiene
+   * subtotal. El carrito anonimo pasa a `ABANDONED`.
+   *
+   * Recibe la IDENTIDAD y no el participante porque es lo que sabe quien acaba
+   * de autenticarse; la traduccion se hace en la misma consulta. Sin perfil de
+   * participante -una cuenta de personal- no hace nada. Todo en una
+   * transaccion: o se pasa el carrito entero o no se pasa.
+   */
+  adoptSessionCart(
+    sessionRef: string,
+    identityId: string,
+    promotionId: string | null,
+  ): Promise<{ readonly adoptedLines: number }>;
+}
+
+// ---------------------------------------------------------------------------
+// Envio (DEC-079)
+// ---------------------------------------------------------------------------
+
+export interface ShippingRateRecord {
+  readonly id: string;
+  readonly amountMinor: bigint;
+  readonly currency: string;
+  readonly setAt: Date;
+  /** `admin_users.id` de quien la puso. */
+  readonly setByAdminUserId: string;
+}
+
+export interface ShippingRateRepository {
+  /** La vigente: la ultima que se puso. `null` si nunca se ha puesto ninguna. */
+  current(): Promise<ShippingRateRecord | null>;
+  /** Pone una tarifa nueva. Nunca edita la anterior: queda de historico. */
+  set(input: {
+    readonly amountMinor: bigint;
+    readonly currency: string;
+    readonly setByAdminUserId: string;
+  }): Promise<ShippingRateRecord>;
+  /** Las ultimas `limit`, de la mas reciente a la mas antigua. */
+  history(limit: number): Promise<readonly ShippingRateRecord[]>;
+}
+
+// ---------------------------------------------------------------------------
+// Configuracion publica y saldo
+// ---------------------------------------------------------------------------
+
+export type AmoeMode = "ONLINE_FORM" | "MAIL_IN_REVIEW" | "CODE" | "EXTERNAL_INSTRUCTIONS";
+
+export interface PublicConfigRecord {
+  readonly featureFlags: Readonly<Record<FeatureFlagKey, boolean>>;
+  readonly amoeMode: AmoeMode | null;
+}
+
+export interface ConfigRepository {
+  read(): Promise<PublicConfigRecord>;
+}
+
+export interface EntryBalanceRepository {
+  /**
+   * Entries activas del participante en la promocion, leidas de la vista de
+   * saldo (DEC-007). Nunca de un contador editable ni de la cache.
+   */
+  activeEntries(promotionId: string, participantId: string): Promise<number>;
+}
+
+// ---------------------------------------------------------------------------
+// Marca del sitio (tabla `brand_profile`, migracion 0040)
+// ---------------------------------------------------------------------------
+
+/**
+ * La fila unica de `brand_profile`, tal cual.
+ *
+ * `logoUrl` es la ruta publica del logotipo (`/media/<id>.<ext>`), resuelta
+ * aqui porque la extension depende del tipo guardado en `media_assets` y solo
+ * el repositorio lo tiene a mano. `null` sin logotipo: la web pinta el simbolo
+ * de la plantilla.
+ */
+export interface BrandProfileRecord {
+  readonly name: string;
+  readonly wordmarkLead: string;
+  readonly wordmarkTail: string;
+  readonly legalName: string;
+  readonly legalEntity: string;
+  readonly governingLawState: string;
+  readonly venue: string;
+  readonly street: string;
+  readonly cityStateZip: string;
+  readonly contactEmail: string;
+  readonly domain: string;
+  readonly timeZone: string;
+  readonly orderNumberPrefix: string;
+  readonly entryNumberPrefix: string;
+  /** `#rrggbb` en minusculas. */
+  readonly colorBrand: string;
+  readonly colorAccent: string;
+  /** 0..40. */
+  readonly patternOpacityPercent: number;
+  readonly logoMediaId: string | null;
+  readonly logoUrl: string | null;
+  readonly updatedAt: Date;
+  /** `null` mientras nadie haya guardado desde el panel (valores iniciales). */
+  readonly updatedByAdminUserId: string | null;
+}
+
+/** Lo que el panel manda al guardar: la fila entera menos lo derivado. */
+export type BrandProfileInput = Omit<
+  BrandProfileRecord,
+  "logoUrl" | "updatedAt" | "updatedByAdminUserId"
+>;
+
+export interface BrandRepository {
+  /** La fila siempre existe: la siembra la migracion 0040. */
+  read(): Promise<BrandProfileRecord>;
+  /** Reemplaza la fila entera y deja constancia de quien lo hizo. */
+  update(input: BrandProfileInput, updatedByAdminUserId: string): Promise<BrandProfileRecord>;
+  /**
+   * Si existe una imagen subida con ese id. Se comprueba ANTES de guardar para
+   * responder 422 y no un error de clave ajena del motor.
+   */
+  mediaExists(mediaId: string): Promise<boolean>;
+}
+
+export interface Repositories {
+  readonly promotions: PromotionRepository;
+  readonly catalog: CatalogRepository;
+  readonly carts: CartRepository;
+  readonly config: ConfigRepository;
+  readonly entryBalances: EntryBalanceRepository;
+  /** DEC-079: tarifa fija de envio. */
+  readonly shipping: ShippingRateRepository;
+  /** La marca del sitio, editable desde el panel. */
+  readonly brand: BrandRepository;
+}

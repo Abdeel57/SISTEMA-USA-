@@ -1,0 +1,134 @@
+# ---------------------------------------------------------------------------
+# Plantilla Sorteos en Coolify: UN CLIENTE = UN RECURSO con estos tres
+# servicios (base de datos, api y web). Ver docs/DEPLOYMENT_COOLIFY.md.
+#
+# Las variables `SERVICE_*` son "magicas" de Coolify:
+#   - SERVICE_PASSWORD_* / SERVICE_USER_*: Coolify genera un valor aleatorio la
+#     primera vez y lo conserva en cada despliegue. Cada cliente tiene asi sus
+#     propias contrasenas sin que nadie las invente ni las copie.
+#   - SERVICE_URL_* / SERVICE_FQDN_*: el dominio que se le asigne en Coolify a
+#     ese servicio (el numero final es su puerto interno), con o sin `https://`.
+#
+# Lo unico obligatorio que rellena una persona es ADMIN_EMAIL. Los dominios de
+# `web` y `api` tienen que ser HTTPS: en produccion la API se niega a arrancar
+# con una URL publica `http://`.
+# ---------------------------------------------------------------------------
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${SERVICE_USER_POSTGRES}
+      POSTGRES_PASSWORD: ${SERVICE_PASSWORD_64_POSTGRES}
+      POSTGRES_DB: sorteos
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d sorteos"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: ["sh", "scripts/docker/api-start.sh"]
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      TZ: UTC
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+
+      # En Docker la red interna es IPv4: `::` (lo que pedia Railway) no aplica.
+      API_HOST: 0.0.0.0
+      API_PORT: 8080
+      PORT: 8080
+      API_PUBLIC_URL: ${SERVICE_URL_API_8080}
+      API_BODY_LIMIT_BYTES: 1048576
+      API_CORS_ALLOWED_ORIGINS: ${SERVICE_URL_WEB_8080}
+      API_REQUEST_ID_HEADER: x-request-id
+      API_RATE_LIMIT_WINDOW_SECONDS: 60
+      API_RATE_LIMIT_MAX_REQUESTS: 120
+
+      # La base solo es alcanzable dentro de la red privada del recurso: la
+      # misma postura que en Railway (DEC-043), sin TLS que no se verifica.
+      DATABASE_NETWORK: private
+      DATABASE_SSL_MODE: disable
+      DATABASE_URL_APP: postgresql://app_runtime:${SERVICE_PASSWORD_64_DBAPP}@db:5432/sorteos
+      DATABASE_POOL_MAX: 10
+      DATABASE_STATEMENT_TIMEOUT_MS: 15000
+      DATABASE_URL_SUPERUSER: postgresql://${SERVICE_USER_POSTGRES}:${SERVICE_PASSWORD_64_POSTGRES}@db:5432/sorteos
+      DB_APP_PASSWORD: ${SERVICE_PASSWORD_64_DBAPP}
+      DB_MIGRATOR_PASSWORD: ${SERVICE_PASSWORD_64_DBMIGRATOR}
+      DB_READONLY_PASSWORD: ${SERVICE_PASSWORD_64_DBREADONLY}
+
+      SESSION_SECRET: ${SERVICE_PASSWORD_64_SESSION}
+      SESSION_COOKIE_NAME: app_session
+      SESSION_COOKIE_DOMAIN: ${SERVICE_FQDN_WEB_8080}
+      SESSION_COOKIE_SECURE: "true"
+      SESSION_TTL_MINUTES: 1440
+      ADMIN_SESSION_TTL_MINUTES: 480
+      ADMIN_SESSION_IDLE_TIMEOUT_MINUTES: 15
+
+      # Stripe nace APAGADO: solo efectivo confirmado desde el panel. Para
+      # cobrar con tarjeta, PAYMENT_PROVIDER=stripe y las dos llaves del cliente.
+      PAYMENT_PROVIDER: ${PAYMENT_PROVIDER:-none}
+      PAYMENT_PROVIDER_API_KEY: ${PAYMENT_PROVIDER_API_KEY:-}
+      PAYMENT_WEBHOOK_SIGNING_SECRET: ${PAYMENT_WEBHOOK_SIGNING_SECRET:-}
+      PAYMENT_TEST_MODE: ${PAYMENT_TEST_MODE:-false}
+      DEFAULT_CURRENCY: USD
+
+      # Cuentas del panel. El administrador se mantiene igual a estas variables
+      # en cada despliegue; la del cliente solo se crea (luego la cambia el).
+      ADMIN_EMAIL: ${ADMIN_EMAIL:?}
+      ADMIN_PASSWORD: ${SERVICE_PASSWORD_ADMIN}
+      ADMIN_NAME: ${ADMIN_NAME:-Administrador}
+      CLIENT_ADMIN_EMAIL: ${CLIENT_ADMIN_EMAIL:-}
+      CLIENT_ADMIN_PASSWORD: ${CLIENT_ADMIN_PASSWORD:-}
+      CLIENT_ADMIN_NAME: ${CLIENT_ADMIN_NAME:-}
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:8080/api/v1/health/ready').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      # El bootstrap compila su script y aplica migraciones antes de escuchar.
+      start_period: 180s
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: ["pnpm", "--filter", "@app/web", "run", "start"]
+    depends_on:
+      - api
+    environment:
+      NODE_ENV: production
+      TZ: UTC
+      PORT: 8080
+      SITE_URL: ${SERVICE_URL_WEB_8080}
+      # `web` habla con `api` por la red privada del recurso, nunca por Internet.
+      API_BASE_URL: http://api:8080/api/v1
+      WEB_ENABLE_API_MOCKS: "false"
+      NEXT_PUBLIC_META_PIXEL_ID: ${NEXT_PUBLIC_META_PIXEL_ID:-}
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:8080/healthz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
+volumes:
+  db-data:

@@ -1,0 +1,154 @@
+/**
+ * Plantilla Sorteos - superficie de TypeScript del design system.
+ *
+ * El sistema visual vive en CSS (`src/styles/tokens.css`) y en el preset de
+ * Tailwind. Este modulo existe para el caso en el que un componente necesita
+ * referirse a un token desde TypeScript (estilos en linea, `<meta name="theme-
+ * color">`, futuras visualizaciones de datos) sin escribir el nombre de la
+ * variable a mano y sin poder equivocarse: los nombres son un tipo.
+ *
+ * Regla: si un valor se puede expresar con una clase de Tailwind, se usa la
+ * clase. Este modulo es la excepcion, no el camino habitual.
+ */
+
+/** Nombres de los tokens de color, sin el prefijo `--app-color-`. */
+export const COLOR_TOKENS = [
+  "bg",
+  "surface",
+  "surface-raised",
+  "surface-sunken",
+  "border",
+  "border-strong",
+  "text",
+  "text-muted",
+  "text-subtle",
+  "text-inverse",
+  "brand",
+  "brand-hover",
+  "brand-active",
+  "brand-subtle",
+  "on-brand",
+  // DEC-042: `accent` es ROJO, no un tercer escalon del oro. Ver `tokens.css`.
+  "accent",
+  "accent-hover",
+  "accent-active",
+  "accent-subtle",
+  "on-accent",
+  "accent-text",
+  "success",
+  "success-subtle",
+  "on-success",
+  "warning",
+  "warning-subtle",
+  "on-warning",
+  "danger",
+  "danger-subtle",
+  "on-danger",
+  "info",
+  "info-subtle",
+  "on-info",
+  "focus",
+  "overlay",
+  "skeleton",
+  // DEC-039: paleta de la banda clara. Se listan aqui por el mismo motivo que
+  // las demas -que el nombre sea un tipo- y NO porque haya un segundo tema:
+  // solo las consumen las secciones de mercancia.
+  "light-bg",
+  "light-surface",
+  "light-surface-sunken",
+  "light-border",
+  "light-border-strong",
+  "light-text",
+  "light-text-muted",
+  "light-gold",
+  // DEC-042: el rojo de tinta de la banda clara, contrapartida de `light-gold`.
+  "light-accent",
+] as const;
+
+export type ColorToken = (typeof COLOR_TOKENS)[number];
+
+/** Nombres de los tokens de espaciado, sin el prefijo `--app-space-`. */
+export const SPACE_TOKENS = [
+  "0",
+  "1",
+  "2",
+  "3",
+  "4",
+  "5",
+  "6",
+  "8",
+  "10",
+  "12",
+  "16",
+  "20",
+  "24",
+] as const;
+
+export type SpaceToken = (typeof SPACE_TOKENS)[number];
+
+/** Nombres de los tokens de radio, sin el prefijo `--app-radius-`. */
+export const RADIUS_TOKENS = ["none", "sm", "md", "lg", "xl", "2xl", "pill"] as const;
+
+export type RadiusToken = (typeof RADIUS_TOKENS)[number];
+
+/**
+ * Nombres de los tokens de elevacion, sin el prefijo `--app-shadow-`.
+ *
+ * Los dos ultimos son los de la banda clara (DEC-039): sobre blanco la sombra
+ * si eleva, y los escalones oscuros -calibrados para no verse sobre negro- ahi
+ * no valen.
+ */
+export const ELEVATION_TOKENS = ["none", "sm", "md", "lg", "xl", "light-sm", "light-md"] as const;
+
+export type ElevationToken = (typeof ELEVATION_TOKENS)[number];
+
+/** Nombres de los pasos de la escala tipografica, sin prefijo. */
+export const TEXT_TOKENS = [
+  "display-xl",
+  "display-lg",
+  "display-md",
+  "heading-lg",
+  "heading-md",
+  "heading-sm",
+  "body-lg",
+  "body-md",
+  "body-sm",
+  "label",
+  "caption",
+  "overline",
+] as const;
+
+export type TextToken = (typeof TEXT_TOKENS)[number];
+
+/**
+ * Referencia CSS a un token de color, ya resuelta como color usable.
+ *
+ * Los tokens se almacenan como canales RGB (ver `tokens.css`), asi que hay que
+ * envolverlos en `rgb()`. `alpha` acepta un valor entre 0 y 1.
+ */
+export function colorVar(token: ColorToken, alpha?: number): string {
+  const channels = `var(--app-color-${token})`;
+  return alpha === undefined ? `rgb(${channels})` : `rgb(${channels} / ${String(alpha)})`;
+}
+
+/** Referencia CSS a un token de espaciado. */
+export function spaceVar(token: SpaceToken): string {
+  return `var(--app-space-${token})`;
+}
+
+/** Referencia CSS a un token de radio. */
+export function radiusVar(token: RadiusToken): string {
+  return `var(--app-radius-${token})`;
+}
+
+/** Referencia CSS a un token de elevacion. */
+export function elevationVar(token: ElevationToken): string {
+  return `var(--app-shadow-${token})`;
+}
+
+/**
+ * Ruta del archivo de tokens, para quien quiera importarlo desde CSS:
+ *
+ *     import "@app/design-system/tokens.css";
+ */
+export const TOKENS_CSS_IMPORT = "@app/design-system/tokens.css";

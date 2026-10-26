@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Simbolo generico de la plantilla. Se sustituye por el del cliente
+       (cuadrado, fondo transparente) y se regeneran los PNG con
+       `node scripts/build-brand-assets.mjs`. -->
+  <defs>
+    <linearGradient id="brand" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#7dd3fc"/>
+      <stop offset="1" stop-color="#2563eb"/>
+    </linearGradient>
+  </defs>
+  <path d="M256 30 L482 256 L256 482 L30 256 Z" fill="none" stroke="url(#brand)" stroke-width="34" stroke-linejoin="round"/>
+  <path d="M256 140 L372 256 L256 372 L140 256 Z" fill="url(#brand)"/>
+</svg>

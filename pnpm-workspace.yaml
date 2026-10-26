@@ -1,0 +1,34 @@
+# ---------------------------------------------------------------------------
+# Plantilla Sorteos - workspaces de pnpm
+#
+# DEC-001: monorepo con pnpm workspaces + Turborepo, con la disposicion de
+# rutas prevista en docs/TASK_OWNERSHIP.md.
+#
+# Ownership de cada glob (docs/TASK_OWNERSHIP.md):
+#   apps/web ............... frontend-ux
+#   apps/api ............... backend-sweepstakes
+#   packages/ui, packages/design-system .......... frontend-ux
+#   packages/database, packages/sweepstakes,
+#   packages/commerce, packages/api-types ........ backend-sweepstakes (DEC-014)
+#   packages/security, packages/audit,
+#   packages/tpa ................................. security-integration
+#
+# Ningun agente crea paquetes fuera de su ownership.
+# ---------------------------------------------------------------------------
+
+packages:
+  - "apps/*"
+  - "packages/*"
+  - "tests/*"
+
+# pnpm 10 no ejecuta scripts de postinstall de dependencias salvo que se
+# declaren aqui explicitamente. La lista es una decision de seguridad: cada
+# entrada es codigo de terceros al que se le permite ejecutarse durante
+# `pnpm install`. Se anaden solo las que lo necesitan de verdad.
+#
+#   lefthook ... descarga el binario de su plataforma; sin el, el `prepare` de
+#                la raiz (`lefthook install`) no puede instalar los hooks.
+#   msw ........ escribe el service worker de `apps/web` en `public/`.
+onlyBuiltDependencies:
+  - lefthook
+  - msw

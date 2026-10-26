@@ -1,0 +1,690 @@
+import type {
+  ConsentRequirement,
+  EntryCalculationSnapshot,
+  EntryNumberBatch,
+  EntryNumbersPage,
+  EntrySummary,
+  EntryTransaction,
+  EntryTransactionPage,
+  OrderDetail,
+  OrderLine,
+  OrderPage,
+  OrderSummary,
+  ParticipantProfile,
+  PostalAddress,
+  SessionState,
+} from "@/lib/api";
+
+import { eligibleProduct, ineligibleProduct } from "./catalog";
+import { mugImage, teeImage } from "./media";
+import { activePromotion } from "./promotions";
+
+/**
+ * Fixtures del portal del participante.
+ *
+ * TODAS LAS CIFRAS DE ESTE ARCHIVO ESTAN ESCRITAS A MANO
+ * ------------------------------------------------------
+ * Ni un saldo, ni un total de linea, ni una participacion se derivan aqui de
+ * nada. `active_entries` no es la suma de `purchase_entries` y `amoe_entries`
+ * aunque lo parezca: es un numero tecleado, igual que los otros dos.
+ *
+ * No es pereza, es la misma frontera que rige en produccion. Si estos fixtures
+ * sumaran, existiria en el repositorio una segunda implementacion del motor de
+ * participaciones -viviendo en el frontend- y los tests pasarian a comprobar
+ * que esa copia coincide consigo misma en vez de que la interfaz pinta lo que le
+ * mandan (DEC-023, requisito R13 de `security`).
+ *
+ * Y HAY UN CASO DELIBERADAMENTE DESCUADRADO
+ * -----------------------------------------
+ * `summaryWithReversals` trae un saldo que NO coincide con la suma de sus dos
+ * procedencias, porque incluye un ajuste manual que no pertenece a ninguna de
+ * las dos. Es el fixture que rompe cualquier pantalla que se atreva a sumar.
+ *
+ * Los casos dificiles que cubre
+ * -----------------------------
+ * - participante con 0 participaciones y sin pedidos;
+ * - participante con un solo lote de numeros;
+ * - participante con varios lotes;
+ * - pedido reembolsado (reversal con delta negativo);
+ * - pedido con chargeback;
+ * - participaciones AMOE conviviendo con las de compra, con su procedencia;
+ * - sesion caducada.
+ */
+
+const PARTICIPANT_ID = "par_0000000000000001";
+
+/**
+ * Valor de la cookie de sesion en los fixtures.
+ *
+ * FORMA, NO CONTENIDO. La sesion paralela confirma que el token es OPACO: 43
+ * caracteres base64url, y NO un JWT. Aqui se reproduce esa forma para que
+ * ningun test pueda depender de lo que hay dentro -no hay nada dentro- y para
+ * que un fixture con forma de JWT no sugiera nunca que se puede decodificar.
+ *
+ * El frontend no lo lee jamas: viaja en una cookie `httpOnly` y todo lo que la
+ * interfaz sabe de la sesion llega por `GET /auth/session` (DEC-006).
+ */
+export const MOCK_SESSION_TOKEN = "Zk3TQ8pR2mVxL7bN4yH1sD6gJ0wC5fA9eU-tKiO_qXz"; // gitleaks:allow — token de sesion FICTICIO con la forma opaca real (43 chars base64url), no es un secreto
+export const participant: ParticipantProfile = {
+  id: PARTICIPANT_ID,
+  email: "participant@example.com",
+  display_name: "Alex Rivera",
+  email_verified: true,
+  language_preference: "es-US",
+  created_at: "2026-08-02T16:30:00.000Z",
+};
+
+/**
+ * Sesion de participante, activa.
+ *
+ * Forma exacta de `SessionState` (seccion 10). NO trae nombre, ni idioma, ni
+ * fecha de alta: eso es PERFIL y viaja por `GET /me`. La separacion no es
+ * cosmetica -es la del contrato- y tenerla en los fixtures obliga a que las
+ * pantallas la respeten.
+ *
+ * `roles` vacio: un participante no tiene rol de personal.
+ */
+export const activeSession: SessionState = {
+  authenticated: true,
+  state: "ACTIVE",
+  scope: "PARTICIPANT",
+  email: participant.email,
+  email_verified: true,
+  roles: [],
+};
+
+/**
+ * Sin sesion.
+ *
+ * `200` con `ANONYMOUS`, que es lo que el contrato publica. No un 401: es lo
+ * que el frontend consulta en cada render, y un 401 ahi obligaria a tratar el
+ * caso normal -un visitante- como un error.
+ */
+export const anonymousSession: SessionState = {
+  authenticated: false,
+  state: "ANONYMOUS",
+  scope: "PARTICIPANT",
+  email: "",
+  email_verified: false,
+  roles: [],
+};
+
+/**
+ * Sesion de personal, activa. Plantilla: el login de personal es correo y
+ * contrasena, y un 200 ya devuelve `ACTIVE`.
+ */
+export const staffSession: SessionState = {
+  authenticated: true,
+  state: "ACTIVE",
+  scope: "STAFF",
+  email: "staff@example.com",
+  email_verified: true,
+  roles: ["CATALOG_MANAGER"],
+};
+
+/**
+ * Consentimientos que exige el alta.
+ *
+ * NO SON UNA REGLA LEGAL ESCRITA POR EL FRONTEND: son un DATO simulado que
+ * ocupa el sitio del que publicara el backend cuando el abogado del cliente
+ * decida cuales son. Por eso la clave de copy (`text_key`) es generica y remite
+ * a las Reglas Oficiales en vez de afirmar nada concreto sobre edad, residencia
+ * o jurisdiccion.
+ *
+ * `defaultConfig` NO los trae, y eso tambien es deliberado: el escenario por
+ * defecto de desarrollo es el de hoy, donde el backend todavia no publica
+ * ninguno y el alta no ensena ninguna casilla.
+ */
+export const requiredConsents: readonly ConsentRequirement[] = [
+  {
+    key: "OFFICIAL_RULES",
+    version: "2026-08-01",
+    text_key: "OFFICIAL_RULES",
+    required: true,
+  },
+];
+
+/** Consentimiento cuya clave de copy la interfaz no conoce. */
+export const unknownConsent: ConsentRequirement = {
+  key: "SOMETHING_THE_FRONTEND_DOES_NOT_KNOW",
+  version: "1",
+  text_key: "SOMETHING_THE_FRONTEND_DOES_NOT_KNOW",
+  required: true,
+};
+
+// ---------------------------------------------------------------------------
+// Saldos
+// ---------------------------------------------------------------------------
+
+const AS_OF = "2026-09-15T12:00:00.000Z";
+
+/** Participante que todavia no tiene ninguna participacion. */
+export const emptySummary: EntrySummary = {
+  promotion_id: activePromotion.id,
+  active_entries: 0,
+  purchase_entries: 0,
+  amoe_entries: 0,
+  as_of: AS_OF,
+};
+
+/**
+ * Saldo con las dos procedencias.
+ *
+ * Compra y AMOE conviven en el MISMO universo elegible conservando su
+ * procedencia (principio #9). No son dos saldos: son el desglose de uno.
+ */
+export const entrySummary: EntrySummary = {
+  promotion_id: activePromotion.id,
+  active_entries: 11_450,
+  purchase_entries: 11_250,
+  amoe_entries: 200,
+  as_of: AS_OF,
+};
+
+/**
+ * Saldo que NO CUADRA con la suma de sus procedencias, a proposito.
+ *
+ * 11.250 de compra + 200 de AMOE no dan 11.700: faltan 250 que vienen de un
+ * ajuste manual aprobado, que no es ni compra ni AMOE. Cualquier pantalla que
+ * calcule el total sumando las dos procedencias falla con este fixture, que es
+ * exactamente para lo que existe.
+ */
+export const summaryWithReversals: EntrySummary = {
+  promotion_id: activePromotion.id,
+  active_entries: 11_700,
+  purchase_entries: 11_250,
+  amoe_entries: 200,
+  as_of: AS_OF,
+};
+
+// ---------------------------------------------------------------------------
+// Ledger
+// ---------------------------------------------------------------------------
+
+/**
+ * Historial completo, con sus correcciones.
+ *
+ * LAS DEVOLUCIONES SON FILAS NUEVAS, no la desaparicion de las originales
+ * (DEC-007, principios #6 y #7). Aqui se ve: la compra que genero 250
+ * participaciones sigue en la lista, y debajo esta la fila con delta -250 que
+ * apunta a ella con `reverses_transaction_id`.
+ */
+export const entryTransactions: readonly EntryTransaction[] = [
+  {
+    id: "etx_0000000000000001",
+    type: "PURCHASE_EARNED",
+    source_type: "PURCHASE",
+    quantity_delta: 11_000,
+    reason_key: "ORDER_QUALIFIED",
+    effective_at: "2026-09-01T18:12:00.000Z",
+    reverses_transaction_id: null,
+  },
+  {
+    /*
+     * FICHA POSTAL RECORTADA POR EL TOPE
+     * (HO-041, resolucion fase 1, punto 4).
+     *
+     * La ficha valia 2,000 y entraron 550 porque el participante ya estaba
+     * cerca del maximo por persona. `quantity_delta` es lo que ENTRO y
+     * `applied_cap` explica por que no fue mas: las cuatro cifras llegan del
+     * backend, ninguna se deriva aqui, y sin ellas la unica explicacion posible
+     * seria una resta hecha en el cliente.
+     */
+    id: "etx_0000000000000002",
+    type: "AMOE_EARNED",
+    source_type: "AMOE",
+    quantity_delta: 550,
+    reason_key: "AMOE_APPROVED",
+    effective_at: "2026-09-04T09:40:00.000Z",
+    reverses_transaction_id: null,
+    applied_cap: { kind: "PER_PARTICIPANT", limit: 10_000, requested: 2_000, granted: 550 },
+  },
+  {
+    id: "etx_0000000000000003",
+    type: "PURCHASE_EARNED",
+    source_type: "PURCHASE",
+    quantity_delta: 250,
+    reason_key: "ORDER_QUALIFIED",
+    effective_at: "2026-09-08T14:05:00.000Z",
+    reverses_transaction_id: null,
+  },
+  {
+    id: "etx_0000000000000004",
+    type: "REVERSAL",
+    source_type: "PURCHASE",
+    quantity_delta: -250,
+    reason_key: "ORDER_REFUNDED",
+    effective_at: "2026-09-10T10:22:00.000Z",
+    reverses_transaction_id: "etx_0000000000000003",
+  },
+  {
+    id: "etx_0000000000000005",
+    type: "PURCHASE_EARNED",
+    source_type: "PURCHASE",
+    quantity_delta: 500,
+    reason_key: "ORDER_QUALIFIED",
+    effective_at: "2026-09-11T11:00:00.000Z",
+    reverses_transaction_id: null,
+  },
+  {
+    id: "etx_0000000000000006",
+    type: "REVERSAL",
+    source_type: "PURCHASE",
+    quantity_delta: -500,
+    reason_key: "ORDER_CHARGEBACK",
+    effective_at: "2026-09-12T08:15:00.000Z",
+    reverses_transaction_id: "etx_0000000000000005",
+  },
+  {
+    id: "etx_0000000000000007",
+    type: "MANUAL_ADJUSTMENT",
+    source_type: "ADJUSTMENT",
+    quantity_delta: 250,
+    reason_key: "MANUAL_ADJUSTMENT_APPROVED",
+    effective_at: "2026-09-13T16:45:00.000Z",
+    reverses_transaction_id: null,
+  },
+  {
+    id: "etx_0000000000000008",
+    type: "SOMETHING_THE_FRONTEND_DOES_NOT_KNOW_YET",
+    source_type: "SOMETHING_ELSE",
+    quantity_delta: 25,
+    reason_key: "A_REASON_THE_FRONTEND_DOES_NOT_KNOW_YET",
+    effective_at: "2026-09-14T12:00:00.000Z",
+    reverses_transaction_id: null,
+  },
+];
+
+export const entryTransactionPage: EntryTransactionPage = {
+  items: entryTransactions,
+  next_cursor: null,
+};
+
+/** Primera pagina de un historial que tiene mas. El cursor es OPACO. */
+export const entryTransactionFirstPage: EntryTransactionPage = {
+  items: entryTransactions.slice(0, 3),
+  next_cursor: "eyJhZnRlciI6ImV0eF8wMDAwMDAwMDAwMDAwMDAzIn0",
+};
+
+export const emptyTransactionPage: EntryTransactionPage = { items: [], next_cursor: null };
+
+// ---------------------------------------------------------------------------
+// Numeros de participacion (`GET /account/entry-numbers`, detras de
+// `visible_entry_numbers_enabled`)
+// ---------------------------------------------------------------------------
+
+/*
+ * Forma de `EntryNumbersPage` (DEC-080): lotes con sus numeros, uno por
+ * participacion. Los numeros son CADENAS de `digits` cifras y NO son
+ * consecutivos -salen de una permutacion con clave de la promocion-, y aqui
+ * estan tecleados a mano igual que el resto de cifras de este archivo.
+ */
+
+/** Un solo lote de compra, con un numero anulado por devolucion. */
+export const singleEntryBatch: readonly EntryNumberBatch[] = [
+  {
+    batch_id: "ebt_0000000000000001",
+    source_type: "PURCHASE",
+    awarded_at: "2026-09-01T18:12:00.000Z",
+    quantity: 4,
+    active_quantity: 3,
+    numbers: [
+      { number: "04669096", active: true },
+      { number: "00917342", active: true },
+      { number: "07123856", active: false },
+      { number: "02556417", active: true },
+    ],
+  },
+];
+
+/** Varios lotes: compra, ficha AMOE, ajuste de una sola participacion y uno anulado entero. */
+export const manyEntryBatches: readonly EntryNumberBatch[] = [
+  ...singleEntryBatch,
+  {
+    batch_id: "ebt_0000000000000002",
+    source_type: "AMOE",
+    awarded_at: "2026-09-04T09:40:00.000Z",
+    quantity: 2,
+    active_quantity: 2,
+    numbers: [
+      { number: "05518230", active: true },
+      { number: "03384471", active: true },
+    ],
+  },
+  {
+    batch_id: "ebt_0000000000000003",
+    source_type: "ADMIN",
+    awarded_at: "2026-09-13T16:45:00.000Z",
+    quantity: 1,
+    active_quantity: 1,
+    numbers: [{ number: "06601777", active: true }],
+  },
+  {
+    batch_id: "ebt_0000000000000004",
+    source_type: "PURCHASE",
+    awarded_at: "2026-09-11T11:00:00.000Z",
+    quantity: 3,
+    active_quantity: 0,
+    numbers: [
+      { number: "01290385", active: false },
+      { number: "06042119", active: false },
+      { number: "02871604", active: false },
+    ],
+  },
+];
+
+export const singleBatchPage: EntryNumbersPage = {
+  promotion_id: activePromotion.id,
+  digits: 8,
+  active_numbers: 3,
+  void_numbers: 1,
+  items: singleEntryBatch,
+  next_cursor: null,
+};
+
+export const manyBatchesPage: EntryNumbersPage = {
+  promotion_id: activePromotion.id,
+  digits: 8,
+  active_numbers: 6,
+  void_numbers: 4,
+  items: manyEntryBatches,
+  next_cursor: null,
+};
+
+export const emptyBatchPage: EntryNumbersPage = {
+  promotion_id: activePromotion.id,
+  digits: 8,
+  active_numbers: 0,
+  void_numbers: 0,
+  items: [],
+  next_cursor: null,
+};
+
+// ---------------------------------------------------------------------------
+// Pedidos
+// ---------------------------------------------------------------------------
+
+export const shippingAddress: PostalAddress = {
+  full_name: "Alex Rivera",
+  line1: "1200 Congress Ave",
+  line2: "Apt 4B",
+  city: "Austin",
+  region: "TX",
+  postal_code: "78701",
+  country: "US",
+};
+
+const ELIGIBLE_LINE: OrderLine = {
+  line_id: "oli_0000000000000001",
+  sku: "TEE-S",
+  product_slug: eligibleProduct.slug,
+  product_name: eligibleProduct.name,
+  variant_name: { "en-US": "Small", "es-US": "Pequeña" },
+  image_url: teeImage,
+  quantity: 2,
+  unit_price: { amount_minor: "2500", currency: "USD" },
+  line_total: { amount_minor: "5000", currency: "USD" },
+};
+
+const INELIGIBLE_LINE: OrderLine = {
+  line_id: "oli_0000000000000002",
+  sku: "MUG-STD",
+  product_slug: ineligibleProduct.slug,
+  product_name: ineligibleProduct.name,
+  variant_name: { "en-US": "Standard", "es-US": "Estándar" },
+  image_url: mugImage,
+  quantity: 1,
+  unit_price: { amount_minor: "1800", currency: "USD" },
+  line_total: { amount_minor: "1800", currency: "USD" },
+};
+
+/**
+ * Traza del calculo persistida, CON LA FORMA DEL CONTRATO (DEC-078).
+ *
+ * Cinco campos, y el desglose dentro de `trace` tal como lo escribe el motor:
+ * cifras de primer nivel en `snake_case` y filas en `camelCase`. Este fixture
+ * declaraba antes los campos de una cotizacion en el primer nivel, que la API
+ * nunca mando; con el, las pruebas pasaban y la ficha real de un pedido
+ * otorgado caia. Ninguna de estas cifras se calcula aqui.
+ */
+const CALCULATION: EntryCalculationSnapshot = {
+  rules_version_id: "prv_0000000000000001",
+  engine_version: 1,
+  evaluated_at: "2026-09-01T18:12:00.000Z",
+  final_entries: 250,
+  trace: {
+    engine_version: 1,
+    rules_version_id: "prv_0000000000000001",
+    evaluated_at: "2026-09-01T18:12:00.000Z",
+    eligible_subtotal_minor: "5000",
+    entries_before_caps: 500,
+    final_entries: 250,
+    eligible_items: [
+      {
+        lineId: ELIGIBLE_LINE.line_id,
+        sku: ELIGIBLE_LINE.sku,
+        productKind: "MERCHANDISE",
+        quantity: 2,
+        lineSubtotalMinor: "5000",
+        multiplierIds: ["labor-day-2x"],
+      },
+    ],
+    ineligible_items: [
+      {
+        lineId: INELIGIBLE_LINE.line_id,
+        sku: INELIGIBLE_LINE.sku,
+        productKind: "MERCHANDISE",
+        reasonKey: "PRODUCT_NOT_ELIGIBLE",
+      },
+    ],
+    applied_multipliers: [
+      {
+        id: "labor-day-2x",
+        numerator: 2,
+        denominator: 1,
+        appliedToLineIds: [ELIGIBLE_LINE.line_id],
+      },
+    ],
+    applied_caps: [{ kind: "PER_ORDER", limit: 250, entriesBefore: 500, entriesAfter: 250 }],
+  },
+};
+
+/** Traza sin multiplicadores ni topes, para los pedidos devueltos. */
+function plainCalculation(
+  evaluatedAt: string,
+  subtotalMinor: string,
+  entries: number,
+): EntryCalculationSnapshot {
+  return {
+    ...CALCULATION,
+    evaluated_at: evaluatedAt,
+    final_entries: entries,
+    trace: {
+      ...CALCULATION.trace,
+      evaluated_at: evaluatedAt,
+      eligible_subtotal_minor: subtotalMinor,
+      entries_before_caps: entries,
+      final_entries: entries,
+      ineligible_items: [],
+      applied_multipliers: [],
+      applied_caps: [],
+    },
+  };
+}
+
+const GRANTED_SUMMARY: OrderSummary = {
+  id: "ord_0000000000000001",
+  order_number: "APP-10524",
+  status: "FULFILLED",
+  placed_at: "2026-09-01T18:10:00.000Z",
+  total: { amount_minor: "7300", currency: "USD" },
+  item_count: 3,
+  promotion_id: activePromotion.id,
+  entry_state: "GRANTED",
+  entries_granted: 250,
+};
+
+/**
+ * Pedido recien pagado.
+ *
+ * `status: "PAID"` con `entry_state: "PENDING_QUALIFICATION"` es el par que la
+ * pagina de confirmacion tiene que saber pintar sin prometer nada: el pago esta
+ * hecho y las participaciones todavia no estan otorgadas. `entries_granted` es
+ * `null` y no `0`, porque no se sabe todavia no es lo mismo que ninguna.
+ */
+const PENDING_SUMMARY: OrderSummary = {
+  id: "ord_0000000000000002",
+  order_number: "APP-10608",
+  status: "PAID",
+  placed_at: "2026-09-15T11:58:00.000Z",
+  total: { amount_minor: "5000", currency: "USD" },
+  item_count: 2,
+  promotion_id: activePromotion.id,
+  entry_state: "PENDING_QUALIFICATION",
+  entries_granted: null,
+};
+
+/** Pedido devuelto: las participaciones se revirtieron con una fila nueva. */
+const REFUNDED_SUMMARY: OrderSummary = {
+  id: "ord_0000000000000003",
+  order_number: "APP-10431",
+  status: "REFUNDED",
+  placed_at: "2026-09-08T14:00:00.000Z",
+  total: { amount_minor: "2500", currency: "USD" },
+  item_count: 1,
+  promotion_id: activePromotion.id,
+  entry_state: "REVERSED",
+  entries_granted: 0,
+};
+
+/** Pedido con contracargo del banco. No es lo mismo que una devolucion. */
+const CHARGEBACK_SUMMARY: OrderSummary = {
+  id: "ord_0000000000000004",
+  order_number: "APP-10399",
+  status: "CHARGEBACK",
+  placed_at: "2026-09-11T10:55:00.000Z",
+  total: { amount_minor: "10000", currency: "USD" },
+  item_count: 4,
+  promotion_id: activePromotion.id,
+  entry_state: "REVERSED",
+  entries_granted: 0,
+};
+
+/** Pedido de una epoca sin promocion abierta: no genera participaciones. */
+const NO_PROMOTION_SUMMARY: OrderSummary = {
+  id: "ord_0000000000000005",
+  order_number: "APP-10102",
+  status: "FULFILLED",
+  placed_at: "2026-07-20T15:30:00.000Z",
+  total: { amount_minor: "1800", currency: "USD" },
+  item_count: 1,
+  promotion_id: null,
+  entry_state: "NOT_APPLICABLE",
+  entries_granted: null,
+};
+
+/**
+ * DEC-078: pedido para pagar en EFECTIVO en un punto de venta, todavia sin
+ * cobrar. `PENDING_PAYMENT` + `CASH` es lo que la confirmacion y el portal
+ * tienen que saber decir: no se ha cobrado nada, el pedido espera el pago en
+ * caja y las participaciones no existen todavia.
+ */
+const CASH_PENDING_SUMMARY: OrderSummary = {
+  id: "ord_0000000000000006",
+  order_number: "APP-10650",
+  status: "PENDING_PAYMENT",
+  placed_at: "2026-10-05T16:20:00.000Z",
+  total: { amount_minor: "5000", currency: "USD" },
+  item_count: 2,
+  promotion_id: activePromotion.id,
+  entry_state: "PENDING_QUALIFICATION",
+  entries_granted: null,
+  payment_method: "CASH",
+};
+
+export const orderSummaries: readonly OrderSummary[] = [
+  PENDING_SUMMARY,
+  GRANTED_SUMMARY,
+  REFUNDED_SUMMARY,
+  CHARGEBACK_SUMMARY,
+  NO_PROMOTION_SUMMARY,
+  CASH_PENDING_SUMMARY,
+];
+
+export const orderPage: OrderPage = { items: orderSummaries, next_cursor: null };
+export const emptyOrderPage: OrderPage = { items: [], next_cursor: null };
+
+/** Pedido con traza completa: multiplicador aplicado y tope aplicado. */
+export const grantedOrder: OrderDetail = {
+  ...GRANTED_SUMMARY,
+  items: [ELIGIBLE_LINE, INELIGIBLE_LINE],
+  subtotal: { amount_minor: "6800", currency: "USD" },
+  shipping_total: { amount_minor: "500", currency: "USD" },
+  tax_total: { amount_minor: "0", currency: "USD" },
+  shipping_address: shippingAddress,
+  entry_calculation: CALCULATION,
+};
+
+/** Pedido pagado del que todavia no hay traza: el backend no ha calculado. */
+export const pendingOrder: OrderDetail = {
+  ...PENDING_SUMMARY,
+  items: [ELIGIBLE_LINE],
+  subtotal: { amount_minor: "5000", currency: "USD" },
+  shipping_total: null,
+  tax_total: null,
+  shipping_address: shippingAddress,
+  entry_calculation: null,
+};
+
+export const refundedOrder: OrderDetail = {
+  ...REFUNDED_SUMMARY,
+  items: [{ ...ELIGIBLE_LINE, quantity: 1, line_total: { amount_minor: "2500", currency: "USD" } }],
+  subtotal: { amount_minor: "2500", currency: "USD" },
+  shipping_total: { amount_minor: "0", currency: "USD" },
+  tax_total: { amount_minor: "0", currency: "USD" },
+  shipping_address: shippingAddress,
+  entry_calculation: plainCalculation("2026-09-08T14:05:00.000Z", "2500", 250),
+};
+
+export const chargebackOrder: OrderDetail = {
+  ...CHARGEBACK_SUMMARY,
+  items: [
+    { ...ELIGIBLE_LINE, quantity: 4, line_total: { amount_minor: "10000", currency: "USD" } },
+  ],
+  subtotal: { amount_minor: "10000", currency: "USD" },
+  shipping_total: { amount_minor: "0", currency: "USD" },
+  tax_total: { amount_minor: "0", currency: "USD" },
+  shipping_address: shippingAddress,
+  entry_calculation: plainCalculation("2026-09-11T11:00:00.000Z", "10000", 500),
+};
+
+export const orderWithoutPromotion: OrderDetail = {
+  ...NO_PROMOTION_SUMMARY,
+  items: [INELIGIBLE_LINE],
+  subtotal: { amount_minor: "1800", currency: "USD" },
+  shipping_total: { amount_minor: "0", currency: "USD" },
+  tax_total: { amount_minor: "0", currency: "USD" },
+  shipping_address: shippingAddress,
+  entry_calculation: null,
+};
+
+/** DEC-078: pedido en efectivo pendiente de cobro en caja. */
+export const cashPendingOrder: OrderDetail = {
+  ...CASH_PENDING_SUMMARY,
+  items: [ELIGIBLE_LINE],
+  subtotal: { amount_minor: "5000", currency: "USD" },
+  shipping_total: null,
+  tax_total: null,
+  shipping_address: shippingAddress,
+  entry_calculation: null,
+};
+
+/** Los detalles que la API simulada publica, uno por cada resumen. */
+export const orderDetails: readonly OrderDetail[] = [
+  pendingOrder,
+  grantedOrder,
+  refundedOrder,
+  chargebackOrder,
+  orderWithoutPromotion,
+  cashPendingOrder,
+];
