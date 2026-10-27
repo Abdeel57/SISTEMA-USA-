@@ -38,6 +38,14 @@ describe("canonicalRedirectUrl", () => {
     );
   });
 
+  it("no arrastra el puerto interno del contenedor ni el http del proxy", () => {
+    // Detras de Traefik, la URL que ve el middleware es la interna.
+    const internal = new URL("http://cliente.com:8080/es/cart?x=1");
+    expect(canonicalRedirectUrl(WWW, "cliente.com", internal)?.toString()).toBe(
+      "https://www.cliente.com/es/cart?x=1",
+    );
+  });
+
   it("no toca el www, la sonda local ni otros hosts", () => {
     expect(canonicalRedirectUrl(WWW, "www.cliente.com", url("/es"))).toBeNull();
     expect(canonicalRedirectUrl(WWW, "127.0.0.1:8080", url("/healthz"))).toBeNull();

@@ -46,8 +46,13 @@ export function canonicalRedirectUrl(env: Env, requestHost: string | null, url: 
   const host = requestHost.trim().toLowerCase().replace(/:\d+$/u, "");
   if (host !== canonical.slice("www.".length)) return null;
 
+  // `hostname` y `port` por separado, y no `host`: detras del proxy la URL de
+  // la peticion lleva el puerto INTERNO del contenedor (`:8080`), y el setter
+  // de `host` lo conserva si el valor nuevo no trae puerto. El dominio publico
+  // se sirve en el 443 implicito.
   const destination = new URL(url);
   destination.protocol = "https:";
-  destination.host = canonical;
+  destination.hostname = canonical;
+  destination.port = "";
   return destination;
 }
