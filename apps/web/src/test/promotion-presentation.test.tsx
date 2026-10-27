@@ -475,7 +475,9 @@ describe("PromotionHero, composicion de DEC-042", () => {
       />,
     );
 
-    const image = container.querySelector("img");
+    // La foto del premio, no su fondo desenfocado: `HeroPhoto` pinta antes una
+    // copia decorativa (`aria-hidden`, `alt=""`) que rellena el hueco.
+    const image = container.querySelector('img:not([aria-hidden="true"])');
     expect(image, "el hero pinta la imagen del premio que sirve el backend").not.toBeNull();
 
     const alt = activePromotionDetail.media?.alt;
@@ -523,7 +525,7 @@ describe("PromotionHero, composicion de DEC-042", () => {
     );
 
     // `alt=""` y no ausencia de atributo.
-    expect(container.querySelector("img")).toHaveAttribute("alt", "");
+    expect(container.querySelector('img:not([aria-hidden="true"])')).toHaveAttribute("alt", "");
   });
 
   it("sin detalle se compone igual, sin imagen y sin inventar premio", () => {

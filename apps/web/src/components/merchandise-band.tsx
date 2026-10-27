@@ -40,15 +40,16 @@ import type { ProductSummary } from "@/lib/api";
 /**
  * Cortes de la rejilla, en un solo sitio.
  *
- * DOS COLUMNAS DESDE 360px con calles estrechas, como la referencia movil: en
- * un telefono, una sola columna de tarjetas grandes obliga a desplazarse para
- * comparar dos articulos, que es justo lo que se hace en un catalogo. Sube a
- * tres en tableta y a cuatro en escritorio ancho, de modo que el ancho de
- * tarjeta se mantiene casi constante en vez de estirarse hasta parecer un
- * banner.
+ * TRES COLUMNAS DESDE 360px con calles estrechas (el usuario lo pidio asi el
+ * 2026-10-27; antes eran dos): en un telefono, una fila entera de articulos se
+ * compara de un vistazo y la rejilla se lee como un catalogo y no como una
+ * lista. A ese ancho cada tarjeta mide unos 105px, y `ProductCard` reduce su
+ * tipografia y su relleno por debajo de `sm` para que quepa. Sube a cuatro en
+ * escritorio ancho, de modo que el ancho de tarjeta se mantiene casi constante
+ * en vez de estirarse hasta parecer un banner.
  */
 export const MERCHANDISE_GRID_CLASS =
-  "grid list-none grid-cols-2 gap-s3 sm:gap-s4 md:grid-cols-3 lg:gap-s5 xl:grid-cols-4";
+  "grid list-none grid-cols-3 gap-s2 sm:gap-s4 lg:gap-s5 xl:grid-cols-4";
 
 export function MerchandiseBand({
   products,

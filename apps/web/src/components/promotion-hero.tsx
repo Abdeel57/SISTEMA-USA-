@@ -1,5 +1,4 @@
 import { buttonVariants, cn } from "@app/ui";
-import Image from "next/image";
 import { useTranslations } from "next-intl";
 import type { CSSProperties, ReactNode } from "react";
 
@@ -15,6 +14,7 @@ import { presentPromotion } from "@/lib/promotion-state";
 import { BonusAnnouncement } from "./bonus-announcement";
 import { fractionText, useBonusScopeLabel } from "./entry-rate-lines";
 import { HeroCarousel, type HeroSlide } from "./hero-carousel";
+import { HeroPhoto } from "./hero-photo";
 import { PromotionCountdown } from "./promotion-countdown";
 
 /**
@@ -497,6 +497,9 @@ export function PromotionHero({
               // DEC-074: el pie tambien, en telefono y en escritorio; ver
               // `.app-hero-photo-fade`.
               "app-hero-photo-fade",
+              // El fondo desenfocado de `HeroPhoto` va agrandado: lo que
+              // sobresale no debe pintarse fuera del hueco.
+              "overflow-hidden",
             )}
           >
             {/*
@@ -530,34 +533,18 @@ export function PromotionHero({
                 imageClassName={HERO_IMAGE_POSITION}
               />
             ) : (
-              <Image
+              /*
+               * La foto ENTERA sobre su propio fondo desenfocado (`HeroPhoto`).
+               * Hasta 2026-10-27 iba a sangre con `object-cover` y un encuadre
+               * medido para la foto de un cliente concreto; cualquier otra foto
+               * perdia parte del premio en el recorte.
+               */
+              <HeroPhoto
                 src={primarySlide.src}
                 alt={primarySlide.alt}
-                fill
                 priority
                 sizes={HERO_IMAGE_SIZES}
-                /*
-                 * ENCUADRE DE ESTA FOTOGRAFIA (DEC-042).
-                 *
-                 * `38%` en horizontal: el hueco es mas estrecho que la imagen en
-                 * todos los tamanos, asi que `cover` recorta A LO ANCHO y hay que
-                 * decidir que parte de la camioneta se queda. Desplazado a la
-                 * izquierda del centro conserva el frontal completo -parrilla,
-                 * emblema, faro y rueda delantera-, que es lo que identifica al
-                 * vehiculo, y sacrifica la caja, que no dice nada.
-                 *
-                 * `35%` en vertical: en las dos disposiciones el eje vertical no
-                 * recorta nada -se ve la altura entera- y este valor da igual. Solo
-                 * entra en juego en una ventana muy ancha y baja, y ahi tira hacia
-                 * ARRIBA a proposito: lo que hay que salvar es el techo de la
-                 * cabina, no el asfalto del pie, que ademas queda bajo el degradado.
-                 *
-                 * El rotulo del concesionario que aparecia sobre el techo NO se
-                 * quita desde aqui: es imposible con `cover` en un hueco mas
-                 * estrecho que la imagen. Se recorta en origen; ver
-                 * `scripts/build-prize-assets.mjs`.
-                 */
-                className={`object-cover ${HERO_IMAGE_POSITION}`}
+                className={HERO_IMAGE_POSITION}
               />
             )}
 

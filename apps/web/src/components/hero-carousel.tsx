@@ -1,9 +1,10 @@
 "use client";
 
 import { cn } from "@app/ui";
-import Image from "next/image";
 import { useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
+
+import { HeroPhoto } from "./hero-photo";
 
 /** Una foto del carrusel, ya filtrada (`safeImageUrl`) y con su `alt` resuelto. */
 export interface HeroSlide {
@@ -60,7 +61,7 @@ export function HeroCarousel({
   readonly slides: readonly HeroSlide[];
   readonly sizes: string;
   /** Encuadre de las fotos (`object-*`), el mismo que la foto unica del hero. */
-  readonly imageClassName?: string;
+  readonly imageClassName?: string | undefined;
 }) {
   const t = useTranslations("home.heroCarousel");
   const trackRef = useRef<HTMLDivElement>(null);
@@ -188,17 +189,17 @@ export function HeroCarousel({
               aria-roledescription={t("slideRoleDescription")}
               aria-label={t("slide", { current: slideIndex + 1, total: count })}
               aria-hidden={!active}
-              className="relative h-full w-full shrink-0 snap-center snap-always"
+              // `overflow-hidden`: el fondo desenfocado de `HeroPhoto` va
+              // agrandado y, sin esto, asomaria sobre la foto de al lado.
+              className="relative h-full w-full shrink-0 snap-center snap-always overflow-hidden"
             >
-              <Image
+              <HeroPhoto
                 src={slide.src}
                 alt={slide.alt}
-                fill
                 priority={slideIndex === 0}
-                loading={slideIndex === 0 ? undefined : "eager"}
+                {...(slideIndex === 0 ? {} : { loading: "eager" as const })}
                 sizes={sizes}
-                draggable={false}
-                className={cn("select-none object-cover", imageClassName)}
+                className={imageClassName}
               />
             </div>
           );

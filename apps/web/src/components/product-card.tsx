@@ -270,7 +270,7 @@ export function ProductCard({
             estas son solidas y traen su propio contorno, y un velo OSCURO sobre
             una imagen de estudio claro solo dejaba un manchon en la parte
             superior de cada tarjeta. */}
-        <div className="absolute inset-x-0 top-0 flex flex-wrap items-start gap-s2 p-s2 sm:p-s3">
+        <div className="absolute inset-x-0 top-0 flex flex-wrap items-start gap-s1 p-s1 sm:gap-s2 sm:p-s3">
           {/* PAQUETE DE PARTICIPACIONES, dicho con la palabra que aprobo el
               abogado. Nunca "boleto" ni "oportunidad de ganar": lo que se vende
               es un paquete definido por las Official Rules, y el metodo gratuito
@@ -308,7 +308,9 @@ export function ProductCard({
         <span
           aria-hidden="true"
           className={cn(
-            "pointer-events-none absolute bottom-s2 right-s2 flex h-9 w-9 items-center justify-center",
+            // Tres columnas en telefono (2026-10-27): la tarjeta mide ~105px y
+            // el boton baja a 28px para no tapar la foto.
+            "pointer-events-none absolute bottom-s1 right-s1 flex h-7 w-7 items-center justify-center",
             "sm:bottom-s3 sm:right-s3 sm:h-11 sm:w-11",
             "rounded-pill border border-light-gold/40 bg-light-surface/90 text-light-gold shadow-light-sm",
             "transition-colors duration-base ease-standard",
@@ -319,7 +321,7 @@ export function ProductCard({
             "group-hover:border-buy group-hover:bg-buy group-hover:text-on-buy",
           )}
         >
-          <svg viewBox="0 0 20 20" fill="none" focusable="false" className="h-5 w-5">
+          <svg viewBox="0 0 20 20" fill="none" focusable="false" className="h-4 w-4 sm:h-5 sm:w-5">
             <path
               d="M10 4.5v11M4.5 10h11"
               stroke="currentColor"
@@ -330,11 +332,11 @@ export function ProductCard({
         </span>
       </div>
 
-      <div className="flex flex-1 flex-col p-s3 sm:p-s4">
+      <div className="flex flex-1 flex-col p-s2 sm:p-s4">
         <CardTitle
           as={headingLevel}
           size="sm"
-          className="text-body-sm font-bold text-light-text sm:text-heading-sm"
+          className="text-caption font-bold text-light-text sm:text-heading-sm"
         >
           <Link
             href={`/products/${product.slug}`}
@@ -365,8 +367,8 @@ export function ProductCard({
          * participaciones, y el precio es la consecuencia.
          */}
         {offer === null ? null : (
-          <div className="mt-s3 flex flex-col gap-s1">
-            <p className="app-display text-body-sm text-light-gold sm:text-body-md">
+          <div className="mt-s2 flex flex-col gap-s1 sm:mt-s3">
+            <p className="app-display text-caption text-light-gold sm:text-body-md">
               {packageOffer === null
                 ? t("merchandiseEntries", {
                     entries: formatEntryCount(offer.base_entries, locale),
@@ -392,7 +394,7 @@ export function ProductCard({
             segun el articulo, y sin esto los precios de una misma fila quedarian
             a distinta altura. */}
         {price === null ? null : (
-          <p className="app-display mt-auto pt-s3 text-body-md tabular-nums text-light-text sm:text-heading-sm">
+          <p className="app-display mt-auto pt-s2 text-body-sm tabular-nums text-light-text sm:pt-s3 sm:text-heading-sm">
             {t("priceFrom", { price })}
           </p>
         )}
