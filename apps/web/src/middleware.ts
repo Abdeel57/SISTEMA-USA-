@@ -9,6 +9,7 @@ import {
   negotiateAdminLocale,
 } from "./i18n/admin-routing";
 import { routing } from "./i18n/routing";
+import { canonicalRedirectUrl } from "./lib/canonical-host";
 import { resolveMetaPixelId } from "./lib/meta-pixel";
 import { apiConnectOrigins, contentSecurityPolicy, createNonce } from "./lib/security-headers";
 
@@ -101,6 +102,18 @@ function requestHeadersWithCsp(request: NextRequest, csp: string): Headers {
 export default function middleware(request: NextRequest): NextResponse {
   const { pathname } = request.nextUrl;
   const { csp } = policyFor(request);
+
+  /*
+   * ANTES DE NEGOCIAR NADA: el dominio raiz (`cliente.com`) se manda al `www`
+   * cuando el sitio se publica con `www` (ver `lib/canonical-host.ts`). Es
+   * permanente (308) y conserva metodo, ruta y consulta.
+   */
+  const canonical = canonicalRedirectUrl(process.env, request.headers.get("host"), request.nextUrl);
+  if (canonical !== null) {
+    const redirect = NextResponse.redirect(canonical, 308);
+    redirect.headers.set("content-security-policy", csp);
+    return redirect;
+  }
 
   if (!isAdminPath(pathname)) {
     /*

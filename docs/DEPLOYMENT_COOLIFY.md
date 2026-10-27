@@ -85,6 +85,29 @@ El webhook de Stripe de cada cliente va a
 - `https://api.cliente.com/api/v1/health/ready` -> 200
 - En Coolify, los tres servicios en verde (**healthy**).
 
+## Dominio propio del cliente
+
+Un cliente suele arrancar en un dominio temporal del servidor y pasar despues
+a su dominio (`www.cliente.com`). Tres pasos:
+
+1. **DNS** (donde el cliente compro el dominio; en Hostinger, hPanel →
+   Dominios → DNS / Nameservers): tres registros **A** a la IP del servidor:
+   `@`, `www` y `api`. Si habia un CNAME para `www`, se borra: no puede
+   convivir con un A del mismo nombre.
+2. **Dominios en Coolify** (la app → servicio `web` y servicio `api` →
+   Domains), o por API con `PATCH /applications/{uuid}` y
+   `docker_compose_domains: [{ name: "web", domain: "https://www.cliente.com:8080,https://cliente.com:8080" }, { name: "api", domain: "https://api.cliente.com:8080" }]`.
+   **El `www` va primero**: Coolify toma el primer dominio para
+   `SERVICE_FQDN_WEB`, que es el dominio de la cookie de sesion y el origen
+   permitido en CORS.
+3. **Redesplegar.** Las URLs publicas, CORS y la cookie salen solos de las
+   variables `SERVICE_*`; el certificado lo emite Coolify al primer acceso.
+
+El dominio sin `www` lo redirige la propia web al `www` (308), porque el ajuste
+de redireccion www/no-www de Coolify no aplica a los dominios de un servicio de
+docker-compose. Comprobar: `https://cliente.com/es` -> 308 ->
+`https://www.cliente.com/es`, y el login del panel funciona en el `www`.
+
 ## Problemas frecuentes
 
 | Sintoma                                          | Causa casi segura                                                       |
