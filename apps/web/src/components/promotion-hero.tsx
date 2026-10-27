@@ -106,8 +106,17 @@ import { PromotionCountdown } from "./promotion-countdown";
 /** Tamanos de la foto del hero para `next/image`: media pantalla en escritorio. */
 const HERO_IMAGE_SIZES = "(min-width: 1024px) 56vw, 100vw";
 
-/** Encuadre de la foto del hero. El motivo, junto a la `<Image>` de abajo. */
-const HERO_IMAGE_POSITION = "object-[38%_35%]";
+/**
+ * Encuadre de la foto del hero: centrada a lo ancho y un punto hacia arriba.
+ *
+ * Hasta 2026-10-27 iba corrida a la izquierda (`38%`), medida para UNA foto
+ * concreta -la camioneta del primer cliente, con el frontal a la izquierda-.
+ * La plantilla ya no sabe que foto sube cada cliente desde el panel, y el
+ * unico encuadre que no apuesta por ninguna es el centro: el premio se
+ * fotografia centrado. El `40%` vertical sigue tirando hacia arriba, porque
+ * el pie de la foto queda bajo el fundido y el titular.
+ */
+const HERO_IMAGE_POSITION = "object-[50%_40%]";
 
 /**
  * Tamano del titular cromado segun su LONGITUD.
@@ -575,11 +584,16 @@ export function PromotionHero({
 
                 DEC-073: los dos degradados dejan pasar el toque. Estan encima
                 de las fotos, y si se quedaran el gesto, el carrusel no se
-                podria deslizar con el dedo. */}
+                podria deslizar con el dedo.
+
+                2026-10-27: en telefono el fundido se acorta otra vez, del 40%
+                al 30% de la foto, y la mascara `.app-hero-photo-fade` lo
+                acompana. El titular solo solapa el pie (3rem) y lleva sombra
+                propia; el resto del oscurecido tapaba el premio. */}
             <div
               aria-hidden="true"
               className={cn(
-                "pointer-events-none absolute inset-0 bg-gradient-to-t from-bg via-bg/60 via-15% to-bg/0 to-40%",
+                "pointer-events-none absolute inset-0 bg-gradient-to-t from-bg via-bg/60 via-12% to-bg/0 to-30%",
                 "lg:bg-gradient-to-r lg:via-bg/75 lg:via-[18%] lg:to-[38%]",
               )}
             />

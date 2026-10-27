@@ -25,12 +25,13 @@ import type { CardBonus } from "./product-card";
  * CADA TARJETA ES SU MATERIAL
  * ---------------------------
  * El cliente lo pidio asi (2026-10-13): nada de logotipo de la tienda dentro;
- * la tarjeta ES una placa de bronce, de plata, de oro o de diamante. Los tres
- * metales son placas de metal CEPILLADO con brillo especular, la cifra y el
- * nombre GRABADOS en tinta oscura y una MEDALLA acunada en el centro; el
- * diamante es una placa facetada, helada, con una GEMA de talla brillante y
- * destellos. Las placas viven en `globals.css` (`.app-plate-*`): son varias
- * capas de fondo y no caben con claridad en una clase de Tailwind.
+ * la tarjeta ES una placa de bronce, de plata, de oro o de diamante. Las cuatro
+ * son placas de metal CEPILLADO con brillo especular y la cifra y el nombre
+ * GRABADOS en tinta oscura; los tres metales llevan una MEDALLA acunada en el
+ * centro, y el diamante es una placa de HIELO iridiscente con una GEMA de
+ * talla brillante y destellos. Las placas viven en `globals.css`
+ * (`.app-plate-*`): son varias capas de fondo y no caben con claridad en una
+ * clase de Tailwind.
  *
  * LO QUE NO SE COPIA DE LA REFERENCIA
  * -----------------------------------
@@ -106,11 +107,12 @@ const TIERS: readonly TierStyle[] = [
   },
   {
     material: "diamond",
-    edge: "bg-[linear-gradient(135deg,#0b3550_0%,#4fc3ef_40%,#f2fdff_52%,#2a9ccc_70%,#082638_100%)]",
+    edge: "bg-[linear-gradient(135deg,#1d6a8f_0%,#8fdcf6_40%,#ffffff_52%,#5fc0e6_70%,#155a7c_100%)]",
     plate: "app-plate-diamond",
-    ink: "text-[#effcff]",
-    subInk: "text-[#bfefff]",
-    engrave: "app-engrave-ice",
+    // Tinta azul noche sobre el hielo: el mismo grabado que los metales.
+    ink: "text-[#07233a]",
+    subInk: "text-[#1b4d6b]",
+    engrave: "app-engrave",
     glow: "hover:shadow-[0_26px_50px_-16px_rgba(60,180,230,0.8)]",
   },
 ];
@@ -620,23 +622,29 @@ function Medal({ id, stops }: { readonly id: string; readonly stops: readonly st
 }
 
 /**
- * GEMA de talla brillante: corona y pabellon facetados en hielo, con destellos
- * que titilan por turnos. Decorativa.
+ * GEMA de talla brillante: corona y pabellon facetados, con destellos que
+ * titilan por turnos. Decorativa.
+ *
+ * Va sobre la placa de HIELO, que es casi blanca, asi que la gema es la pieza
+ * SATURADA de la tarjeta: azules profundos en el pabellon, blancos en la
+ * corona, aristas blancas entre facetas y un contorno azul noche que la
+ * despega del fondo. Con los tonos palidos de antes -pensados para la placa
+ * azul marino- se perdia en la placa.
  */
 function DiamondGem({ id }: { readonly id: string }) {
   const crown: readonly (readonly [string, string])[] = [
-    ["14,36 36,14 48,36", "#bdf1ff"],
-    ["36,14 60,14 48,36", "#f4feff"],
-    ["48,36 60,14 72,36", "#8fe2ff"],
-    ["60,14 84,14 72,36", "#e2fbff"],
-    ["72,36 84,14 106,36", "#63cdf2"],
+    ["14,36 36,14 48,36", "#8fdcf6"],
+    ["36,14 60,14 48,36", "#ffffff"],
+    ["48,36 60,14 72,36", "#5cc5ec"],
+    ["60,14 84,14 72,36", "#e6f9ff"],
+    ["72,36 84,14 106,36", "#2ea9da"],
   ];
   const pavilion: readonly (readonly [string, string])[] = [
-    ["14,36 36,36 60,100", "#3fb6e6"],
-    ["36,36 48,36 60,100", "#a6eaff"],
-    ["48,36 72,36 60,100", "#d9f8ff"],
-    ["72,36 84,36 60,100", "#6fd3f5"],
-    ["84,36 106,36 60,100", "#1f8fc2"],
+    ["14,36 36,36 60,100", "#1f86b8"],
+    ["36,36 48,36 60,100", "#7fd3f3"],
+    ["48,36 72,36 60,100", "#bdebfb"],
+    ["72,36 84,36 60,100", "#49b4e0"],
+    ["84,36 106,36 60,100", "#0e5f8a"],
   ];
 
   return (
@@ -644,7 +652,7 @@ function DiamondGem({ id }: { readonly id: string }) {
       viewBox="0 0 120 112"
       aria-hidden="true"
       focusable="false"
-      className="h-full w-auto drop-shadow-[0_10px_22px_rgba(80,200,255,0.55)]"
+      className="h-full w-auto drop-shadow-[0_10px_18px_rgba(14,90,130,0.45)]"
     >
       <defs>
         <linearGradient id={`${id}-sheen`} x1="0" y1="0" x2="1" y2="1">
@@ -660,18 +668,27 @@ function DiamondGem({ id }: { readonly id: string }) {
           points={points}
           fill={fill}
           stroke="#ffffff"
-          strokeOpacity="0.75"
+          strokeOpacity="0.85"
           strokeWidth="0.8"
           strokeLinejoin="round"
         />
       ))}
       {/* Reflejo sobre toda la gema. */}
       <polygon points="14,36 36,14 84,14 106,36 60,100" fill={`url(#${id}-sheen)`} />
+      {/* Contorno: lo que la separa de una placa casi del mismo color. */}
+      <polygon
+        points="14,36 36,14 84,14 106,36 60,100"
+        fill="none"
+        stroke="#0b3550"
+        strokeOpacity="0.55"
+        strokeWidth="1.4"
+        strokeLinejoin="round"
+      />
 
-      {/* Destellos de cuatro puntas. */}
-      <Sparkle x={98} y={16} size={9} delay={0} />
-      <Sparkle x={22} y={22} size={6} delay={0.9} />
-      <Sparkle x={88} y={62} size={5} delay={1.7} />
+      {/* Destellos de cuatro puntas, con filete azul para leerse sobre el hielo. */}
+      <Sparkle x={98} y={16} size={9} delay={0} stroke="#2ea9da" />
+      <Sparkle x={22} y={22} size={6} delay={0.9} stroke="#2ea9da" />
+      <Sparkle x={88} y={62} size={5} delay={1.7} stroke="#2ea9da" />
     </svg>
   );
 }
@@ -681,11 +698,14 @@ function Sparkle({
   y,
   size,
   delay,
+  stroke,
 }: {
   readonly x: number;
   readonly y: number;
   readonly size: number;
   readonly delay: number;
+  /** Filete alrededor del destello blanco, para fondos claros. */
+  readonly stroke?: string;
 }) {
   const s = size;
   return (
@@ -694,6 +714,7 @@ function Sparkle({
       style={{ "--twinkle-delay": `${String(delay)}s` } as CSSProperties}
       d={`M${String(x)} ${String(y - s)} L${String(x + s * 0.22)} ${String(y - s * 0.22)} L${String(x + s)} ${String(y)} L${String(x + s * 0.22)} ${String(y + s * 0.22)} L${String(x)} ${String(y + s)} L${String(x - s * 0.22)} ${String(y + s * 0.22)} L${String(x - s)} ${String(y)} L${String(x - s * 0.22)} ${String(y - s * 0.22)} Z`}
       fill="#ffffff"
+      {...(stroke === undefined ? {} : { stroke, strokeWidth: 0.7, strokeLinejoin: "round" })}
     />
   );
 }
