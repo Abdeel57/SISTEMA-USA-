@@ -27,10 +27,16 @@ useDefault = true
 # Asignacion de un secreto con valor de alta entropia, en cualquier fichero.
 # Cubre el caso realista: alguien pega el valor bueno en .env.example, en un
 # test o en un fichero de configuracion.
+#
+# Alrededor del `=` solo cuentan espacios y tabuladores, NO saltos de linea.
+# Con `\s*`, una variable VACIA de `.env.example` (`DB_APP_PASSWORD=`) tomaba
+# como valor el NOMBRE de la variable de la linea siguiente
+# (`DB_READONLY_PASSWORD`, 20 caracteres) y el pre-push bloqueaba un falso
+# positivo. Un secreto real va en la misma linea que su nombre.
 [[rules]]
 id = "app-secret-assignment"
 description = "Asignacion de secreto con valor de alta entropia"
-regex = '''(?i)\b(?:[A-Z0-9_]*(?:SECRET|PASSWORD|PASSWD|PRIVATE_KEY|API_KEY|ACCESS_KEY|SIGNING_KEY|AUTH_TOKEN|ACCESS_TOKEN|SESSION_SECRET|WEBHOOK_SECRET))\b\s*[:=]\s*["']?([A-Za-z0-9+/=_\-]{20,})["']?'''
+regex = '''(?i)\b(?:[A-Z0-9_]*(?:SECRET|PASSWORD|PASSWD|PRIVATE_KEY|API_KEY|ACCESS_KEY|SIGNING_KEY|AUTH_TOKEN|ACCESS_TOKEN|SESSION_SECRET|WEBHOOK_SECRET))\b[ \t]*[:=][ \t]*["']?([A-Za-z0-9+/=_\-]{20,})["']?'''
 secretGroup = 1
 entropy = 3.5
 tags = ["app", "secret", "generic"]
