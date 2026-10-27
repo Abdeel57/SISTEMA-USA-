@@ -10,8 +10,9 @@
  * Lo que NO vive aqui (ver el README de la raiz, seccion "Cliente nuevo"):
  *   - Los COLORES: `packages/design-system/src/styles/tokens.css`, bloque
  *     "MARCA".
- *   - El LOGO y el icono: `apps/web/public/brand/brand-mark.png` y
- *     `apps/web/src/app/icon.png`.
+ *   - El LOGO: se sube desde el panel. Sin logotipo subido se usa
+ *     `apps/web/public/brand/brand-mark.png`. El icono de la pestana lo dibuja
+ *     la web a partir de ese logotipo (`/brand-icon.png`).
  *   - Las llaves de Stripe y el Meta Pixel: variables de entorno en Railway.
  *
  * Los textos legales (Terminos, Privacidad, Aviso de California) usan estos

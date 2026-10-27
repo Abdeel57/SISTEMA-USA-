@@ -9,6 +9,7 @@ import type { ReactNode } from "react";
 
 import { isLocale, localeTag } from "@/i18n/locales";
 import { loadMessages } from "@/i18n/messages";
+import { brandIconsMetadata } from "@/lib/brand-icon";
 import { adminThemeCss } from "@/lib/brand-palette";
 import { loadBrand } from "@/lib/brand-server";
 
@@ -62,10 +63,13 @@ export async function generateMetadata({
 
   // `getTranslations` pasa por `i18n/request.ts`, que ya rellena la marca.
   const t = await getTranslations({ locale, namespace: "admin.meta" });
+  const brand = await loadBrand();
 
   return {
     title: t("title"),
     description: t("description"),
+    // El mismo icono que la tienda: el logotipo y el color guardados en el panel.
+    icons: brandIconsMetadata(brand),
     /*
      * NADA DEL PANEL SE INDEXA. No es una preferencia de posicionamiento: un
      * buscador que indexe `/admin/es/participants` publica la existencia y la

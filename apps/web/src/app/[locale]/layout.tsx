@@ -16,6 +16,7 @@ import { SiteHeader } from "@/components/site-header";
 import { SiteMain } from "@/components/site-main";
 import { localeTag } from "@/i18n/locales";
 import { routing } from "@/i18n/routing";
+import { brandIconsMetadata, brandIconUrl } from "@/lib/brand-icon";
 import { storeLightThemeCss } from "@/lib/brand-palette";
 import { loadBrand } from "@/lib/brand-server";
 import { resolveMetaPixelId } from "@/lib/meta-pixel";
@@ -61,6 +62,8 @@ export async function generateMetadata({
   if (!hasLocale(routing.locales, locale)) notFound();
 
   const t = await getTranslations({ locale, namespace: "metadata" });
+  const brand = await loadBrand();
+  const siteUrl = siteUrlFromEnv();
 
   return {
     title: t("title"),
@@ -73,7 +76,46 @@ export async function generateMetadata({
         "es-US": "/es",
       },
     },
+    // El icono de la pestana y de la pantalla de inicio, con el logotipo y el
+    // color guardados en el panel (`lib/brand-icon.ts`).
+    icons: brandIconsMetadata(brand),
+    /*
+     * VISTA PREVIA AL COMPARTIR (WhatsApp, Facebook, mensajes).
+     *
+     * El nombre del sitio y la imagen salen de la marca vigente. La imagen
+     * necesita una URL ABSOLUTA, y la unica fuente fiable del dominio publico
+     * es `SITE_URL` (la pone Coolify): deducirlo de la cabecera `Host` dejaria
+     * que quien hace la peticion eligiera el dominio que se escribe en la
+     * pagina. Sin `SITE_URL` la vista previa sale sin imagen, no con una rota.
+     */
+    ...(siteUrl === null ? {} : { metadataBase: siteUrl }),
+    openGraph: {
+      type: "website",
+      siteName: brand.profile.name,
+      title: t("title"),
+      description: t("description"),
+      locale: localeTag(locale).replace("-", "_"),
+      ...(siteUrl === null
+        ? {}
+        : {
+            images: [
+              { url: brandIconUrl(brand, 512), width: 512, height: 512, alt: brand.profile.name },
+            ],
+          }),
+    },
   };
+}
+
+/** El origen publico de la tienda (`SITE_URL`), o `null` si falta o no es `https:`/`http:`. */
+function siteUrlFromEnv(): URL | null {
+  const raw = process.env.SITE_URL ?? process.env.NEXT_PUBLIC_SITE_URL;
+  if (raw === undefined || raw.trim() === "") return null;
+  try {
+    const url = new URL(raw.trim());
+    return url.protocol === "https:" || url.protocol === "http:" ? url : null;
+  } catch {
+    return null;
+  }
 }
 
 export default async function LocaleLayout({

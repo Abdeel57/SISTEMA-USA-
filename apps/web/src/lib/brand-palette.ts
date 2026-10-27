@@ -191,20 +191,23 @@ export function effectiveBrandHex(colors: BrandColors): string {
 }
 
 /**
- * Version corta y estable de lo que dibuja el patron (color + intensidad).
+ * Version corta y estable de un texto, para el `?v=` de un recurso de marca.
  *
- * Va en la URL de `/brand-pattern.svg?v=...` para que el navegador pueda
- * cachear el SVG un ano y aun asi ver el nuevo en cuanto cambie la marca. FNV-1a
- * de 32 bits: no es criptografia, es un nombre de fichero.
+ * Permite cachear el recurso un ano y aun asi ver el nuevo en cuanto cambie la
+ * marca. FNV-1a de 32 bits: no es criptografia, es un nombre de fichero.
  */
-export function patternVersion(colors: BrandColors, opacityPercent: number): string {
-  const text = `${effectiveBrandHex(colors)}|${String(opacityPercent)}`;
+export function shortHash(text: string): string {
   let hash = 0x811c9dc5;
   for (let index = 0; index < text.length; index += 1) {
     hash ^= text.charCodeAt(index);
     hash = Math.imul(hash, 0x01000193) >>> 0;
   }
   return hash.toString(16).padStart(8, "0");
+}
+
+/** Version de lo que dibuja el patron (color + intensidad): `/brand-pattern.svg?v=...`. */
+export function patternVersion(colors: BrandColors, opacityPercent: number): string {
+  return shortHash(`${effectiveBrandHex(colors)}|${String(opacityPercent)}`);
 }
 
 /**

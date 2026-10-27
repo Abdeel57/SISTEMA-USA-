@@ -30,7 +30,7 @@ Lo que sigue viviendo en el código:
 | --------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
 | Valores **iniciales** de la marca (se copian a la base el primer día) | `packages/brand/src/brand.config.ts` — solo mientras nadie haya guardado desde el panel; después manda la base de datos             |
 | Paleta de respaldo y superficies fijas (negros, banda clara, estados) | `packages/design-system/src/styles/tokens.css`; los tokens de marca y acento los sobreescribe la web con lo guardado en el panel    |
-| Símbolo de respaldo y favicon                                         | `apps/web/brand/logo.svg` → `node apps/web/scripts/build-brand-assets.mjs` (el símbolo lo sustituye el logotipo subido en el panel) |
+| Símbolo de respaldo (sin logotipo subido)                             | `apps/web/brand/logo.svg` → `node apps/web/scripts/build-brand-assets.mjs` (el símbolo lo sustituye el logotipo subido en el panel) |
 | Pixel de Meta y llaves de Stripe                                      | Variables de entorno en Railway (opcionales)                                                                                        |
 
 Pasos:
@@ -39,8 +39,9 @@ Pasos:
 2. En **Marca**, rellena los datos del cliente, sube su logotipo y elige sus
    colores. Opcional: deja también esos valores en `brand.config.ts` para que
    una base nueva arranque ya con ellos.
-3. Si quieres otro favicon, sustituye `apps/web/brand/logo.svg` y ejecuta
-   `node apps/web/scripts/build-brand-assets.mjs`.
+3. El icono de la pestaña, el de la pantalla de inicio del teléfono y la imagen
+   de la vista previa al compartir el enlace salen solos del logotipo y el color
+   guardados (`/brand-icon.png`). No hay que regenerar nada.
 4. **Textos legales.** Términos, Privacidad y Aviso de California
    (`apps/web/src/legal/`) toman los datos del cliente de la marca guardada,
    pero **los redactó el abogado de otro negocio**: el cliente debe revisarlos
