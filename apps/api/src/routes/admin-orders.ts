@@ -75,8 +75,8 @@ const listQuerySchema = paginationQuerySchema.extend({
    * que se teclea no vuelve en la respuesta: el correo sigue enmascarado.
    */
   q: z.string().trim().min(1).max(120).optional(),
-  /** DEC-078: `CASH` para la cola de caja. */
-  payment_method: z.enum(["CARD", "CASH"]).optional(),
+  /** DEC-078: `CASH` para la cola de caja. 0041: `ZELLE` para la de Zelle. */
+  payment_method: z.enum(["CARD", "CASH", "ZELLE"]).optional(),
   /** DEC-078: `true` = solo los que siguen esperando el cobro. */
   awaiting_payment: z.enum(["true", "false"]).optional(),
 });
@@ -146,6 +146,8 @@ const dailyCutSchema = z.object({
   from: z.string(),
   to: z.string(),
   cash: dailyCutTotalSchema,
+  /** 0041: cobros por Zelle confirmados ese dia. */
+  zelle: dailyCutTotalSchema,
   card: dailyCutTotalSchema,
   total: dailyCutTotalSchema,
   /** Reembolsos con tarjeta hechos ESE dia, de pedidos de cualquier dia. */
@@ -165,7 +167,7 @@ const dailyCutSchema = z.object({
         order_id: z.uuid(),
         order_number: z.string(),
         paid_at: z.string(),
-        payment_method: z.enum(["CARD", "CASH"]),
+        payment_method: z.enum(["CARD", "CASH", "ZELLE"]),
         order_status: z.string(),
         customer_name: z.string().nullable(),
         /** Enmascarado, como en el listado. */
@@ -201,7 +203,7 @@ const adminOrderRowSchema = z.object({
   participant_email: z.string(),
   participant_id: z.uuid(),
   /** DEC-078: `CASH` se cobra en caja y se confirma desde la ficha. */
-  payment_method: z.enum(["CARD", "CASH"]),
+  payment_method: z.enum(["CARD", "CASH", "ZELLE"]),
 });
 
 export function buildAdminOrdersRoutes(dependencies: AppDependencies): RouteDefinition[] {
@@ -355,7 +357,11 @@ export function buildAdminOrdersRoutes(dependencies: AppDependencies): RouteDefi
           throw ApiErrors.notFound();
         }
 
-        return await presentOrderDetail(domain, order);
+        return await presentOrderDetail(
+          domain,
+          order,
+          await dependencies.repositories.paymentReceipts.listForOrder(order.id),
+        );
       },
     },
 
@@ -538,7 +544,11 @@ export function buildAdminOrdersRoutes(dependencies: AppDependencies): RouteDefi
           { reasonCode, notes },
         );
 
-        return await presentOrderDetail(domain, result.order);
+        return await presentOrderDetail(
+          domain,
+          result.order,
+          await dependencies.repositories.paymentReceipts.listForOrder(result.order.id),
+        );
       },
     },
 
@@ -581,7 +591,47 @@ export function buildAdminOrdersRoutes(dependencies: AppDependencies): RouteDefi
             : { delivered: false },
         );
 
-        return await presentOrderDetail(domain, order);
+        return await presentOrderDetail(
+          domain,
+          order,
+          await dependencies.repositories.paymentReceipts.listForOrder(order.id),
+        );
+      },
+    },
+
+    {
+      method: "GET",
+      url: "/api/v1/admin/orders/:order_id/payment-receipts/:receipt_id",
+      operationId: "getAdminPaymentReceipt",
+      summary: "La imagen de un comprobante de pago (Zelle) de un pedido.",
+      description:
+        "0041. Los bytes de la captura que subio el comprador, para compararla con el banco antes de confirmar el cobro. Exige `order.read`, la misma capacidad que la ficha del pedido donde se muestra: quien atiende un pedido ve su comprobante. No es publica -la captura puede llevar datos bancarios- y no se cachea fuera del navegador: `private, no-store`. 404 si el comprobante no existe o no es de ese pedido.",
+      tags: ["admin"],
+      authorization: { kind: "PERMISSION", permission: "order.read" },
+      binaryResponses: { 200: ["image/jpeg", "image/png", "image/webp"] },
+      schema: {
+        params: z.object({ order_id: z.uuid(), receipt_id: z.uuid() }),
+        response: {
+          401: errorEnvelopeSchema,
+          403: errorEnvelopeSchema,
+          404: errorEnvelopeSchema,
+        },
+      },
+      handler: async (request, reply) => {
+        await requireStaff(dependencies, request);
+        const params = request.params as { order_id: string; receipt_id: string };
+
+        const receipt = await dependencies.repositories.paymentReceipts.find(
+          params.order_id,
+          params.receipt_id,
+        );
+        if (receipt === null) throw ApiErrors.notFound();
+
+        return reply
+          .header("cache-control", "private, no-store")
+          .header("x-content-type-options", "nosniff")
+          .type(receipt.contentType)
+          .send(receipt.content);
       },
     },
 
@@ -630,7 +680,7 @@ export function buildAdminOrdersRoutes(dependencies: AppDependencies): RouteDefi
           );
         }
 
-        const sumOf = (method: "CASH" | "CARD" | null) => {
+        const sumOf = (method: "CASH" | "ZELLE" | "CARD" | null) => {
           const rows = cut.totals.filter(
             (row) => row.currency === currency && (method === null || row.method === method),
           );
@@ -693,6 +743,7 @@ export function buildAdminOrdersRoutes(dependencies: AppDependencies): RouteDefi
           from: window.from.toISOString(),
           to: window.to.toISOString(),
           cash: sumOf("CASH"),
+          zelle: sumOf("ZELLE"),
           card: sumOf("CARD"),
           total: sumOf(null),
           refunds: {

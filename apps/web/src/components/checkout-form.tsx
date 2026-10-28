@@ -6,7 +6,7 @@ import { useActionState, useState } from "react";
 
 import type { Locale } from "@/i18n/locales";
 import { IDLE } from "@/lib/action-result";
-import type { FulfillmentMethod, PaymentMethod } from "@/lib/api";
+import type { FulfillmentMethod, PaymentMethod, PublicPaymentMethods } from "@/lib/api";
 import { startCheckoutAction } from "@/lib/checkout-actions";
 
 import { FormError, useFieldError } from "./auth-form-shell";
@@ -55,22 +55,42 @@ import { PaymentMethodChoice } from "./payment-method-choice";
  * prefiere que se lo envien, elige envio y vuelven la direccion y el envio.
  * `cashDelivery` es `null` cuando el carrito no lleva mercancia (solo
  * paquetes): no hay nada que recoger ni que enviar y no se pregunta.
+ *
+ * ZELLE (0041)
+ * ------------
+ * Se paga a distancia, como la tarjeta: no hay punto de venta donde recoger,
+ * asi que lleva la direccion siempre. Y pide el WHATSAPP, obligatorio: es a
+ * donde la tienda le confirma el pago cuando ve el dinero en su banco. A quien
+ * transferir se le muestra en el paso siguiente, junto al numero de pedido que
+ * va en la nota de Zelle.
  */
+const DEFAULT_METHODS: readonly PaymentMethod[] = ["CARD", "CASH"];
+
 export function CheckoutForm({
   locale,
   cashDelivery,
+  methods = DEFAULT_METHODS,
+  zelle = null,
 }: {
   readonly locale: Locale;
   readonly cashDelivery: CashDeliveryOptions | null;
+  /**
+   * Las formas de pago que ofrece la tienda. Nunca vacia: la pagina lo evita.
+   * Ausente, tarjeta y efectivo, que es lo que ofrecia antes de 0041.
+   */
+  readonly methods?: readonly PaymentMethod[];
+  /** 0041: a quien se paga por Zelle, o `null` si la tienda no lo ofrece. */
+  readonly zelle?: PublicPaymentMethods["zelle"];
 }) {
   const t = useTranslations("checkout");
   const [state, formAction, pending] = useActionState(startCheckoutAction, IDLE);
   const fieldError = useFieldError(state);
-  const [method, setMethod] = useState<PaymentMethod>("CARD");
+  const [method, setMethod] = useState<PaymentMethod>(methods[0] ?? "CARD");
   const [fulfillment, setFulfillment] = useState<FulfillmentMethod>("PICKUP");
 
   const asksFulfillment = method === "CASH" && cashDelivery !== null;
   const needsAddress = !(asksFulfillment && fulfillment === "PICKUP");
+  const isZelle = method === "ZELLE" && zelle !== null;
 
   return (
     <form action={formAction} className="flex flex-col gap-s5">
@@ -83,7 +103,18 @@ export function CheckoutForm({
        * carrito, y en un telefono, con seis campos de direccion delante, las
        * dos opciones quedarian fuera de la pantalla.
        */}
-      <PaymentMethodChoice value={method} onChange={setMethod} />
+      <PaymentMethodChoice methods={methods} value={method} onChange={setMethod} />
+
+      {isZelle ? (
+        <FormField
+          label={t("fields.whatsapp")}
+          description={t("fields.whatsappHint")}
+          required
+          error={fieldError("contact_phone")}
+        >
+          <Input name="contact_phone" type="tel" inputMode="tel" autoComplete="tel" />
+        </FormField>
+      ) : null}
 
       {asksFulfillment && cashDelivery !== null ? (
         <FulfillmentChoice value={fulfillment} onChange={setFulfillment} options={cashDelivery} />
@@ -147,11 +178,15 @@ export function CheckoutForm({
        * pedido en efectivo por carrito-, es lo que evita que alguien lo pruebe.
        */}
       <Button type="submit" variant="buy" size="lg" fullWidth loading={pending}>
-        {method === "CASH" ? t("payment.cashCta") : t("payCta")}
+        {method === "CASH" ? t("payment.cashCta") : isZelle ? t("payment.zelleCta") : t("payCta")}
       </Button>
 
       <p className="text-caption text-text-subtle">
-        {method === "CASH" ? t("payment.cashNote") : t("providerNote")}
+        {method === "CASH"
+          ? t("payment.cashNote")
+          : isZelle
+            ? t("payment.zelleNote")
+            : t("providerNote")}
       </p>
     </form>
   );

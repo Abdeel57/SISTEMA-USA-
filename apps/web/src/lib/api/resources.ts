@@ -47,6 +47,7 @@ import type {
   PromotionSummary,
   SessionState,
   SiteConfigResponse,
+  PaymentReceipt,
 } from "./contract";
 import type {
   AdminAmoeTranscriptionInput,
@@ -85,6 +86,8 @@ import type {
   AdminSettingChangeRequestPage,
   AdminShippingRateInput,
   AdminShippingRateResponse,
+  AdminPaymentSettings,
+  AdminPaymentSettingsInput,
 } from "./admin-contract";
 import { apiGet, apiRequest, queryString, type ApiRequestOptions } from "./http";
 import { ok, type ApiResult } from "./result";
@@ -173,7 +176,7 @@ export const API_PATHS = {
   checkoutSession: "/checkout/session",
   /** Estado de una sesion de pago. */
   checkoutSessions: "/checkout/sessions",
-  /** DEC-078: pedido para pagar en efectivo en un punto de venta fisico. */
+  /** DEC-078: pedido para pagar en efectivo en un punto de venta fisico. 0041: o por Zelle. */
   checkoutCashOrder: "/checkout/cash-order",
 
   /*
@@ -209,6 +212,8 @@ export const API_PATHS = {
   adminProductCategories: "/admin/product-categories",
   /** DEC-079: tarifa fija de envio (§16). */
   adminShippingRate: "/admin/shipping-rate",
+  /** 0041: formas de pago manual y cuenta Zelle. */
+  adminPaymentSettings: "/admin/payment-settings",
   /** Marca del sitio editable desde el panel (§17). */
   adminBrand: "/admin/brand",
   /** Subida de imagenes de catalogo (§14, DEC-056). */
@@ -988,9 +993,15 @@ export function createCheckoutSession(
  * envio; `DELIVERY` lleva la direccion y el backend cobra el envio.
  */
 export function createCashOrder(
-  input:
+  input: (
     | { readonly fulfillment_method: "PICKUP" }
-    | { readonly fulfillment_method: "DELIVERY"; readonly shipping_address: PostalAddress },
+    | { readonly fulfillment_method: "DELIVERY"; readonly shipping_address: PostalAddress }
+  ) & {
+    /** 0041: `ZELLE` o `CASH`. Ausente = `CASH`. */
+    readonly payment_channel?: "CASH" | "ZELLE";
+    /** 0041: WhatsApp como lo escribio el comprador; la API lo normaliza. */
+    readonly contact_phone?: string;
+  },
   locale: Locale,
   session: SessionContext,
 ): Promise<ApiResult<OrderSummary>> {
@@ -1848,6 +1859,53 @@ export function updateAdminProductVariant(
     adminProductVariantPath(productId, variantId),
     { locale, body: patch, ...sessionOptions(session) },
   );
+}
+
+/**
+ * 0041: sube la captura del comprobante de Zelle de un pedido del propio
+ * participante. Solo los bytes, en base64: el tipo lo decide la API leyendo la
+ * firma, igual que con las fotos del catalogo.
+ */
+export function uploadPaymentReceipt(
+  orderId: string,
+  dataBase64: string,
+  locale: Locale,
+  session: SessionContext,
+): Promise<ApiResult<PaymentReceipt>> {
+  return apiRequest<PaymentReceipt>(
+    "POST",
+    `${API_PATHS.orders}/${encodeURIComponent(orderId)}/payment-receipts`,
+    { locale, body: { data_base64: dataBase64 }, ...sessionOptions(session) },
+  );
+}
+
+/** 0041: la ruta de la API de la imagen de un comprobante (solo personal). */
+export function adminPaymentReceiptPath(orderId: string, receiptId: string): string {
+  return `${adminOrderPath(orderId)}/payment-receipts/${encodeURIComponent(receiptId)}`;
+}
+
+/** 0041: formas de pago manual y cuenta Zelle, tal como estan guardadas. */
+export function fetchAdminPaymentSettings(
+  locale: Locale,
+  session: SessionContext,
+): Promise<ApiResult<AdminPaymentSettings>> {
+  return apiGet<AdminPaymentSettings>(API_PATHS.adminPaymentSettings, {
+    locale,
+    ...sessionOptions(session),
+  });
+}
+
+/** 0041: guarda las formas de pago. Activar Zelle sin cuenta es 422. */
+export function setAdminPaymentSettings(
+  input: AdminPaymentSettingsInput,
+  locale: Locale,
+  session: SessionContext,
+): Promise<ApiResult<AdminPaymentSettings>> {
+  return apiRequest<AdminPaymentSettings>("PUT", API_PATHS.adminPaymentSettings, {
+    locale,
+    body: input,
+    ...sessionOptions(session),
+  });
 }
 
 /** DEC-079: tarifa fija de envio vigente y su historico. */

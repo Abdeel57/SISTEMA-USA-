@@ -37,6 +37,7 @@ import type { z } from "zod";
 
 import type { orderDetailSchema, orderSummarySchema } from "../http/schemas-b5.js";
 import type { DomainServices } from "./domain-services.js";
+import type { PaymentReceiptSummary } from "./ports.js";
 
 type OrderSummary = z.infer<typeof orderSummarySchema>;
 type OrderDetail = z.infer<typeof orderDetailSchema>;
@@ -176,15 +177,29 @@ export async function entryStateForOrder(
 }
 
 /**
- * DEC-078: como se paga el pedido. Se deriva del proveedor guardado y no hay
- * columna aparte: `cash` lo pone el checkout en efectivo al crear el pedido, y
- * cualquier otro valor -o ninguno, si la sesion de pago no llego a abrirse- es
- * la pasarela de tarjeta.
+ * DEC-078: como se paga el pedido. Se deriva del proveedor guardado: `cash` lo
+ * pone el checkout de pago manual al crear el pedido, y cualquier otro valor
+ * -o ninguno, si la sesion de pago no llego a abrirse- es la pasarela de
+ * tarjeta. 0041: dentro del pago manual, el canal dice si fue en caja o por
+ * Zelle; un pedido manual anterior a 0041 es de caja.
  */
 export function paymentMethodOf(
-  order: Pick<OrderRecord, "provider">,
+  order: Pick<OrderRecord, "provider" | "manualPaymentChannel">,
 ): OrderSummary["payment_method"] {
-  return order.provider === "cash" ? "CASH" : "CARD";
+  if (order.provider !== "cash") return "CARD";
+  return order.manualPaymentChannel ?? "CASH";
+}
+
+/** 0041: el comprobante, tal como sale en el detalle del pedido (sin bytes). */
+export function presentPaymentReceipt(
+  receipt: PaymentReceiptSummary,
+): OrderDetail["payment_receipts"][number] {
+  return {
+    id: receipt.id,
+    uploaded_at: receipt.createdAt.toISOString(),
+    content_type: receipt.contentType,
+    byte_size: receipt.byteSize,
+  };
 }
 
 export function presentOrderSummary(order: OrderRecord, facts: OrderEntryFacts): OrderSummary {
@@ -216,6 +231,8 @@ function localized(snapshot: OrderRecord["items"][number]["nameSnapshot"]): {
 export async function presentOrderDetail(
   domain: DomainServices,
   order: OrderRecord,
+  /** 0041: los comprobantes del pedido, del mas reciente al mas antiguo. */
+  receipts: readonly PaymentReceiptSummary[],
 ): Promise<OrderDetail> {
   const facts = await entryStateForOrder(domain, order);
   const summary = presentOrderSummary(order, facts);
@@ -260,6 +277,8 @@ export async function presentOrderDetail(
       carrier: order.shippingCarrier,
       tracking_number: order.trackingNumber,
     },
+    contact_phone: order.contactPhone,
+    payment_receipts: receipts.map(presentPaymentReceipt),
     entry_calculation:
       snapshot === null
         ? null

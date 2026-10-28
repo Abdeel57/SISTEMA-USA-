@@ -66,16 +66,27 @@ import {
   checkoutSessionStateSchema,
   orderDetailSchema,
   orderSummarySchema,
+  paymentReceiptSchema,
   webhookAckSchema,
 } from "../http/schemas-b5.js";
 import { freezeOpenCart } from "../services/cart-freeze.js";
-import { createCashCheckout } from "../services/cash-payments.js";
+import { createCashCheckout, isCashOrder } from "../services/cash-payments.js";
+import { normalizeContactPhone } from "../services/contact-phone.js";
+import {
+  MEDIA_MAX_BASE64_LENGTH,
+  MEDIA_MAX_BYTES,
+  MEDIA_UPLOAD_BODY_LIMIT_BYTES,
+  decodeStrictBase64,
+  sha256Hex,
+  sniffImageType,
+} from "../services/media.js";
 import { domainServicesFor } from "../services/domain-registry.js";
 import { toCommerceOrder } from "../services/domain-services.js";
 import {
   entryStateForOrder,
   presentOrderDetail,
   presentOrderSummary,
+  presentPaymentReceipt,
 } from "../services/order-presenter.js";
 import {
   createPurchaseQualifier,
@@ -127,7 +138,32 @@ const shippingAddressBodySchema = z.object({
 const cashOrderBodySchema = z.object({
   fulfillment_method: z.enum(["DELIVERY", "PICKUP"]).optional(),
   shipping_address: shippingAddressBodySchema.optional(),
+  /**
+   * 0041: como entrega el dinero. Ausente = `CASH` (efectivo en caja), que es
+   * lo que hacia esta ruta antes de Zelle.
+   */
+  payment_channel: z.enum(["CASH", "ZELLE"]).optional(),
+  /**
+   * 0041: WhatsApp del comprador, como lo escriba. Obligatorio con `ZELLE`:
+   * es a donde la tienda le confirma el pago. Ver `services/contact-phone.ts`.
+   */
+  contact_phone: z.string().max(32).optional(),
 });
+
+/**
+ * 0041: la captura del comprobante de Zelle, en base64. Mismo formato y mismo
+ * tope que las fotos del catalogo (`routes/media.ts`): el tipo se decide por la
+ * firma de los bytes, no por lo que diga quien sube.
+ */
+const paymentReceiptBodySchema = z.object({
+  data_base64: z.string().min(4).max(MEDIA_MAX_BASE64_LENGTH),
+});
+
+/**
+ * Cuantos comprobantes admite un pedido. Se puede subir otro si el primero
+ * salio mal; un tope evita que un pedido se use de almacen de imagenes.
+ */
+const MAX_RECEIPTS_PER_ORDER = 10;
 
 const checkoutBodySchema = z.object({
   shipping_address: shippingAddressBodySchema,
@@ -748,6 +784,29 @@ export function buildOrdersRoutes(dependencies: AppDependencies): RouteDefinitio
         const principal = await requirePrincipal(request);
         const body = request.body as z.infer<typeof cashOrderBodySchema>;
 
+        // 0041: solo los canales que la tienda tiene activados en el panel.
+        const channel = body.payment_channel ?? "CASH";
+        const settings = await repositories.paymentSettings.read();
+        const channelEnabled = channel === "ZELLE" ? settings.zelleEnabled : settings.cashEnabled;
+        if (!channelEnabled) {
+          throw new ApiError({
+            statusCode: 409,
+            code: "PAYMENT_METHOD_UNAVAILABLE",
+            details: { payment_channel: channel },
+          });
+        }
+
+        // 0041: el WhatsApp. Con Zelle es obligatorio; con efectivo, si viene,
+        // tiene que ser un numero valido igualmente.
+        const typedPhone = (body.contact_phone ?? "").trim();
+        const contactPhone = typedPhone === "" ? null : normalizeContactPhone(typedPhone);
+        if (typedPhone !== "" && contactPhone === null) {
+          throw ApiErrors.validationFailed([{ path: "contact_phone", code: "invalid" }]);
+        }
+        if (channel === "ZELLE" && contactPhone === null) {
+          throw ApiErrors.validationFailed([{ path: "contact_phone", code: "required" }]);
+        }
+
         // DEC-079: sin direccion solo se puede recoger. Se comprueba aqui y no
         // en el esquema para que el 422 diga QUE campo falta.
         const address = body.shipping_address;
@@ -764,6 +823,7 @@ export function buildOrdersRoutes(dependencies: AppDependencies): RouteDefinitio
                 method: "DELIVERY",
                 shippingAddress: { ...address, line2: address.line2 ?? null },
               },
+          { channel, contactPhone },
         );
 
         // Con el pedido ya escrito, el carrito se cierra: lo que hay dentro ya
@@ -782,6 +842,105 @@ export function buildOrdersRoutes(dependencies: AppDependencies): RouteDefinitio
 
         void reply.code(outcome.created ? 201 : 200);
         return presentOrderSummary(outcome.order, await entryStateForOrder(domain, outcome.order));
+      },
+    },
+
+    {
+      method: "POST",
+      url: "/api/v1/account/orders/:order_id/payment-receipts",
+      operationId: "uploadPaymentReceipt",
+      summary: "Subir la captura del comprobante de un pedido pagado por Zelle.",
+      description:
+        "0041. Solo el comprador del pedido, y solo mientras el pedido por Zelle siga pendiente de pago. Acepta JPEG, PNG o WebP de hasta 5 MiB; el tipo se decide por la firma de los bytes. El comprobante NO es publico: lo ve el comprador (sin bytes, en el detalle de su pedido) y el personal con `order.read`, que lo compara con su banco antes de confirmar el cobro. Se puede subir otro si el primero salio mal (hasta 10); se conservan todos. 409 `ORDER_NOT_ZELLE_PAYMENT` si el pedido no es por Zelle, `PAYMENT_RECEIPT_NOT_ACCEPTED` si ya no esta pendiente y `PAYMENT_RECEIPT_LIMIT` si ya tiene diez.",
+      tags: ["commerce"],
+      authorization: { kind: "PARTICIPANT", selfOnly: true },
+      bodyLimitBytes: MEDIA_UPLOAD_BODY_LIMIT_BYTES,
+      schema: {
+        params: orderIdParamsSchema,
+        body: paymentReceiptBodySchema,
+        response: {
+          201: paymentReceiptSchema,
+          401: errorEnvelopeSchema,
+          404: errorEnvelopeSchema,
+          409: errorEnvelopeSchema,
+          413: errorEnvelopeSchema,
+          415: errorEnvelopeSchema,
+          422: errorEnvelopeSchema,
+        },
+      },
+      handler: async (request, reply) => {
+        const principal = await requirePrincipal(request);
+        const params = request.params as z.infer<typeof orderIdParamsSchema>;
+        const body = request.body as z.infer<typeof paymentReceiptBodySchema>;
+
+        // El `participantId` en el WHERE: el pedido de otro es 404, igual que
+        // en el detalle.
+        const order = await orders.findForParticipant(params.order_id, principal.participantId);
+        if (order === null) {
+          throw new ApiError({ statusCode: 404, code: "ORDER_NOT_FOUND" });
+        }
+        if (!isCashOrder(order) || order.manualPaymentChannel !== "ZELLE") {
+          throw new ApiError({ statusCode: 409, code: "ORDER_NOT_ZELLE_PAYMENT" });
+        }
+        if (order.status !== "PENDING_PAYMENT") {
+          throw new ApiError({
+            statusCode: 409,
+            code: "PAYMENT_RECEIPT_NOT_ACCEPTED",
+            details: { status: order.status },
+          });
+        }
+
+        const content = decodeStrictBase64(body.data_base64);
+        if (content === null) {
+          throw ApiErrors.validationFailed([{ path: "data_base64", code: "invalid_base64" }]);
+        }
+        if (content.length === 0 || content.length > MEDIA_MAX_BYTES) {
+          throw new ApiError({
+            statusCode: 413,
+            code: "MEDIA_TOO_LARGE",
+            details: { max_bytes: MEDIA_MAX_BYTES },
+          });
+        }
+        const contentType = sniffImageType(content);
+        if (contentType === null) {
+          throw new ApiError({
+            statusCode: 415,
+            code: "MEDIA_TYPE_UNSUPPORTED",
+            details: { accepted: ["image/jpeg", "image/png", "image/webp"] },
+          });
+        }
+
+        const existing = await repositories.paymentReceipts.listForOrder(order.id);
+        if (existing.length >= MAX_RECEIPTS_PER_ORDER) {
+          throw new ApiError({
+            statusCode: 409,
+            code: "PAYMENT_RECEIPT_LIMIT",
+            details: { max_receipts: MAX_RECEIPTS_PER_ORDER },
+          });
+        }
+
+        const stored = await repositories.paymentReceipts.store({
+          orderId: order.id,
+          participantId: principal.participantId,
+          contentType,
+          sha256: sha256Hex(content),
+          content,
+        });
+
+        // La traza dice QUE se subio y para que pedido; la imagen no viaja al
+        // log ni a la auditoria.
+        request.log.info(
+          {
+            event: "order.payment_receipt.uploaded",
+            order_id: order.id,
+            receipt_id: stored.id,
+            byte_size: stored.byteSize,
+          },
+          "comprobante de pago subido",
+        );
+
+        void reply.code(201);
+        return presentPaymentReceipt(stored);
       },
     },
 
@@ -892,7 +1051,11 @@ export function buildOrdersRoutes(dependencies: AppDependencies): RouteDefinitio
           throw new ApiError({ statusCode: 404, code: "ORDER_NOT_FOUND" });
         }
 
-        return await presentOrderDetail(domain, order);
+        return await presentOrderDetail(
+          domain,
+          order,
+          await repositories.paymentReceipts.listForOrder(order.id),
+        );
       },
     },
 

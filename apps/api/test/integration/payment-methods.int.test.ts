@@ -288,7 +288,7 @@ class Browser {
   }
 
   public async request(
-    method: "GET" | "POST",
+    method: "GET" | "POST" | "PUT",
     url: string,
     payload?: unknown,
   ): Promise<LightMyRequestResponse> {
@@ -449,6 +449,25 @@ const fakeStripeFetch: typeof fetch = (input, init) => {
 
 beforeAll(async () => {
   testDb = await startTestDatabase();
+
+  /*
+   * LOS PREFIJOS DE ESTAS PRUEBAS: `APP`.
+   *
+   * Desde 0040 los prefijos salen de `brand_profile`, que se siembra con los
+   * valores iniciales de la plantilla (`ORD`). Las aserciones de numeros de
+   * pedido y de participacion de este fichero se escribieron con `APP`, asi
+   * que se fija antes de empezar, con el rol propietario: la API no la escribe.
+   * La zona se queda la inicial (`BRAND.timeZone`), que es la que comprueba el
+   * corte de caja.
+   */
+  const owner = testDb.connectAsOwner();
+  await owner.db.execute(sql`
+    UPDATE brand_profile
+       SET order_number_prefix = 'APP', entry_number_prefix = 'APP'
+     WHERE id = 1
+  `);
+  // Sin `close()`: la conexion la cierra `testDb.stop()` con las demas.
+
   handle = testDb.connectAs("app");
   db = handle.db;
 
@@ -1362,14 +1381,261 @@ describe("corte de caja del dia, en la hora del negocio (DEC-085)", () => {
     expect(empty.statusCode).toBe(200);
     expect(empty.json<Record<string, unknown>>()).toMatchObject({
       date: "2020-01-01",
-      // 2020-01-01 en Nuevo Mexico es MST (UTC-7).
-      from: "2020-01-01T07:00:00.000Z",
-      to: "2020-01-02T07:00:00.000Z",
+      // 2020-01-01 en Chicago (`BRAND.timeZone`) es CST (UTC-6).
+      from: "2020-01-01T06:00:00.000Z",
+      to: "2020-01-02T06:00:00.000Z",
       total: { orders: 0, amount: { amount_minor: "0" } },
       merchandise: { products: [], lines: [] },
     });
 
     const invalid = await manager.request("GET", "/api/v1/admin/reports/daily-cut?date=2026-02-30");
     expect(invalid.statusCode).toBe(422);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Pago por Zelle (0041)
+// ---------------------------------------------------------------------------
+
+/** PNG de 1x1. La API decide el tipo por la firma de los bytes, no por el nombre. */
+const RECEIPT_PNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+  "base64",
+);
+
+describe("pago por Zelle (0041): checkout, comprobante, revision y confirmacion", () => {
+  const zelleOrder = { id: "", order_number: "" };
+  let zelleBuyerEmail = "";
+
+  beforeAll(async () => {
+    zelleBuyerEmail = "zelle-buyer@example.invalid";
+    await insertParticipant(zelleBuyerEmail);
+    await insertParticipant("zelle-stranger@example.invalid");
+  });
+
+  it("con Zelle apagado (como nace la tienda), el checkout lo rechaza", async () => {
+    const buyer = await participantBrowser(zelleBuyerEmail);
+    await fillCart(buyer);
+
+    const response = await buyer.request("POST", "/api/v1/checkout/cash-order", {
+      shipping_address: SHIPPING,
+      payment_channel: "ZELLE",
+      contact_phone: "(512) 555-0134",
+    });
+
+    expect(response.statusCode, response.body).toBe(409);
+    expect(response.json<{ error: { code: string } }>().error.code).toBe(
+      "PAYMENT_METHOD_UNAVAILABLE",
+    );
+  });
+
+  it("activar Zelle exige la cuenta; con ella, /config la publica para el checkout", async () => {
+    const manager = await staffBrowser(scenario.manager);
+
+    const incomplete = await manager.request("PUT", "/api/v1/admin/payment-settings", {
+      cash_enabled: true,
+      zelle_enabled: true,
+      zelle_recipient_name: "",
+      zelle_recipient: null,
+    });
+    expect(incomplete.statusCode, incomplete.body).toBe(422);
+
+    const saved = await manager.request("PUT", "/api/v1/admin/payment-settings", {
+      cash_enabled: true,
+      zelle_enabled: true,
+      zelle_recipient_name: "Rifas Fixture LLC",
+      zelle_recipient: "pagos@example.invalid",
+    });
+    expect(saved.statusCode, saved.body).toBe(200);
+    expect(saved.json()).toMatchObject({
+      zelle_enabled: true,
+      zelle_recipient_name: "Rifas Fixture LLC",
+      zelle_recipient: "pagos@example.invalid",
+      updated_by_admin_user_id: scenario.manager.adminUserId,
+    });
+
+    const config = await app.inject({ method: "GET", url: "/api/v1/config" });
+    expect(config.json<{ payment_methods: unknown }>().payment_methods).toEqual({
+      card: true,
+      cash: true,
+      zelle: { recipient_name: "Rifas Fixture LLC", recipient: "pagos@example.invalid" },
+    });
+  });
+
+  it("SUPPORT puede ver los ajustes de pago pero no cambiarlos", async () => {
+    const support = await staffBrowser(scenario.support);
+    const denied = await support.request("PUT", "/api/v1/admin/payment-settings", {
+      cash_enabled: false,
+      zelle_enabled: false,
+    });
+    expect(denied.statusCode).toBe(403);
+  });
+
+  it("Zelle exige un WhatsApp valido", async () => {
+    const buyer = await participantBrowser(zelleBuyerEmail);
+
+    const missing = await buyer.request("POST", "/api/v1/checkout/cash-order", {
+      shipping_address: SHIPPING,
+      payment_channel: "ZELLE",
+    });
+    expect(missing.statusCode, missing.body).toBe(422);
+    expect(missing.body).toContain("contact_phone");
+
+    const nonsense = await buyer.request("POST", "/api/v1/checkout/cash-order", {
+      shipping_address: SHIPPING,
+      payment_channel: "ZELLE",
+      contact_phone: "llamame",
+    });
+    expect(nonsense.statusCode, nonsense.body).toBe(422);
+    expect(nonsense.body).toContain("contact_phone");
+  });
+
+  it("crea el pedido por Zelle pendiente, con el WhatsApp en E.164 y SIN participaciones", async () => {
+    const buyer = await participantBrowser(zelleBuyerEmail);
+
+    const response = await buyer.request("POST", "/api/v1/checkout/cash-order", {
+      shipping_address: SHIPPING,
+      payment_channel: "ZELLE",
+      contact_phone: "(512) 555-0134",
+    });
+    expect(response.statusCode, response.body).toBe(201);
+
+    const body = response.json<Record<string, unknown>>();
+    zelleOrder.id = String(body.id);
+    zelleOrder.order_number = String(body.order_number);
+    expect(body.payment_method).toBe("ZELLE");
+    expect(body.status).toBe("PENDING_PAYMENT");
+    expect(body.entries_granted).toBeNull();
+
+    const row = await db.execute<{ provider: string; channel: string; phone: string }>(
+      sql`SELECT provider, manual_payment_channel AS channel, contact_phone AS phone
+            FROM orders WHERE id = ${zelleOrder.id}`,
+    );
+    expect(row.rows[0]).toEqual({ provider: "cash", channel: "ZELLE", phone: "+15125550134" });
+    expect(await purchaseAwards(zelleOrder.id)).toEqual([]);
+  });
+
+  it("el comprador sube la captura; un archivo que no es imagen se rechaza", async () => {
+    const buyer = await participantBrowser(zelleBuyerEmail);
+    const url = `/api/v1/account/orders/${zelleOrder.id}/payment-receipts`;
+
+    const notImage = await buyer.request("POST", url, {
+      data_base64: Buffer.from("no soy una imagen, soy texto").toString("base64"),
+    });
+    expect(notImage.statusCode, notImage.body).toBe(415);
+
+    const uploaded = await buyer.request("POST", url, {
+      data_base64: RECEIPT_PNG.toString("base64"),
+    });
+    expect(uploaded.statusCode, uploaded.body).toBe(201);
+    expect(uploaded.json()).toMatchObject({
+      content_type: "image/png",
+      byte_size: RECEIPT_PNG.length,
+    });
+
+    const detail = (await buyer.request("GET", `/api/v1/account/orders/${zelleOrder.id}`)).json<{
+      contact_phone: string;
+      payment_receipts: unknown[];
+    }>();
+    expect(detail.contact_phone).toBe("+15125550134");
+    expect(detail.payment_receipts).toHaveLength(1);
+  });
+
+  it("otro participante no puede subir comprobantes a un pedido ajeno", async () => {
+    const stranger = await participantBrowser("zelle-stranger@example.invalid");
+    const response = await stranger.request(
+      "POST",
+      `/api/v1/account/orders/${zelleOrder.id}/payment-receipts`,
+      { data_base64: RECEIPT_PNG.toString("base64") },
+    );
+    expect(response.statusCode).toBe(404);
+  });
+
+  it("un pedido en efectivo no admite comprobante", async () => {
+    const buyer = await participantBrowser("zelle-stranger@example.invalid");
+    const cash = await placeCashOrder(buyer);
+    const response = await buyer.request(
+      "POST",
+      `/api/v1/account/orders/${cash.id}/payment-receipts`,
+      { data_base64: RECEIPT_PNG.toString("base64") },
+    );
+    expect(response.statusCode).toBe(409);
+    expect(response.json<{ error: { code: string } }>().error.code).toBe("ORDER_NOT_ZELLE_PAYMENT");
+  });
+
+  it("la cola 'Zelle por revisar' lo encuentra y la de efectivo no", async () => {
+    const manager = await staffBrowser(scenario.manager);
+
+    const zelleQueue = (
+      await manager.request(
+        "GET",
+        "/api/v1/admin/orders?payment_method=ZELLE&awaiting_payment=true",
+      )
+    ).json<{ items: { id: string; payment_method: string }[] }>();
+    expect(zelleQueue.items.map((row) => row.id)).toContain(zelleOrder.id);
+    expect(zelleQueue.items.every((row) => row.payment_method === "ZELLE")).toBe(true);
+
+    const cashQueue = (
+      await manager.request("GET", "/api/v1/admin/orders?payment_method=CASH")
+    ).json<{ items: { id: string }[] }>();
+    expect(cashQueue.items.map((row) => row.id)).not.toContain(zelleOrder.id);
+  });
+
+  it("la imagen la ve el personal que atiende pedidos, llega intacta y no es publica", async () => {
+    const manager = await staffBrowser(scenario.manager);
+    const detail = (await manager.request("GET", `/api/v1/admin/orders/${zelleOrder.id}`)).json<{
+      payment_method: string;
+      payment_receipts: { id: string }[];
+    }>();
+    expect(detail.payment_method).toBe("ZELLE");
+    const receiptId = detail.payment_receipts[0]?.id ?? "";
+
+    const url = `/api/v1/admin/orders/${zelleOrder.id}/payment-receipts/${receiptId}`;
+    const image = await manager.request("GET", url);
+    expect(image.statusCode).toBe(200);
+    expect(image.headers["content-type"]).toBe("image/png");
+    expect(image.headers["cache-control"]).toBe("private, no-store");
+    expect(Buffer.from(image.rawPayload).equals(RECEIPT_PNG)).toBe(true);
+
+    // SUPPORT atiende pedidos (`order.read`): ve el comprobante del pedido.
+    const support = await staffBrowser(scenario.support);
+    expect((await support.request("GET", url)).statusCode).toBe(200);
+
+    // El comprador no: la imagen no sale por la API publica.
+    const buyer = await participantBrowser(zelleBuyerEmail);
+    expect((await buyer.request("GET", url)).statusCode).toBeGreaterThanOrEqual(401);
+  });
+
+  it("confirmarlo genera las participaciones y el corte lo cuenta como Zelle", async () => {
+    const manager = await staffBrowser(scenario.manager);
+    const confirmed = await manager.request(
+      "POST",
+      `/api/v1/admin/orders/${zelleOrder.id}/cash-payment/confirm`,
+      { reason_code: "ZELLE_PAYMENT_VERIFIED", notes: "Visto en el banco" },
+    );
+    expect(confirmed.statusCode, confirmed.body).toBe(200);
+    expect(confirmed.json()).toMatchObject({
+      stage: "ENTRIES_GENERATED",
+      entries: { status: "GENERATED", entries_granted: EXPECTED_ENTRIES },
+    });
+
+    const cut = (await manager.request("GET", "/api/v1/admin/reports/daily-cut")).json<{
+      zelle: { orders: number; amount: { amount_minor: string } };
+    }>();
+    expect(cut.zelle.orders).toBe(1);
+    expect(cut.zelle.amount.amount_minor).toBe(String(ORDER_TOTAL_MINOR));
+  });
+
+  it("ya pagado, no se aceptan mas comprobantes", async () => {
+    const buyer = await participantBrowser(zelleBuyerEmail);
+    const response = await buyer.request(
+      "POST",
+      `/api/v1/account/orders/${zelleOrder.id}/payment-receipts`,
+      { data_base64: RECEIPT_PNG.toString("base64") },
+    );
+    expect(response.statusCode).toBe(409);
+    expect(response.json<{ error: { code: string } }>().error.code).toBe(
+      "PAYMENT_RECEIPT_NOT_ACCEPTED",
+    );
   });
 });

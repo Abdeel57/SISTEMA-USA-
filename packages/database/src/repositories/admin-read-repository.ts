@@ -139,8 +139,11 @@ export interface AdminOrderListOptions {
    * correo enmascarado. Quien teclea el correo de un cliente ya lo conoce.
    */
   readonly search?: string | null;
-  /** DEC-078: `CASH` = pedidos en efectivo; `CARD` = el resto. */
-  readonly paymentMethod?: "CARD" | "CASH" | null;
+  /**
+   * DEC-078: `CASH` = efectivo en caja; `CARD` = el resto. 0041: `ZELLE` =
+   * pago manual por Zelle.
+   */
+  readonly paymentMethod?: "CARD" | "CASH" | "ZELLE" | null;
   /** DEC-078: solo los que siguen esperando el cobro (`PENDING_PAYMENT`). */
   readonly awaitingPayment?: boolean;
 }
@@ -176,9 +179,12 @@ export interface AdminAuditListOptions {
  * la ventana, sea cual sea su estado despues; lo que se devolvio va aparte, en
  * `refunds`, por el dia en que se devolvio.
  */
+/** 0041: el medio con el que se cobro un pedido, tal como lo agrupa el corte. */
+export type AdminPaymentMethodValue = "CASH" | "ZELLE" | "CARD";
+
 export interface AdminDailyCut {
   readonly totals: readonly {
-    readonly method: "CASH" | "CARD";
+    readonly method: AdminPaymentMethodValue;
     readonly currency: string;
     readonly orders: number;
     readonly amountMinor: bigint;
@@ -196,7 +202,7 @@ export interface AdminDailyCutMerchandiseRow {
   readonly orderId: string;
   readonly orderNumber: string;
   readonly paidAt: Date;
-  readonly method: "CASH" | "CARD";
+  readonly method: AdminPaymentMethodValue;
   readonly orderStatus: string;
   /** Crudo, como todo el correo de este archivo (regla 2). */
   readonly customerEmail: string | null;
@@ -354,23 +360,31 @@ export class DrizzleAdminReadRepository {
     const search = (options.search ?? "").trim();
     if (search !== "") {
       const pattern = likePattern(search);
-      // "APP-1234" o "app1234" tal como lo dicta alguien en caja: el numero
-      // guardado lleva ocho cifras con ceros (`APP-00001234`) y una subcadena
-      // no lo encontraria.
-      const dictated = /^(?:app-?)?0*(\d{1,8})$/iu.exec(search);
-      const exactNumber = dictated === null ? null : `APP-${(dictated[1] ?? "").padStart(8, "0")}`;
+      // "RFS-1234", "rfs1234" o solo "1234" tal como lo dicta alguien en caja:
+      // el numero guardado lleva ocho cifras con ceros (`RFS-00001234`) y una
+      // subcadena no lo encontraria. El prefijo es el de la marca y cambia por
+      // cliente, asi que se compara solo el final: `-00001234`.
+      const dictated = /^(?:[a-z]{2,8}-?|[a-z0-9]{2,8}-)?0*(\d{1,8})$/iu.exec(search);
+      const numberSuffix = dictated === null ? null : `%-${(dictated[1] ?? "").padStart(8, "0")}`;
 
       filters.push(sql`(
         ${orders.orderNumber} ILIKE ${pattern}
-        OR ${orders.orderNumber} = ${exactNumber}
+        OR ${orders.orderNumber} LIKE ${numberSuffix}
         OR ${identities.email} ILIKE ${pattern}
         OR ${participants.displayName} ILIKE ${pattern}
         OR ${orders.shippingAddress} ->> 'full_name' ILIKE ${pattern}
       )`);
     }
 
-    if (options.paymentMethod === "CASH") {
+    if (options.paymentMethod === "ZELLE") {
       filters.push(eq(orders.provider, "cash"));
+      filters.push(eq(orders.manualPaymentChannel, "ZELLE"));
+    } else if (options.paymentMethod === "CASH") {
+      // Un pedido manual sin canal es de caja (ver la migracion 0041).
+      filters.push(eq(orders.provider, "cash"));
+      filters.push(
+        sql`(${orders.manualPaymentChannel} IS NULL OR ${orders.manualPaymentChannel} = 'CASH')`,
+      );
     } else if (options.paymentMethod === "CARD") {
       filters.push(sql`(${orders.provider} IS NULL OR ${orders.provider} <> 'cash')`);
     }
@@ -405,17 +419,17 @@ export class DrizzleAdminReadRepository {
    * DEC-085: el corte de caja de `[from, to)`.
    *
    * La ventana -el dia de calendario en la zona del punto de venta- la calcula
-   * quien llama: aqui solo hay instantes (DEC-011). Efectivo es
-   * `provider = 'cash'` y tarjeta todo lo demas, igual que en `listOrders`.
+   * quien llama: aqui solo hay instantes (DEC-011). Pago manual es
+   * `provider = 'cash'`, partido por su canal (efectivo o Zelle, 0041), y
+   * tarjeta todo lo demas, igual que en `listOrders`.
    */
   public async dailyCut(window: {
     readonly from: Date;
     readonly to: Date;
   }): Promise<AdminDailyCut> {
     const paidInWindow = and(gte(orders.paidAt, window.from), lt(orders.paidAt, window.to));
-    const method = sql<
-      "CASH" | "CARD"
-    >`CASE WHEN ${orders.provider} = 'cash' THEN 'CASH' ELSE 'CARD' END`;
+    const method = sql<AdminPaymentMethodValue>`CASE WHEN ${orders.provider} = 'cash'
+      THEN coalesce(${orders.manualPaymentChannel}, 'CASH') ELSE 'CARD' END`;
 
     const [totals, refunds, merchandise] = await Promise.all([
       this.db

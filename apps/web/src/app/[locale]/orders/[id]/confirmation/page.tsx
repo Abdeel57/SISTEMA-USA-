@@ -7,6 +7,7 @@ import { SignInRequired } from "@/components/account-shell";
 import { ApiErrorState } from "@/components/api-error-state";
 import { OrderLineList } from "@/components/order-line-list";
 import { PageTitle } from "@/components/page-title";
+import { ZellePaymentCard } from "@/components/zelle-payment-card";
 import {
   useOrderEntryStateBody,
   useOrderEntryStateLabel,
@@ -16,7 +17,7 @@ import { formatEntryCount, formatMoney, formatZonedDate } from "@/i18n/formatter
 import type { Locale } from "@/i18n/locales";
 import { Link } from "@/i18n/navigation";
 import { routing } from "@/i18n/routing";
-import { fetchActivePromotion, fetchOrder, type OrderDetail } from "@/lib/api";
+import { fetchActivePromotion, fetchOrder, fetchSiteConfig, type OrderDetail } from "@/lib/api";
 import { loadParticipant } from "@/lib/participant-server";
 
 export const dynamic = "force-dynamic";
@@ -71,9 +72,10 @@ export default async function OrderConfirmationPage({
     );
   }
 
-  const [result, promotionResult] = await Promise.all([
+  const [result, promotionResult, configResult] = await Promise.all([
     fetchOrder(id, locale, session),
     fetchActivePromotion(locale),
+    fetchSiteConfig(locale),
   ]);
 
   if (!result.ok && result.error.status === 404) notFound();
@@ -96,6 +98,14 @@ export default async function OrderConfirmationPage({
     <ConfirmationShell title={t("title")} intro={t("intro")}>
       <div className="flex flex-col gap-s6">
         {order.payment_method === "CASH" ? <CashPaymentCard order={order} locale={locale} /> : null}
+        {order.payment_method === "ZELLE" ? (
+          <ZellePaymentCard
+            order={order}
+            zelle={configResult.ok ? (configResult.data.payment_methods?.zelle ?? null) : null}
+            locale={locale}
+            timeZone={timeZone}
+          />
+        ) : null}
         <OrderSummaryCard order={order} locale={locale} timeZone={timeZone} />
         <EntryStatusCard order={order} locale={locale} />
 
@@ -277,9 +287,7 @@ function ConfirmationShell({
       <div className="mx-auto w-full max-w-[44rem]">
         <PageTitle>{title}</PageTitle>
 
-        {intro === undefined ? null : (
-          <p className="mt-s4 text-body-md text-text-muted">{intro}</p>
-        )}
+        {intro === undefined ? null : <p className="mt-s4 text-body-md text-text-muted">{intro}</p>}
 
         <div className="mt-s8">{children}</div>
       </div>

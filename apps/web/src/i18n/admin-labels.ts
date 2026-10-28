@@ -235,6 +235,8 @@ const TRANSLATED_REASONS = [
   "INCIDENT_MITIGATION",
   /* DEC-078: cobro en efectivo en un punto de venta fisico. */
   "CASH_RECEIVED_AT_STORE",
+  /* 0041: el pago por Zelle se vio en el banco antes de confirmarlo. */
+  "ZELLE_PAYMENT_VERIFIED",
   "RETRY_ENTRY_GENERATION",
   /* DEC-085: cancelar un pedido que nunca se cobro. */
   "DUPLICATE_ORDER",
@@ -299,6 +301,8 @@ export async function reasonLabeller(locale: Locale): Promise<(key: string) => s
         return t("INCIDENT_MITIGATION");
       case "CASH_RECEIVED_AT_STORE":
         return t("CASH_RECEIVED_AT_STORE");
+      case "ZELLE_PAYMENT_VERIFIED":
+        return t("ZELLE_PAYMENT_VERIFIED");
       case "RETRY_ENTRY_GENERATION":
         return t("RETRY_ENTRY_GENERATION");
       case "DUPLICATE_ORDER":

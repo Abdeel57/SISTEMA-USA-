@@ -98,8 +98,22 @@ export const orderSummarySchema = z.object({
    * DEC-078: `CARD` (pasarela de pago) o `CASH` (efectivo en un punto de venta
    * fisico). Con `CASH` y `status = PENDING_PAYMENT`, el pedido espera a que
    * alguien de la tienda confirme el cobro en caja.
+   *
+   * 0041: `ZELLE` es el mismo pago manual con otro canal: el comprador
+   * transfiere por Zelle, sube el comprobante y la tienda confirma.
    */
-  payment_method: z.enum(["CARD", "CASH"]),
+  payment_method: z.enum(["CARD", "CASH", "ZELLE"]),
+});
+
+/**
+ * 0041: un comprobante de pago subido por el comprador, SIN los bytes. La
+ * imagen solo la sirve el panel, a quien puede confirmar el cobro.
+ */
+export const paymentReceiptSchema = z.object({
+  id: z.uuid(),
+  uploaded_at: z.string(),
+  content_type: z.enum(["image/jpeg", "image/png", "image/webp"]),
+  byte_size: z.number().int(),
 });
 
 export const postalAddressSchema = z.object({
@@ -143,6 +157,10 @@ export const orderDetailSchema = orderSummarySchema.extend({
     carrier: z.string().nullable(),
     tracking_number: z.string().nullable(),
   }),
+  /** 0041: WhatsApp del comprador en E.164, o `null` si no lo dio. */
+  contact_phone: z.string().nullable(),
+  /** 0041: comprobantes subidos, del mas reciente al mas antiguo. Vacio fuera de Zelle. */
+  payment_receipts: z.array(paymentReceiptSchema),
   /**
    * Traza del calculo que persistio el `EntryCalculationSnapshot`, o `null` si
    * el pedido no ha generado ninguna. Es lo que permite contestar "por que esta

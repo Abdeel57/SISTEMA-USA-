@@ -32,3 +32,5 @@ export * from "./cash-payments.js";
 export * from "./guest-cart-and-shipping.js";
 // Plantilla (0040): la marca del sitio, editable desde el panel. Al final.
 export * from "./brand.js";
+// Plantilla (0041): pago por Zelle, comprobantes y ajustes de pago. Al final.
+export * from "./payments.js";

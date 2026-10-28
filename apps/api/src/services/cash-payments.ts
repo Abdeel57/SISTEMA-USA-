@@ -53,6 +53,7 @@ import type {
   CashEntryOutcome,
   CashEntryOutcomeRecord,
   CashPaymentConfirmationRecord,
+  ManualPaymentChannelValue,
   OrderRecord,
 } from "@app/database";
 import { isSweepstakesError, type DomainActor } from "@app/sweepstakes";
@@ -94,15 +95,29 @@ export type CashFulfillment =
       readonly shippingAddress: Readonly<Record<string, string | null>>;
     };
 
+/**
+ * 0041: como entrega el dinero quien paga de forma manual, y a donde se le
+ * avisa. `ZELLE` exige el telefono; lo comprueba la ruta.
+ */
+export interface ManualPayment {
+  readonly channel: ManualPaymentChannelValue;
+  /** WhatsApp en E.164, o `null`. */
+  readonly contactPhone: string | null;
+}
+
 export interface CashCheckout {
   /**
-   * Crea el pedido en efectivo del carrito abierto, o devuelve el que ese
+   * Crea el pedido de pago manual del carrito abierto, o devuelve el que ese
    * carrito ya tenia (`created: false`). 409 `CART_EMPTY` si no hay carrito.
+   *
+   * Un carrito tiene UN pedido manual, sea en caja o por Zelle: si ya lo tenia,
+   * se devuelve ese aunque ahora se pida el otro canal.
    */
   placeOrder(
     participantId: string,
     owner: CartOwnerRef,
     fulfillment: CashFulfillment,
+    payment?: ManualPayment,
   ): Promise<{ readonly created: boolean; readonly order: OrderRecord }>;
 }
 
@@ -111,7 +126,7 @@ export function createCashCheckout(
   domain: DomainServices,
 ): CashCheckout {
   return {
-    async placeOrder(participantId, owner, fulfillment) {
+    async placeOrder(participantId, owner, fulfillment, payment) {
       const orders = domain.repositories.orders;
       const cart = await freezeOpenCart(dependencies.repositories, owner, fulfillment.method);
 
@@ -137,6 +152,8 @@ export function createCashCheckout(
           shippingAddress:
             fulfillment.method === "DELIVERY" ? { ...fulfillment.shippingAddress } : null,
           fulfillmentMethod: cart.fulfillmentMethod,
+          manualPaymentChannel: payment?.channel ?? "CASH",
+          contactPhone: payment?.contactPhone ?? null,
           items: cart.items,
           createdAt: now,
         });

@@ -31,6 +31,8 @@ import {
   mediaAssets,
   orders,
   participants,
+  paymentReceipts,
+  paymentSettings,
   shippingRates,
   productCategories,
   productCategoryTranslations,
@@ -70,6 +72,10 @@ import type {
   CartRepository,
   ShippingRateRecord,
   ShippingRateRepository,
+  PaymentReceiptRepository,
+  PaymentReceiptSummary,
+  PaymentSettingsRecord,
+  PaymentSettingsRepository,
 } from "./ports.js";
 
 /**
@@ -961,6 +967,123 @@ function createBrandRepository(db: Database): BrandRepository {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Pago por Zelle (0041)
+// ---------------------------------------------------------------------------
+
+function createPaymentSettingsRepository(db: Database): PaymentSettingsRepository {
+  function toRecord(row: typeof paymentSettings.$inferSelect): PaymentSettingsRecord {
+    return {
+      cashEnabled: row.cashEnabled,
+      zelleEnabled: row.zelleEnabled,
+      zelleRecipientName: row.zelleRecipientName,
+      zelleRecipient: row.zelleRecipient,
+      updatedAt: row.updatedAt,
+      updatedByAdminUserId: row.updatedByAdminUserId,
+    };
+  }
+
+  return {
+    read: async () => {
+      const [row] = await db.select().from(paymentSettings).where(eq(paymentSettings.id, 1));
+      if (row === undefined) {
+        // La siembra la migracion 0041: si falta, la base esta a medio migrar.
+        throw new Error("payment_settings_row_missing");
+      }
+      return toRecord(row);
+    },
+
+    update: async (input, updatedByAdminUserId) => {
+      const [row] = await db
+        .update(paymentSettings)
+        .set({
+          cashEnabled: input.cashEnabled,
+          zelleEnabled: input.zelleEnabled,
+          zelleRecipientName: input.zelleRecipientName,
+          zelleRecipient: input.zelleRecipient,
+          updatedByAdminUserId,
+        })
+        .where(eq(paymentSettings.id, 1))
+        .returning();
+      if (row === undefined) {
+        throw new Error("payment_settings_row_missing");
+      }
+      return toRecord(row);
+    },
+  };
+}
+
+function createPaymentReceiptRepository(db: Database): PaymentReceiptRepository {
+  const summaryColumns = {
+    id: paymentReceipts.id,
+    orderId: paymentReceipts.orderId,
+    contentType: paymentReceipts.contentType,
+    byteSize: paymentReceipts.byteSize,
+    createdAt: paymentReceipts.createdAt,
+  };
+
+  function toSummary(row: {
+    id: string;
+    orderId: string;
+    contentType: string;
+    byteSize: number;
+    createdAt: Date;
+  }): PaymentReceiptSummary {
+    return {
+      id: row.id,
+      orderId: row.orderId,
+      // La CHECK de la migracion solo admite los tres tipos.
+      contentType: row.contentType as PaymentReceiptSummary["contentType"],
+      byteSize: row.byteSize,
+      createdAt: row.createdAt,
+    };
+  }
+
+  return {
+    store: async (input) => {
+      const [row] = await db
+        .insert(paymentReceipts)
+        .values({
+          orderId: input.orderId,
+          participantId: input.participantId,
+          contentType: input.contentType,
+          byteSize: input.content.length,
+          sha256: input.sha256,
+          content: input.content,
+        })
+        .returning(summaryColumns);
+      if (row === undefined) {
+        throw new Error("payment_receipt_insert_returned_no_row");
+      }
+      return toSummary(row);
+    },
+
+    listForOrder: async (orderId) => {
+      const rows = await db
+        .select(summaryColumns)
+        .from(paymentReceipts)
+        .where(eq(paymentReceipts.orderId, orderId))
+        .orderBy(desc(paymentReceipts.createdAt), desc(paymentReceipts.id));
+      return rows.map(toSummary);
+    },
+
+    find: async (orderId, receiptId) => {
+      const [row] = await db
+        .select({
+          ...summaryColumns,
+          sha256: paymentReceipts.sha256,
+          content: paymentReceipts.content,
+        })
+        .from(paymentReceipts)
+        .where(and(eq(paymentReceipts.id, receiptId), eq(paymentReceipts.orderId, orderId)))
+        .limit(1);
+      return row === undefined
+        ? null
+        : { ...toSummary(row), sha256: row.sha256, content: row.content };
+    },
+  };
+}
+
 export function createRepositories(db: Database): Repositories {
   return {
     promotions: createPromotionRepository(db),
@@ -970,5 +1093,7 @@ export function createRepositories(db: Database): Repositories {
     entryBalances: createEntryBalanceRepository(db),
     shipping: createShippingRateRepository(db),
     brand: createBrandRepository(db),
+    paymentSettings: createPaymentSettingsRepository(db),
+    paymentReceipts: createPaymentReceiptRepository(db),
   };
 }

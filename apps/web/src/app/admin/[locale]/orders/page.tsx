@@ -20,9 +20,13 @@ export const dynamic = "force-dynamic";
  *
  * `cash-pending` es la cola de la caja: pedidos en efectivo que siguen
  * esperando el cobro. Se elige con un enlace y no con un desplegable porque son
- * tres opciones fijas que tienen que verse a la vez en un telefono.
+ * opciones fijas que tienen que verse a la vez en un telefono.
+ *
+ * 0041: `zelle-pending` es la cola de Zelle -pedidos por Zelle esperando que
+ * alguien compare el comprobante con el banco-, y va primera despues de "todos"
+ * porque es la que se revisa a diario.
  */
-const VIEWS = ["all", "cash-pending", "cash"] as const;
+const VIEWS = ["all", "zelle-pending", "cash-pending", "cash"] as const;
 type OrdersView = (typeof VIEWS)[number];
 
 function viewFrom(raw: string | undefined): OrdersView {
@@ -31,10 +35,12 @@ function viewFrom(raw: string | undefined): OrdersView {
 
 /** Lo que cada vista pide al backend. La interfaz no filtra nada por su cuenta. */
 function filtersOf(view: OrdersView): {
-  readonly payment_method?: "CASH";
+  readonly payment_method?: "CASH" | "ZELLE";
   readonly awaiting_payment?: boolean;
 } {
   switch (view) {
+    case "zelle-pending":
+      return { payment_method: "ZELLE", awaiting_payment: true };
     case "cash-pending":
       return { payment_method: "CASH", awaiting_payment: true };
     case "cash":
@@ -239,6 +245,10 @@ export default async function AdminOrdersPage({
                     row.payment_method === "CASH" ? (
                       <Badge tone="info" size="sm" wrap>
                         {t("paymentCash")}
+                      </Badge>
+                    ) : row.payment_method === "ZELLE" ? (
+                      <Badge tone="info" size="sm" wrap>
+                        {t("paymentZelle")}
                       </Badge>
                     ) : (
                       t("paymentCard")

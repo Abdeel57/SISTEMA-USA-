@@ -5,7 +5,11 @@ import { reasonLabeller } from "@/i18n/admin-labels";
 import { formatEntryCount, formatMoney, formatZonedDateTime } from "@/i18n/formatters";
 import type { Locale } from "@/i18n/locales";
 import { confirmCashPaymentAction, generateCashEntriesAction } from "@/lib/admin/actions";
-import { CASH_CONFIRM_REASONS, CASH_RETRY_REASONS } from "@/lib/admin/reason-codes";
+import {
+  CASH_CONFIRM_REASONS,
+  CASH_RETRY_REASONS,
+  ZELLE_CONFIRM_REASONS,
+} from "@/lib/admin/reason-codes";
 import type { AdminCashPayment, CashPaymentStage } from "@/lib/api";
 
 import { SensitiveConfirmForm, type SensitiveImpactRow } from "./sensitive-confirm";
@@ -36,13 +40,23 @@ export async function CashPaymentPanel({
   cash,
   locale,
   actorCanConfirm,
+  channel = "CASH",
 }: {
   readonly cash: AdminCashPayment;
   readonly locale: Locale;
   /** Cortesia de interfaz; el control es la ruta del backend. */
   readonly actorCanConfirm: boolean;
+  /**
+   * 0041: como entrega el dinero el cliente. El flujo es el mismo -pendiente,
+   * pagado, participaciones- y lo que cambia es lo que se le dice a quien
+   * confirma: con Zelle no recibe billetes, comprueba una transferencia en su
+   * banco.
+   */
+  readonly channel?: "CASH" | "ZELLE";
 }) {
   const t = await getTranslations({ locale, namespace: "admin.cashPayment" });
+  const tz = await getTranslations({ locale, namespace: "admin.zellePayment" });
+  const zelle = channel === "ZELLE";
   const reasonLabel = await reasonLabeller(locale);
   const total = formatMoney(cash.amount, locale) ?? "";
 
@@ -53,10 +67,12 @@ export async function CashPaymentPanel({
     <Card elevation="raised" padding="lg" className="border-brand/40">
       <div className="flex flex-wrap items-center justify-between gap-s3">
         <CardTitle as="h2" size="sm">
-          {t("title")}
+          {zelle ? tz("title") : t("title")}
         </CardTitle>
         <Badge tone={cash.stage === "ENTRIES_GENERATED" ? "success" : "info"} size="sm" wrap>
-          {t(`stages.${cash.stage}`)}
+          {zelle && cash.stage === "PENDING_CASH_PAYMENT"
+            ? tz("pendingStage")
+            : t(`stages.${cash.stage}`)}
         </Badge>
       </div>
 
@@ -83,7 +99,9 @@ export async function CashPaymentPanel({
                 <span aria-hidden="true" className="tabular-nums">
                   {done ? "✓" : String(index + 1)}
                 </span>
-                {t(`stages.${stage}`)}
+                {zelle && stage === "PENDING_CASH_PAYMENT"
+                  ? tz("pendingStage")
+                  : t(`stages.${stage}`)}
               </li>
             );
           })}
@@ -149,25 +167,35 @@ export async function CashPaymentPanel({
         <div className="mt-s6 border-t border-border pt-s5">
           {actorCanConfirm ? (
             <>
-              <h3 className="text-label font-medium text-text">{t("confirmHeading")}</h3>
-              <p className="mt-s1 text-body-sm text-text-muted">{t("confirmIntro")}</p>
+              <h3 className="text-label font-medium text-text">
+                {zelle ? tz("confirmHeading") : t("confirmHeading")}
+              </h3>
+              <p className="mt-s1 text-body-sm text-text-muted">
+                {zelle ? tz("confirmIntro") : t("confirmIntro")}
+              </p>
               <div className="mt-s4">
                 <SensitiveConfirmForm
                   locale={locale}
                   action={confirmCashPaymentAction}
                   hiddenFields={{ order_id: cash.order_id }}
                   impact={confirmImpact()}
-                  reasons={CASH_CONFIRM_REASONS.map((key) => ({
+                  reasons={(zelle ? ZELLE_CONFIRM_REASONS : CASH_CONFIRM_REASONS).map((key) => ({
                     value: key,
                     label: reasonLabel(key),
                   }))}
-                  submitLabel={t("confirmSubmit")}
-                  confirmLabel={t("confirmCheckbox", { total, number: cash.order_number })}
+                  submitLabel={zelle ? tz("confirmSubmit") : t("confirmSubmit")}
+                  confirmLabel={
+                    zelle
+                      ? tz("confirmCheckbox", { total, number: cash.order_number })
+                      : t("confirmCheckbox", { total, number: cash.order_number })
+                  }
                 />
               </div>
             </>
           ) : (
-            <p className="text-body-sm text-text-muted">{t("noCapability")}</p>
+            <p className="text-body-sm text-text-muted">
+              {zelle ? tz("noCapability") : t("noCapability")}
+            </p>
           )}
         </div>
       ) : null}
@@ -201,7 +229,9 @@ export async function CashPaymentPanel({
               </div>
             </>
           ) : (
-            <p className="text-body-sm text-text-muted">{t("noCapability")}</p>
+            <p className="text-body-sm text-text-muted">
+              {zelle ? tz("noCapability") : t("noCapability")}
+            </p>
           )}
         </div>
       ) : null}
@@ -218,11 +248,16 @@ export async function CashPaymentPanel({
     return [
       {
         label: t("impactPayment"),
-        before: t("stages.PENDING_CASH_PAYMENT"),
+        before: zelle ? tz("pendingStage") : t("stages.PENDING_CASH_PAYMENT"),
         delta: t("impactConfirm"),
         after: t("stages.PAID"),
       },
-      { label: t("impactAmount"), before: total, delta: t("impactCash"), after: total },
+      {
+        label: t("impactAmount"),
+        before: total,
+        delta: zelle ? tz("impactZelle") : t("impactCash"),
+        after: total,
+      },
       {
         label: t("impactEntries"),
         before: t("entries.AWAITING_PAYMENT"),
@@ -247,7 +282,9 @@ export async function CashPaymentPanel({
         <p>
           {entries.status === "NOT_APPLICABLE" && entries.not_applicable_reason !== null
             ? t(`notApplicable.${entries.not_applicable_reason}`)
-            : t(`entriesBody.${entries.status}`)}
+            : zelle && entries.status === "AWAITING_PAYMENT"
+              ? tz("awaitingBody")
+              : t(`entriesBody.${entries.status}`)}
         </p>
         {entries.entries_granted === null ? null : (
           <p className="mt-s2 font-display text-heading-sm font-bold tabular-nums">

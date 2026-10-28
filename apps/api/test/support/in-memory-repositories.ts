@@ -27,6 +27,10 @@ import type {
   CatalogRepository,
   ConfigRepository,
   EntryBalanceRepository,
+  PaymentReceiptContent,
+  PaymentReceiptRepository,
+  PaymentSettingsRecord,
+  PaymentSettingsRepository,
   ProductRecord,
   PromotionRecord,
   PromotionRepository,
@@ -230,6 +234,8 @@ export interface FakeOptions {
   readonly brand?: Partial<BrandProfileRecord>;
   /** Ids de `media_assets` que el doble considera existentes (para el logotipo). */
   readonly knownMediaIds?: readonly string[];
+  /** 0041: ajustes de pago iniciales. Por defecto, los que siembra la migracion. */
+  readonly paymentSettings?: Partial<PaymentSettingsRecord>;
   /**
    * DEC-079: de identidad a participante, para `adoptSessionCart`. El doble no
    * guarda identidades; una identidad que no este aqui no tiene perfil.
@@ -584,6 +590,56 @@ export function createFakeRepositories(options: FakeOptions = {}): FakeRepositor
     mediaExists: (mediaId) => Promise.resolve((options.knownMediaIds ?? []).includes(mediaId)),
   };
 
+  // 0041: los valores que siembra la migracion, mas lo que pida el test.
+  const paymentState: { record: PaymentSettingsRecord } = {
+    record: {
+      cashEnabled: true,
+      zelleEnabled: false,
+      zelleRecipientName: null,
+      zelleRecipient: null,
+      updatedAt: new Date("2026-01-01T00:00:00.000Z"),
+      updatedByAdminUserId: null,
+      ...options.paymentSettings,
+    },
+  };
+  const paymentSettings: PaymentSettingsRepository = {
+    read: () => Promise.resolve(paymentState.record),
+    update: (input, updatedByAdminUserId) => {
+      paymentState.record = { ...input, updatedAt: tick(), updatedByAdminUserId };
+      return Promise.resolve(paymentState.record);
+    },
+  };
+
+  const storedReceipts: PaymentReceiptContent[] = [];
+  const paymentReceipts: PaymentReceiptRepository = {
+    store: (input) => {
+      const receipt: PaymentReceiptContent = {
+        id: `00000000-0000-4000-8000-${String(storedReceipts.length + 1).padStart(12, "0")}`,
+        orderId: input.orderId,
+        contentType: input.contentType,
+        byteSize: input.content.length,
+        createdAt: tick(),
+        sha256: input.sha256,
+        content: input.content,
+      };
+      storedReceipts.push(receipt);
+      const { sha256: _sha, content: _content, ...summary } = receipt;
+      return Promise.resolve(summary);
+    },
+    listForOrder: (orderId) =>
+      Promise.resolve(
+        storedReceipts
+          .filter((receipt) => receipt.orderId === orderId)
+          .reverse()
+          .map(({ sha256: _sha, content: _content, ...summary }) => summary),
+      ),
+    find: (orderId, receiptId) =>
+      Promise.resolve(
+        storedReceipts.find((receipt) => receipt.id === receiptId && receipt.orderId === orderId) ??
+          null,
+      ),
+  };
+
   return {
     promotions,
     catalog,
@@ -592,6 +648,8 @@ export function createFakeRepositories(options: FakeOptions = {}): FakeRepositor
     entryBalances,
     shipping,
     brand,
+    paymentSettings,
+    paymentReceipts,
     _carts: storedCarts,
   };
 }

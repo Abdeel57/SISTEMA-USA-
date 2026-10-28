@@ -561,6 +561,30 @@ export interface AdminShippingRateInput {
 }
 
 /**
+ * [CONTRATO] Formas de pago manual y cuenta Zelle (0041).
+ *
+ * `card_enabled` es informativo: depende de las llaves de Stripe del
+ * despliegue, no de este panel.
+ */
+export interface AdminPaymentSettings {
+  readonly cash_enabled: boolean;
+  readonly zelle_enabled: boolean;
+  readonly zelle_recipient_name: string | null;
+  readonly zelle_recipient: string | null;
+  readonly card_enabled: boolean;
+  readonly updated_at: string;
+  readonly updated_by_admin_user_id: string | null;
+}
+
+/** Activar Zelle exige nombre y cuenta (la API responde 422 si faltan). */
+export interface AdminPaymentSettingsInput {
+  readonly cash_enabled: boolean;
+  readonly zelle_enabled: boolean;
+  readonly zelle_recipient_name: string | null;
+  readonly zelle_recipient: string | null;
+}
+
+/**
  * [CONTRATO] Marca del sitio en el panel (§17, migracion 0040).
  *
  * Lo mismo que `GET /config` publica en `brand`, mas el id del logotipo (el

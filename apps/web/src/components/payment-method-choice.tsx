@@ -7,14 +7,15 @@ import { useId } from "react";
 import type { PaymentMethod } from "@/lib/api";
 
 /**
- * Las dos formas de pagar del checkout (DEC-078): tarjeta o efectivo en un
- * punto de venta fisico.
+ * Las formas de pagar del checkout: tarjeta, efectivo en un punto de venta
+ * fisico (DEC-078) o Zelle (0041). Cuales salen lo decide la tienda: la
+ * tarjeta, si hay llaves de Stripe; efectivo y Zelle, desde el panel.
  *
- * DOS TARJETAS GRANDES Y NO UN DESPLEGABLE
- * ----------------------------------------
- * Las dos opciones tienen que verse a la vez y entenderse sin abrir nada: lo
- * que cambia entre una y otra no es un detalle, es CUANDO se paga y CUANDO
- * llegan las participaciones. Cada tarjeta lo dice en una frase.
+ * TARJETAS GRANDES Y NO UN DESPLEGABLE
+ * ------------------------------------
+ * Las opciones tienen que verse a la vez y entenderse sin abrir nada: lo que
+ * cambia entre una y otra no es un detalle, es CUANDO se paga y CUANDO llegan
+ * las participaciones. Cada tarjeta lo dice en una frase.
  *
  * RADIOS NATIVOS DENTRO DE UN `fieldset`
  * --------------------------------------
@@ -23,22 +24,44 @@ import type { PaymentMethod } from "@/lib/api";
  * etiqueta, asi que se pulsa en cualquier punto, que en un telefono importa.
  *
  * AQUI NO SE DECIDE NADA. El valor viaja en el formulario y el servidor lo
- * compara contra la lista; el efectivo tiene su propia ruta en el backend.
+ * compara contra la lista; el pago manual tiene su propia ruta en el backend.
  */
+
+/** `switch` exhaustivo: una forma de pago nueva deja de compilar aqui. */
+function iconOf(method: PaymentMethod): string {
+  switch (method) {
+    case "CARD":
+      return "💳";
+    case "CASH":
+      return "💵";
+    case "ZELLE":
+      return "🏦";
+  }
+}
+
+function copyKeyOf(method: PaymentMethod): "card" | "cash" | "zelle" {
+  switch (method) {
+    case "CARD":
+      return "card";
+    case "CASH":
+      return "cash";
+    case "ZELLE":
+      return "zelle";
+  }
+}
+
 export function PaymentMethodChoice({
+  methods,
   value,
   onChange,
 }: {
+  /** Las que ofrece la tienda, en el orden en que se pintan. */
+  readonly methods: readonly PaymentMethod[];
   readonly value: PaymentMethod;
   readonly onChange: (method: PaymentMethod) => void;
 }) {
   const t = useTranslations("checkout.payment");
   const legendId = useId();
-
-  const options: readonly { readonly method: PaymentMethod; readonly icon: string }[] = [
-    { method: "CARD", icon: "💳" },
-    { method: "CASH", icon: "💵" },
-  ];
 
   return (
     <fieldset aria-labelledby={legendId} className="flex flex-col gap-s3 border-0 p-0">
@@ -46,9 +69,9 @@ export function PaymentMethodChoice({
         {t("heading")}
       </legend>
 
-      <div className="grid gap-s3 sm:grid-cols-2">
-        {options.map(({ method, icon }) => {
-          const key = method === "CARD" ? "card" : "cash";
+      <div className={cn("grid gap-s3", methods.length > 1 && "sm:grid-cols-2")}>
+        {methods.map((method) => {
+          const key = copyKeyOf(method);
           return (
             <label
               key={method}
@@ -70,7 +93,7 @@ export function PaymentMethodChoice({
                   className={cn("h-5 w-5 shrink-0 accent-brand", FOCUS_VISIBLE_CLASSES)}
                 />
                 <span aria-hidden="true" className="text-heading-md leading-none">
-                  {icon}
+                  {iconOf(method)}
                 </span>
                 <span className="font-display text-heading-sm font-bold text-text">
                   {t(`${key}.title`)}

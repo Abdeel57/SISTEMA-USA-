@@ -8,6 +8,7 @@ import { ApiErrorState } from "@/components/api-error-state";
 import { EntryCalculationTrace } from "@/components/entry-calculation-trace";
 import { OrderAddress } from "@/components/order-address";
 import { OrderLineList } from "@/components/order-line-list";
+import { ZellePaymentCard } from "@/components/zelle-payment-card";
 import {
   useOrderEntryStateBody,
   useOrderEntryStateLabel,
@@ -17,7 +18,7 @@ import { formatEntryCount, formatMoney, formatZonedDate } from "@/i18n/formatter
 import type { Locale } from "@/i18n/locales";
 import { Link } from "@/i18n/navigation";
 import { routing } from "@/i18n/routing";
-import { fetchActivePromotion, fetchOrder, type OrderDetail } from "@/lib/api";
+import { fetchActivePromotion, fetchOrder, fetchSiteConfig, type OrderDetail } from "@/lib/api";
 import { loadParticipant } from "@/lib/participant-server";
 
 export const dynamic = "force-dynamic";
@@ -67,9 +68,10 @@ export default async function AccountOrderPage({
     );
   }
 
-  const [result, promotionResult] = await Promise.all([
+  const [result, promotionResult, configResult] = await Promise.all([
     fetchOrder(id, locale, session),
     fetchActivePromotion(locale),
+    fetchSiteConfig(locale),
   ]);
 
   // Un pedido que no existe -o que no es de quien pregunta- es un 404 y no un
@@ -95,6 +97,16 @@ export default async function AccountOrderPage({
     <AccountShell title={`${t("numberLabel")} ${order.order_number}`} current="/account/orders">
       <div className="flex flex-col gap-s8">
         <OrderHeader order={order} locale={locale} timeZone={timeZone} />
+
+        {/* 0041: mientras el pago por Zelle no se confirme, esto es lo que hay que hacer. */}
+        {order.payment_method === "ZELLE" ? (
+          <ZellePaymentCard
+            order={order}
+            zelle={configResult.ok ? (configResult.data.payment_methods?.zelle ?? null) : null}
+            locale={locale}
+            timeZone={timeZone}
+          />
+        ) : null}
 
         <section aria-labelledby="order-entries">
           <h2 id="order-entries" className="app-display text-heading-lg text-text">
@@ -163,6 +175,7 @@ function OrderHeader({
       <div className="flex flex-wrap items-center gap-s3">
         <Badge tone="neutral">{statusLabel(order.status)}</Badge>
         {order.payment_method === "CASH" ? <Badge tone="info">{t("paymentCash")}</Badge> : null}
+        {order.payment_method === "ZELLE" ? <Badge tone="info">{t("paymentZelle")}</Badge> : null}
         {placedAt === null ? null : (
           <span className="text-caption text-text-subtle">{t("placedOn", { date: placedAt })}</span>
         )}

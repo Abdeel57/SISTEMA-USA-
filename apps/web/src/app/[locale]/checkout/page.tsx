@@ -22,6 +22,8 @@ import {
   fetchSiteConfig,
   pickLocalized,
   type CartWithQuote,
+  type PaymentMethod,
+  type SiteConfigResponse,
 } from "@/lib/api";
 import { isFeatureEnabled, toFeatureFlags } from "@/lib/flags";
 import { loadParticipant } from "@/lib/participant-server";
@@ -66,8 +68,12 @@ export default async function CheckoutPage({ params }: { params: Promise<{ local
     // va a pagar: pedir una cuenta sin decir por cuanto es lo que hace que la
     // gente se vaya. Al volver del alta o del login, el carrito ya es de la
     // cuenta (lo pasa la API) y esta misma pagina sigue con el pago.
-    const guestCart = await fetchCart(locale, await readSession());
+    const [guestCart, guestConfig] = await Promise.all([
+      fetchCart(locale, await readSession()),
+      fetchSiteConfig(locale),
+    ]);
     const hasLines = guestCart.ok && guestCart.data.lines.length > 0;
+    const guestPayments = paymentOptionsOf(guestConfig.ok ? guestConfig.data : null);
 
     return (
       <CheckoutShell title={t("title")}>
@@ -75,7 +81,11 @@ export default async function CheckoutPage({ params }: { params: Promise<{ local
           <div className="grid gap-s6 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
             <AccountRequired />
             <aside className="flex flex-col gap-s4">
-              <OrderSummary cart={guestCart.data} locale={locale} />
+              <OrderSummary
+                cart={guestCart.data}
+                locale={locale}
+                offersPickup={guestPayments.methods.includes("CASH")}
+              />
             </aside>
           </div>
         ) : (
@@ -140,6 +150,7 @@ export default async function CheckoutPage({ params }: { params: Promise<{ local
   const needsDeclaration =
     checksEligibility && eligibilityResult.ok && !eligibilityResult.data.declared;
   const requiredConsents = configResult.ok ? (configResult.data.required_consents ?? []) : [];
+  const payments = paymentOptionsOf(configResult.ok ? configResult.data : null);
 
   const timeZone =
     promotionResult.ok && promotionResult.data !== null
@@ -164,12 +175,28 @@ export default async function CheckoutPage({ params }: { params: Promise<{ local
           // en un punto de venta- y sigue con la direccion; los dos titulos
           // viven dentro de el, en el orden en que se rellenan.
           <section aria-label={t("title")}>
-            <CheckoutForm locale={locale} cashDelivery={cashDeliveryOf(cartResult.data, locale)} />
+            {payments.methods.length === 0 ? (
+              <EmptyState
+                title={t("noPaymentMethodsTitle")}
+                description={t("noPaymentMethodsBody")}
+              />
+            ) : (
+              <CheckoutForm
+                locale={locale}
+                cashDelivery={cashDeliveryOf(cartResult.data, locale)}
+                methods={payments.methods}
+                zelle={payments.zelle}
+              />
+            )}
           </section>
         )}
 
         <aside className="flex flex-col gap-s4">
-          <OrderSummary cart={cartResult.data} locale={locale} />
+          <OrderSummary
+            cart={cartResult.data}
+            locale={locale}
+            offersPickup={payments.methods.includes("CASH")}
+          />
 
           <EntryQuotePanel quote={quote} locale={locale} timeZone={timeZone} />
 
@@ -189,6 +216,27 @@ export default async function CheckoutPage({ params }: { params: Promise<{ local
  * (y no hay impuestos, pendiente legal). Enviarlo cuesta el TOTAL del carrito,
  * que ya lleva el envio. Ninguna de las dos cifras se suma aqui.
  */
+/**
+ * 0041: las formas de pago que ofrece la tienda, en el orden en que salen.
+ *
+ * Sin `payment_methods` -una API anterior, o `/config` que no respondio- se
+ * ofrece lo de siempre, tarjeta y efectivo: es lo que hacia el checkout antes y
+ * la API sigue rechazando lo que no este activado.
+ */
+function paymentOptionsOf(config: SiteConfigResponse | null): {
+  readonly methods: readonly PaymentMethod[];
+  readonly zelle: NonNullable<SiteConfigResponse["payment_methods"]>["zelle"];
+} {
+  const published = config?.payment_methods;
+  if (published === undefined) return { methods: ["CARD", "CASH"], zelle: null };
+
+  const methods: PaymentMethod[] = [];
+  if (published.zelle !== null) methods.push("ZELLE");
+  if (published.card) methods.push("CARD");
+  if (published.cash) methods.push("CASH");
+  return { methods, zelle: published.zelle };
+}
+
 function cashDeliveryOf(cart: CartWithQuote, locale: Locale): CashDeliveryOptions | null {
   if (cart.shipping.status === "NOT_REQUIRED" || cart.subtotal === null) return null;
 
@@ -217,9 +265,12 @@ function cashDeliveryOf(cart: CartWithQuote, locale: Locale): CashDeliveryOption
 async function OrderSummary({
   cart,
   locale,
+  offersPickup,
 }: {
   readonly cart: CartWithQuote;
   readonly locale: Locale;
+  /** 0041: solo con efectivo hay punto de venta donde recoger sin envio. */
+  readonly offersPickup: boolean;
 }) {
   const t = await getTranslations("checkout");
 
@@ -254,7 +305,7 @@ async function OrderSummary({
       {/* DEC-079: el total de arriba es el de envio a domicilio. Quien paga en
           efectivo y lo recoge no paga el envio, y tiene que saberlo antes de
           elegir. */}
-      {cart.shipping.status === "NOT_REQUIRED" ? null : (
+      {cart.shipping.status === "NOT_REQUIRED" || !offersPickup ? null : (
         <p className="mt-s3 text-caption text-text-subtle">{t("pickupNote")}</p>
       )}
 

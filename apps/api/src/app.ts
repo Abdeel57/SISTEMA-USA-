@@ -56,6 +56,7 @@ import { buildAdjustmentRoutes } from "./routes/adjustments.js";
 import { buildAdminAuditRoutes } from "./routes/admin-audit.js";
 // Marca del sitio editable desde el panel (migracion 0040).
 import { buildAdminBrandRoutes } from "./routes/admin-brand.js";
+import { buildAdminPaymentRoutes } from "./routes/admin-payments.js";
 import { buildAdminCatalogRoutes } from "./routes/admin-catalog.js";
 import { buildAdminRulesRoutes } from "./routes/admin-rules.js";
 import { buildAdminDashboardRoutes } from "./routes/admin-dashboard.js";
@@ -143,6 +144,7 @@ export function collectRouteDefinitions(dependencies: AppDependencies): RouteDef
     ...buildMediaRoutes(dependencies),
     ...buildAdminShippingRoutes(dependencies),
     ...buildAdminBrandRoutes(dependencies),
+    ...buildAdminPaymentRoutes(dependencies),
   ];
 
   const metaRoutes = buildMetaRoutes({
@@ -183,6 +185,7 @@ export function collectContractRouteDefinitions(dependencies: AppDependencies): 
     ...buildMediaRoutes(dependencies),
     ...buildAdminShippingRoutes(dependencies),
     ...buildAdminBrandRoutes(dependencies),
+    ...buildAdminPaymentRoutes(dependencies),
   ];
   routes.push(
     ...buildMetaRoutes({ serverUrl: dependencies.config.http.publicUrl, allRoutes: () => routes }),

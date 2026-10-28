@@ -1244,7 +1244,8 @@
                           "payment_method": {
                             "enum": [
                               "CARD",
-                              "CASH"
+                              "CASH",
+                              "ZELLE"
                             ],
                             "type": "string"
                           },
@@ -1410,6 +1411,16 @@
                 "schema": {
                   "additionalProperties": false,
                   "properties": {
+                    "contact_phone": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
                     "entries_granted": {
                       "anyOf": [
                         {
@@ -1656,9 +1667,46 @@
                     "payment_method": {
                       "enum": [
                         "CARD",
-                        "CASH"
+                        "CASH",
+                        "ZELLE"
                       ],
                       "type": "string"
+                    },
+                    "payment_receipts": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "byte_size": {
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "content_type": {
+                            "enum": [
+                              "image/jpeg",
+                              "image/png",
+                              "image/webp"
+                            ],
+                            "type": "string"
+                          },
+                          "id": {
+                            "format": "uuid",
+                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                            "type": "string"
+                          },
+                          "uploaded_at": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "uploaded_at",
+                          "content_type",
+                          "byte_size"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
                     },
                     "placed_at": {
                       "type": "string"
@@ -1842,6 +1890,8 @@
                     "shipping_address",
                     "fulfillment_method",
                     "fulfillment",
+                    "contact_phone",
+                    "payment_receipts",
                     "entry_calculation"
                   ],
                   "type": "object"
@@ -1941,6 +1991,333 @@
         "x-app-authorization": {
           "kind": "PERMISSION",
           "permission": "order.self.read",
+          "requires_step_up": false
+        }
+      }
+    },
+    "/api/v1/account/orders/{order_id}/payment-receipts": {
+      "post": {
+        "description": "0041. Solo el comprador del pedido, y solo mientras el pedido por Zelle siga pendiente de pago. Acepta JPEG, PNG o WebP de hasta 5 MiB; el tipo se decide por la firma de los bytes. El comprobante NO es publico: lo ve el comprador (sin bytes, en el detalle de su pedido) y el personal con `order.read`, que lo compara con su banco antes de confirmar el cobro. Se puede subir otro si el primero salio mal (hasta 10); se conservan todos. 409 `ORDER_NOT_ZELLE_PAYMENT` si el pedido no es por Zelle, `PAYMENT_RECEIPT_NOT_ACCEPTED` si ya no esta pendiente y `PAYMENT_RECEIPT_LIMIT` si ya tiene diez.",
+        "operationId": "uploadPaymentReceipt",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "order_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "data_base64": {
+                    "maxLength": 6990508,
+                    "minLength": 4,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "data_base64"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "byte_size": {
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    },
+                    "content_type": {
+                      "enum": [
+                        "image/jpeg",
+                        "image/png",
+                        "image/webp"
+                      ],
+                      "type": "string"
+                    },
+                    "id": {
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                      "type": "string"
+                    },
+                    "uploaded_at": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "uploaded_at",
+                    "content_type",
+                    "byte_size"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Respuesta 201."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "error": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "additionalProperties": {},
+                          "propertyNames": {
+                            "type": "string"
+                          },
+                          "type": "object"
+                        },
+                        "request_id": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "request_id"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Respuesta 401."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "error": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "additionalProperties": {},
+                          "propertyNames": {
+                            "type": "string"
+                          },
+                          "type": "object"
+                        },
+                        "request_id": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "request_id"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Respuesta 404."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "error": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "additionalProperties": {},
+                          "propertyNames": {
+                            "type": "string"
+                          },
+                          "type": "object"
+                        },
+                        "request_id": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "request_id"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Respuesta 409."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "error": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "additionalProperties": {},
+                          "propertyNames": {
+                            "type": "string"
+                          },
+                          "type": "object"
+                        },
+                        "request_id": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "request_id"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Respuesta 413."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "error": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "additionalProperties": {},
+                          "propertyNames": {
+                            "type": "string"
+                          },
+                          "type": "object"
+                        },
+                        "request_id": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "request_id"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Respuesta 415."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "error": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "additionalProperties": {},
+                          "propertyNames": {
+                            "type": "string"
+                          },
+                          "type": "object"
+                        },
+                        "request_id": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "request_id"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Respuesta 422."
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Subir la captura del comprobante de un pedido pagado por Zelle.",
+        "tags": [
+          "commerce"
+        ],
+        "x-app-authorization": {
+          "kind": "PARTICIPANT_SELF",
           "requires_step_up": false
         }
       }
@@ -9468,7 +9845,8 @@
             "schema": {
               "enum": [
                 "CARD",
-                "CASH"
+                "CASH",
+                "ZELLE"
               ],
               "type": "string"
             }
@@ -9534,7 +9912,8 @@
                           "payment_method": {
                             "enum": [
                               "CARD",
-                              "CASH"
+                              "CASH",
+                              "ZELLE"
                             ],
                             "type": "string"
                           },
@@ -9765,6 +10144,16 @@
                 "schema": {
                   "additionalProperties": false,
                   "properties": {
+                    "contact_phone": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
                     "entries_granted": {
                       "anyOf": [
                         {
@@ -10011,9 +10400,46 @@
                     "payment_method": {
                       "enum": [
                         "CARD",
-                        "CASH"
+                        "CASH",
+                        "ZELLE"
                       ],
                       "type": "string"
+                    },
+                    "payment_receipts": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "byte_size": {
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "content_type": {
+                            "enum": [
+                              "image/jpeg",
+                              "image/png",
+                              "image/webp"
+                            ],
+                            "type": "string"
+                          },
+                          "id": {
+                            "format": "uuid",
+                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                            "type": "string"
+                          },
+                          "uploaded_at": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "uploaded_at",
+                          "content_type",
+                          "byte_size"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
                     },
                     "placed_at": {
                       "type": "string"
@@ -10197,6 +10623,8 @@
                     "shipping_address",
                     "fulfillment_method",
                     "fulfillment",
+                    "contact_phone",
+                    "payment_receipts",
                     "entry_calculation"
                   ],
                   "type": "object"
@@ -10389,6 +10817,16 @@
                 "schema": {
                   "additionalProperties": false,
                   "properties": {
+                    "contact_phone": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
                     "entries_granted": {
                       "anyOf": [
                         {
@@ -10635,9 +11073,46 @@
                     "payment_method": {
                       "enum": [
                         "CARD",
-                        "CASH"
+                        "CASH",
+                        "ZELLE"
                       ],
                       "type": "string"
+                    },
+                    "payment_receipts": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "byte_size": {
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "content_type": {
+                            "enum": [
+                              "image/jpeg",
+                              "image/png",
+                              "image/webp"
+                            ],
+                            "type": "string"
+                          },
+                          "id": {
+                            "format": "uuid",
+                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                            "type": "string"
+                          },
+                          "uploaded_at": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "uploaded_at",
+                          "content_type",
+                          "byte_size"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
                     },
                     "placed_at": {
                       "type": "string"
@@ -10821,6 +11296,8 @@
                     "shipping_address",
                     "fulfillment_method",
                     "fulfillment",
+                    "contact_phone",
+                    "payment_receipts",
                     "entry_calculation"
                   ],
                   "type": "object"
@@ -12439,6 +12916,16 @@
                 "schema": {
                   "additionalProperties": false,
                   "properties": {
+                    "contact_phone": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
                     "entries_granted": {
                       "anyOf": [
                         {
@@ -12685,9 +13172,46 @@
                     "payment_method": {
                       "enum": [
                         "CARD",
-                        "CASH"
+                        "CASH",
+                        "ZELLE"
                       ],
                       "type": "string"
+                    },
+                    "payment_receipts": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "byte_size": {
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer"
+                          },
+                          "content_type": {
+                            "enum": [
+                              "image/jpeg",
+                              "image/png",
+                              "image/webp"
+                            ],
+                            "type": "string"
+                          },
+                          "id": {
+                            "format": "uuid",
+                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                            "type": "string"
+                          },
+                          "uploaded_at": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "uploaded_at",
+                          "content_type",
+                          "byte_size"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
                     },
                     "placed_at": {
                       "type": "string"
@@ -12871,6 +13395,8 @@
                     "shipping_address",
                     "fulfillment_method",
                     "fulfillment",
+                    "contact_phone",
+                    "payment_receipts",
                     "entry_calculation"
                   ],
                   "type": "object"
@@ -13087,6 +13613,190 @@
         "x-app-authorization": {
           "kind": "PERMISSION",
           "permission": "order.fulfillment.update",
+          "requires_step_up": false
+        }
+      }
+    },
+    "/api/v1/admin/orders/{order_id}/payment-receipts/{receipt_id}": {
+      "get": {
+        "description": "0041. Los bytes de la captura que subio el comprador, para compararla con el banco antes de confirmar el cobro. Exige `order.read`, la misma capacidad que la ficha del pedido donde se muestra: quien atiende un pedido ve su comprobante. No es publica -la captura puede llevar datos bancarios- y no se cachea fuera del navegador: `private, no-store`. 404 si el comprobante no existe o no es de ese pedido.",
+        "operationId": "getAdminPaymentReceipt",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "order_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "receipt_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "image/jpeg": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "image/png": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "image/webp": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Respuesta 200."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "error": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "additionalProperties": {},
+                          "propertyNames": {
+                            "type": "string"
+                          },
+                          "type": "object"
+                        },
+                        "request_id": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "request_id"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Respuesta 401."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "error": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "additionalProperties": {},
+                          "propertyNames": {
+                            "type": "string"
+                          },
+                          "type": "object"
+                        },
+                        "request_id": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "request_id"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Respuesta 403."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "error": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "additionalProperties": {},
+                          "propertyNames": {
+                            "type": "string"
+                          },
+                          "type": "object"
+                        },
+                        "request_id": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "request_id"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Respuesta 404."
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "La imagen de un comprobante de pago (Zelle) de un pedido.",
+        "tags": [
+          "admin"
+        ],
+        "x-app-authorization": {
+          "kind": "PERMISSION",
+          "permission": "order.read",
           "requires_step_up": false
         }
       }
@@ -14677,6 +15387,418 @@
           "kind": "PERMISSION",
           "permission": "pii.view.full",
           "requires_step_up": true
+        }
+      }
+    },
+    "/api/v1/admin/payment-settings": {
+      "get": {
+        "operationId": "getAdminPaymentSettings",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "card_enabled": {
+                      "type": "boolean"
+                    },
+                    "cash_enabled": {
+                      "type": "boolean"
+                    },
+                    "updated_at": {
+                      "type": "string"
+                    },
+                    "updated_by_admin_user_id": {
+                      "anyOf": [
+                        {
+                          "format": "uuid",
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "zelle_enabled": {
+                      "type": "boolean"
+                    },
+                    "zelle_recipient": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "zelle_recipient_name": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "cash_enabled",
+                    "zelle_enabled",
+                    "zelle_recipient_name",
+                    "zelle_recipient",
+                    "card_enabled",
+                    "updated_at",
+                    "updated_by_admin_user_id"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Respuesta 200."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "error": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "additionalProperties": {},
+                          "propertyNames": {
+                            "type": "string"
+                          },
+                          "type": "object"
+                        },
+                        "request_id": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "request_id"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Respuesta 401."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "error": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "additionalProperties": {},
+                          "propertyNames": {
+                            "type": "string"
+                          },
+                          "type": "object"
+                        },
+                        "request_id": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "request_id"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Respuesta 403."
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Formas de pago manual de la tienda y cuenta Zelle.",
+        "tags": [
+          "admin"
+        ],
+        "x-app-authorization": {
+          "kind": "PERMISSION",
+          "permission": "product.read",
+          "requires_step_up": false
+        }
+      },
+      "put": {
+        "description": "0041. Reemplaza la fila entera. Activar Zelle exige el nombre del titular y el correo o telefono registrado en Zelle (422 si faltan): es lo que el comprador ve para transferir. Los pedidos ya creados no cambian: el canal se fija al crear el pedido.",
+        "operationId": "setAdminPaymentSettings",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "cash_enabled": {
+                    "type": "boolean"
+                  },
+                  "zelle_enabled": {
+                    "type": "boolean"
+                  },
+                  "zelle_recipient": {
+                    "anyOf": [
+                      {
+                        "maxLength": 120,
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "zelle_recipient_name": {
+                    "anyOf": [
+                      {
+                        "maxLength": 80,
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "cash_enabled",
+                  "zelle_enabled"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "card_enabled": {
+                      "type": "boolean"
+                    },
+                    "cash_enabled": {
+                      "type": "boolean"
+                    },
+                    "updated_at": {
+                      "type": "string"
+                    },
+                    "updated_by_admin_user_id": {
+                      "anyOf": [
+                        {
+                          "format": "uuid",
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "zelle_enabled": {
+                      "type": "boolean"
+                    },
+                    "zelle_recipient": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "zelle_recipient_name": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "cash_enabled",
+                    "zelle_enabled",
+                    "zelle_recipient_name",
+                    "zelle_recipient",
+                    "card_enabled",
+                    "updated_at",
+                    "updated_by_admin_user_id"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Respuesta 200."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "error": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "additionalProperties": {},
+                          "propertyNames": {
+                            "type": "string"
+                          },
+                          "type": "object"
+                        },
+                        "request_id": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "request_id"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Respuesta 401."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "error": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "additionalProperties": {},
+                          "propertyNames": {
+                            "type": "string"
+                          },
+                          "type": "object"
+                        },
+                        "request_id": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "request_id"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Respuesta 403."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "error": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "additionalProperties": {},
+                          "propertyNames": {
+                            "type": "string"
+                          },
+                          "type": "object"
+                        },
+                        "request_id": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "request_id"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Respuesta 422."
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "summary": "Activar o desactivar efectivo y Zelle, y poner la cuenta Zelle.",
+        "tags": [
+          "admin"
+        ],
+        "x-app-authorization": {
+          "kind": "PERMISSION",
+          "permission": "product.write",
+          "requires_step_up": false
         }
       }
     },
@@ -28870,7 +29992,8 @@
                               "payment_method": {
                                 "enum": [
                                   "CARD",
-                                  "CASH"
+                                  "CASH",
+                                  "ZELLE"
                                 ],
                                 "type": "string"
                               },
@@ -29096,6 +30219,39 @@
                         "amount"
                       ],
                       "type": "object"
+                    },
+                    "zelle": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "amount": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "amount_minor": {
+                              "type": "string"
+                            },
+                            "currency": {
+                              "maxLength": 3,
+                              "minLength": 3,
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "amount_minor",
+                            "currency"
+                          ],
+                          "type": "object"
+                        },
+                        "orders": {
+                          "maximum": 9007199254740991,
+                          "minimum": -9007199254740991,
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "orders",
+                        "amount"
+                      ],
+                      "type": "object"
                     }
                   },
                   "required": [
@@ -29104,6 +30260,7 @@
                     "from",
                     "to",
                     "cash",
+                    "zelle",
                     "card",
                     "total",
                     "refunds",
@@ -34672,10 +35829,21 @@
             "application/json": {
               "schema": {
                 "properties": {
+                  "contact_phone": {
+                    "maxLength": 32,
+                    "type": "string"
+                  },
                   "fulfillment_method": {
                     "enum": [
                       "DELIVERY",
                       "PICKUP"
+                    ],
+                    "type": "string"
+                  },
+                  "payment_channel": {
+                    "enum": [
+                      "CASH",
+                      "ZELLE"
                     ],
                     "type": "string"
                   },
@@ -34785,7 +35953,8 @@
                     "payment_method": {
                       "enum": [
                         "CARD",
-                        "CASH"
+                        "CASH",
+                        "ZELLE"
                       ],
                       "type": "string"
                     },
@@ -34897,7 +36066,8 @@
                     "payment_method": {
                       "enum": [
                         "CARD",
-                        "CASH"
+                        "CASH",
+                        "ZELLE"
                       ],
                       "type": "string"
                     },
@@ -35731,6 +36901,46 @@
                       ],
                       "type": "object"
                     },
+                    "payment_methods": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "card": {
+                          "type": "boolean"
+                        },
+                        "cash": {
+                          "type": "boolean"
+                        },
+                        "zelle": {
+                          "anyOf": [
+                            {
+                              "additionalProperties": false,
+                              "properties": {
+                                "recipient": {
+                                  "type": "string"
+                                },
+                                "recipient_name": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "recipient_name",
+                                "recipient"
+                              ],
+                              "type": "object"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "card",
+                        "cash",
+                        "zelle"
+                      ],
+                      "type": "object"
+                    },
                     "required_consents": {
                       "items": {
                         "additionalProperties": false,
@@ -35775,7 +36985,8 @@
                     "supported_locales",
                     "password_policy",
                     "required_consents",
-                    "brand"
+                    "brand",
+                    "payment_methods"
                   ],
                   "type": "object"
                 }

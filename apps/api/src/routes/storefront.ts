@@ -219,9 +219,10 @@ export function buildStorefrontRoutes(dependencies: AppDependencies): RouteDefin
       },
       schema: { response: { 200: publicConfigSchema } },
       handler: async (_request, reply) => {
-        const [config, brand] = await Promise.all([
+        const [config, brand, payments] = await Promise.all([
           repositories.config.read(),
           repositories.brand.read(),
+          repositories.paymentSettings.read(),
         ]);
         void reply.header("cache-control", "no-store");
         return {
@@ -234,6 +235,21 @@ export function buildStorefrontRoutes(dependencies: AppDependencies): RouteDefin
           },
           required_consents: REQUIRED_CONSENTS.map((consent) => ({ ...consent })),
           brand: presentPublicBrand(brand),
+          payment_methods: {
+            card: dependencies.config.commerce.payment.provider === "stripe",
+            cash: payments.cashEnabled,
+            // La CHECK de 0041 impide Zelle activado sin cuenta; el `null` de
+            // los datos solo puede llegar con Zelle apagado.
+            zelle:
+              payments.zelleEnabled &&
+              payments.zelleRecipientName !== null &&
+              payments.zelleRecipient !== null
+                ? {
+                    recipient_name: payments.zelleRecipientName,
+                    recipient: payments.zelleRecipient,
+                  }
+                : null,
+          },
         };
       },
     },

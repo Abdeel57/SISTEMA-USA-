@@ -146,6 +146,9 @@ export const FLAG_UPDATE_REASONS = [
  */
 export const CASH_CONFIRM_REASONS = ["CASH_RECEIVED_AT_STORE", "OTHER"] as const;
 
+/** 0041: motivos para confirmar un pago por Zelle, ya visto en el banco. */
+export const ZELLE_CONFIRM_REASONS = ["ZELLE_PAYMENT_VERIFIED", "OTHER"] as const;
+
 /** Motivos para reintentar la generacion de participaciones de un cobro ya confirmado. */
 export const CASH_RETRY_REASONS = ["RETRY_ENTRY_GENERATION", "OTHER"] as const;
 

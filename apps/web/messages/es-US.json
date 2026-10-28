@@ -169,7 +169,13 @@
     "PREFIX_INVALID": "Los prefijos llevan de 2 a 8 letras o cifras, sin espacios ni símbolos.",
     "PATTERN_OPACITY_INVALID": "La intensidad del patrón tiene que ser un número entero de 0 a 40.",
     "TEXT_TOO_LONG": "Ese texto es demasiado largo para este campo.",
-    "ELIGIBILITY_ALREADY_DECLARED": "Ya habías confirmado tu fecha de nacimiento y tu estado. Si hay un error en esos datos, escríbenos a [[brand.email]]."
+    "ELIGIBILITY_ALREADY_DECLARED": "Ya habías confirmado tu fecha de nacimiento y tu estado. Si hay un error en esos datos, escríbenos a [[brand.email]].",
+    "PHONE_INVALID": "Escribe un número de WhatsApp válido, con lada. Ejemplo: (512) 555-0134.",
+    "PAYMENT_METHOD_UNAVAILABLE": "Esa forma de pago ya no está disponible. Elige otra.",
+    "ORDER_NOT_ZELLE_PAYMENT": "Este pedido no se paga por Zelle, así que no lleva comprobante.",
+    "PAYMENT_RECEIPT_NOT_ACCEPTED": "Este pedido ya no está pendiente de pago, así que no hace falta subir comprobante.",
+    "PAYMENT_RECEIPT_LIMIT": "Ya subiste el máximo de comprobantes para este pedido. Escríbenos si necesitas ayuda.",
+    "RECEIPT_FILE_REQUIRED": "Elige la foto o captura de tu comprobante."
   },
   "availability": {
     "IN_STOCK": "Disponible",
@@ -779,7 +785,8 @@
       "view": "Ver este pedido",
       "browse": "Ver la mercancía elegible",
       "paymentCash": "Pago en efectivo",
-      "cashPendingBody": "Paga en efectivo en un punto de venta y da tu número de orden, {number}. Tu pedido queda pendiente hasta que la tienda confirme tu pago, y tus participaciones se generan en ese momento."
+      "cashPendingBody": "Paga en efectivo en un punto de venta y da tu número de orden, {number}. Tu pedido queda pendiente hasta que la tienda confirme tu pago, y tus participaciones se generan en ese momento.",
+      "paymentZelle": "Pago por Zelle"
     },
     "order": {
       "back": "Volver a mis pedidos",
@@ -902,7 +909,9 @@
       "region": "Estado o región",
       "postalCode": "Código postal",
       "country": "País",
-      "countryHint": "El nombre o el código de dos letras. Por ejemplo: Estados Unidos o US."
+      "countryHint": "El nombre o el código de dos letras. Por ejemplo: Estados Unidos o US.",
+      "whatsapp": "Tu WhatsApp",
+      "whatsappHint": "Con lada. Te avisamos por aquí cuando confirmemos tu pago."
     },
     "return": {
       "title": "De vuelta del proveedor de pago",
@@ -933,7 +942,13 @@
         "body": "Reservamos tu pedido y lo pagas en efectivo en un punto de venta. No se cobra nada ahora, y tus participaciones se generan cuando la tienda confirme tu pago."
       },
       "cashCta": "Hacer el pedido y pagar en efectivo",
-      "cashNote": "No se cobra nada ahora. Recibirás un número de orden para darlo en el punto de venta cuando pagues."
+      "cashNote": "No se cobra nada ahora. Recibirás un número de orden para darlo en el punto de venta cuando pagues.",
+      "zelle": {
+        "title": "Zelle",
+        "body": "Transfieres desde la app de tu banco y subes la captura del comprobante. Tus participaciones se generan cuando confirmemos el pago."
+      },
+      "zelleCta": "Hacer el pedido y pagar con Zelle",
+      "zelleNote": "No se cobra nada ahora. En el siguiente paso verás a quién enviar el pago y dónde subir tu comprobante."
     },
     "fulfillment": {
       "heading": "¿Cómo recibes tu pedido?",
@@ -946,7 +961,9 @@
         "body": "Se suma el envío de {shipping}: pagas {total}.",
         "unavailable": "El envío a domicilio todavía no está disponible."
       }
-    }
+    },
+    "noPaymentMethodsTitle": "Por ahora no hay formas de pago disponibles",
+    "noPaymentMethodsBody": "Vuelve a intentarlo más tarde o escríbenos."
   },
   "orderConfirmation": {
     "title": "Gracias por tu pedido",
@@ -964,6 +981,32 @@
       "pendingBody": "Da este número de orden en un punto de venta y paga {total} en efectivo. Todavía no se ha cobrado nada: tu pedido está pendiente de pago, y tus participaciones se generan cuando la tienda lo confirme.",
       "paidBody": "La tienda confirmó tu pago en efectivo. Tus participaciones se generan con las mismas reglas que una compra con tarjeta.",
       "pickupBody": "Te entregan tu pedido ahí mismo, al pagar. Sin envío."
+    },
+    "zelle": {
+      "pendingTitle": "Paga por Zelle para completar tu pedido",
+      "reviewTitle": "Estamos revisando tu pago",
+      "receivedBody": "Recibimos tu comprobante. En cuanto veamos el pago en nuestro banco lo confirmamos y te avisamos por WhatsApp al {phone}.",
+      "receivedBodyWithDate": "Recibimos tu comprobante el {date}. En cuanto veamos el pago en nuestro banco lo confirmamos y te avisamos por WhatsApp al {phone}.",
+      "step1Title": "Envía {total} por Zelle a:",
+      "recipientNameLabel": "A nombre de",
+      "recipientLabel": "Correo o teléfono de Zelle",
+      "amountLabel": "Monto exacto",
+      "noRecipient": "Escríbenos para darte los datos de pago.",
+      "step2Title": "En la nota de Zelle escribe tu número de pedido:",
+      "step2Body": "Así sabemos que el pago es de este pedido.",
+      "step3Title": "Sube la captura de tu comprobante",
+      "step3AgainTitle": "¿Te equivocaste de captura? Sube otra",
+      "uploadLabel": "Captura del comprobante",
+      "uploadAnotherLabel": "Otra captura",
+      "uploadHint": "Foto o captura de pantalla en JPG, PNG o WebP, de hasta 5 MB.",
+      "uploadCta": "Enviar comprobante",
+      "uploadAnotherCta": "Enviar otra captura",
+      "uploaded": "¡Listo! Recibimos tu comprobante.",
+      "entriesNote": "Tu pedido queda pendiente hasta que confirmemos el pago. Tus participaciones se generan en ese momento.",
+      "paidTitle": "Pago por Zelle confirmado",
+      "paidBody": "Confirmamos tu pago. Tus participaciones se generan con las mismas reglas que cualquier otra compra.",
+      "cancelledTitle": "Pedido cancelado",
+      "cancelledBody": "Este pedido se canceló y ya no se puede pagar. Si ya habías enviado el pago, escríbenos."
     }
   },
   "admin": {
@@ -1019,7 +1062,8 @@
       "draw": "Sorteo",
       "audit": "Auditoría",
       "flags": "Interruptores",
-      "brand": "Marca"
+      "brand": "Marca",
+      "payments": "Pagos"
     },
     "navGroups": {
       "daily": "Día a día",
@@ -1375,7 +1419,8 @@
       "views": {
         "all": "Todos los pedidos",
         "cash-pending": "Efectivo pendiente de pago",
-        "cash": "Todos los pedidos en efectivo"
+        "cash": "Todos los pedidos en efectivo",
+        "zelle-pending": "Zelle por revisar"
       },
       "columnPayment": "Pago",
       "paymentCash": "Efectivo",
@@ -1386,11 +1431,13 @@
       "fulfillmentPending": "Pendiente de envío",
       "fulfillmentPickupHeading": "Entrega de la mercancía",
       "fulfillmentPickupPending": "Pendiente de entrega",
-      "fulfillmentNoCapability": "Tu cuenta puede ver el envío, pero no marcarlo."
+      "fulfillmentNoCapability": "Tu cuenta puede ver el envío, pero no marcarlo.",
+      "paymentZelle": "Zelle"
     },
     "orderCancel": {
       "title": "Cancelar este pedido",
       "introCash": "Nadie ha pagado este pedido. Si es un duplicado o el cliente no va a venir a pagar, cancélalo: sale de la cola de efectivo pendiente y ya no se podrá cobrar. No se borra nada.",
+      "introZelle": "Todavía no confirmas el pago de este pedido. Si el cliente no va a pagar o es un duplicado, cancélalo: sale de la cola de Zelle y ya no se podrá confirmar. Si ya ves el dinero en tu banco, no lo canceles: confirma el pago. No se borra nada.",
       "introCard": "Este pedido con tarjeta no se llegó a pagar. Al cancelarlo, primero se cierra el pago en la pasarela para que nadie pueda pagarlo después; si el cliente ya pagó, no se cancela. No se borra nada.",
       "impactStatus": "Estado del pedido",
       "impactCancel": "se cancela",
@@ -1462,7 +1509,9 @@
       "shipped": "Enviado",
       "handedOver": "Entregado",
       "shippingPending": "Pendiente de envío",
-      "pickupPending": "Pendiente de entrega"
+      "pickupPending": "Pendiente de entrega",
+      "zelle": "Zelle",
+      "zelleTotal": "Zelle"
     },
     "cashPayment": {
       "title": "Pago en efectivo en punto de venta",
@@ -1773,7 +1822,8 @@
       "DUPLICATE_ORDER": "Pedido duplicado",
       "ABANDONED_CHECKOUT": "Pago abandonado o incompleto",
       "CUSTOMER_REQUEST": "Lo pidió el cliente",
-      "TEST_ORDER": "Pedido de prueba"
+      "TEST_ORDER": "Pedido de prueba",
+      "ZELLE_PAYMENT_VERIFIED": "Pago Zelle verificado en el banco"
     },
     "warnings": {
       "ENTRY_CAP_REACHED": "Se ha alcanzado el tope de participaciones de esta promoción.",
@@ -2059,6 +2109,68 @@
       "cardsHint": "Cuántas fichas venían en el mismo sobre.",
       "cardsHintWithLimit": "Cuántas fichas venían en el mismo sobre. Las Reglas Oficiales admiten {max}; más de eso se marca para revisión, no se rechaza aquí.",
       "submit": "Añadir a la cola de revisión"
+    },
+    "payments": {
+      "title": "Pagos",
+      "description": "Cómo pueden pagar tus clientes y a qué cuenta Zelle envían el dinero.",
+      "currentHeading": "Lo que ve hoy el comprador",
+      "methods": {
+        "zelle": "Zelle",
+        "card": "Tarjeta",
+        "cash": "Efectivo"
+      },
+      "on": "activo",
+      "off": "apagado",
+      "cardNote": "El pago con tarjeta se activa conectando Stripe; no se cambia desde aquí.",
+      "formHeading": "Cambiar las formas de pago",
+      "zelleHeading": "Zelle",
+      "zelleEnabledLabel": "Aceptar pagos por Zelle",
+      "zelleEnabledHint": "El comprador ve tus datos de Zelle, transfiere desde su banco y sube la captura del comprobante. Tú confirmas el pago en el pedido cuando lo veas en tu banco.",
+      "recipientNameLabel": "A nombre de quién está la cuenta Zelle",
+      "recipientNameHint": "Tal como le aparece al comprador en su banco al enviar el pago.",
+      "recipientLabel": "Correo o teléfono registrado en Zelle",
+      "recipientHint": "Al que el comprador envía el dinero.",
+      "cashHeading": "Efectivo en punto de venta",
+      "cashEnabledLabel": "Aceptar pagos en efectivo",
+      "cashEnabledHint": "Solo si tienes un punto de venta físico donde el cliente pague y recoja.",
+      "save": "Guardar formas de pago",
+      "saved": "Listo. El checkout ya muestra estas formas de pago.",
+      "readOnly": "Puedes ver las formas de pago, pero cambiarlas requiere el permiso de editar el catálogo."
+    },
+    "zellePayment": {
+      "title": "Pago por Zelle",
+      "pendingStage": "Pendiente: revisar el pago por Zelle",
+      "confirmHeading": "Confirmar el pago por Zelle",
+      "confirmIntro": "Confirma solo después de ver el dinero en tu banco. Al confirmar queda registrado quién lo confirmó y cuándo, el pedido pasa a pagado y se generan sus participaciones con las mismas reglas que cualquier compra.",
+      "confirmSubmit": "Confirmar pago por Zelle",
+      "confirmCheckbox": "Vi en mi banco el pago de {total} por Zelle del pedido {number}.",
+      "noCapability": "Tu cuenta no puede confirmar pagos. Pídeselo a quien administra las cuentas del panel.",
+      "impactZelle": "por Zelle",
+      "awaitingBody": "Un pedido por Zelle pendiente no genera participaciones. Se generan cuando confirmas el pago.",
+      "reviewTitle": "Comprobante y contacto del cliente",
+      "noReceiptBadge": "Sin comprobante",
+      "receiptBadge": "{count, plural, one {# comprobante} other {# comprobantes}}",
+      "whatsappLabel": "WhatsApp del cliente",
+      "noPhone": "No lo dio",
+      "expectedLabel": "Lo que debe llegar",
+      "expectedValue": "{total} con la nota {number}",
+      "verifyTitle": "Revisa tu banco antes de confirmar",
+      "verifyBody": "Abre tu banco y busca un pago de {total} por Zelle con la nota {number}. Una captura se puede falsificar: lo que cuenta es el dinero en tu cuenta.",
+      "noReceiptBody": "El cliente todavía no sube su comprobante. Puedes escribirle por WhatsApp para pedírselo.",
+      "receiptAlt": "Comprobante de Zelle del pedido {number}",
+      "receiptCaption": "Subido el {date}. Toca la imagen para verla completa.",
+      "olderHeading": "Comprobantes anteriores",
+      "olderLink": "Subido el {date}",
+      "whatsappPendingHint": "Abre WhatsApp con el mensaje ya escrito; revísalo y envíalo.",
+      "whatsappPaidHint": "Avísale al cliente que su pago quedó confirmado. Se abre WhatsApp con el mensaje ya escrito; solo envíalo.",
+      "whatsappPendingCta": "Escribir al cliente por WhatsApp",
+      "whatsappPaidCta": "Avisar por WhatsApp que su pago está confirmado",
+      "whatsappGreeting": "¡Hola, {name}!",
+      "whatsappGreetingNoName": "¡Hola!",
+      "whatsappAskReceipt": "{greeting} Te escribimos de {brand} por tu pedido {number}. Para completarlo, envía {total} por Zelle y sube la captura del comprobante en tu pedido. ¡Gracias!",
+      "whatsappReviewing": "{greeting} Te escribimos de {brand}. Recibimos el comprobante de tu pedido {number} y estamos revisando el pago. Te avisamos en cuanto quede confirmado.",
+      "whatsappPaid": "{greeting} 🎉 Te escribimos de {brand}. Confirmamos tu pago de {total} del pedido {number}. ¡Gracias por tu compra y mucha suerte!",
+      "whatsappPaidWithEntries": "{greeting} 🎉 Te escribimos de {brand}. Confirmamos tu pago de {total} del pedido {number}. Ya tienes {entries} participaciones en el sorteo; puedes verlas en tu cuenta. ¡Gracias por tu compra y mucha suerte!"
     }
   },
   "eligibility": {

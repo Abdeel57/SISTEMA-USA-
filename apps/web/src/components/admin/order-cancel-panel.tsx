@@ -33,16 +33,19 @@ export async function OrderCancelPanel({
   const statusT = await getTranslations({ locale, namespace: "orderStatus" });
   const reasonLabel = await reasonLabeller(locale);
   const total = formatMoney(order.total, locale) ?? "";
-  const isCash = order.payment_method === "CASH";
+  const intro =
+    order.payment_method === "CASH"
+      ? t("introCash")
+      : order.payment_method === "ZELLE"
+        ? t("introZelle")
+        : t("introCard");
 
   return (
     <Card elevation="flat" padding="lg">
       <CardTitle as="h2" size="sm">
         {t("title")}
       </CardTitle>
-      <p className="mt-s2 text-body-sm text-text-muted">
-        {isCash ? t("introCash") : t("introCard")}
-      </p>
+      <p className="mt-s2 text-body-sm text-text-muted">{intro}</p>
 
       <div className="mt-s4">
         <SensitiveConfirmForm

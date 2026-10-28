@@ -128,7 +128,14 @@ export interface OrderRecord {
   readonly fulfilledAt: Date | null;
   readonly shippingCarrier: string | null;
   readonly trackingNumber: string | null;
+  /** 0041: canal del pago manual (`CASH` o `ZELLE`); `null` en tarjeta. */
+  readonly manualPaymentChannel: ManualPaymentChannelValue | null;
+  /** 0041: WhatsApp del comprador en E.164, o `null`. */
+  readonly contactPhone: string | null;
 }
+
+/** 0041: como se entrega el dinero en un pago manual confirmado por una persona. */
+export type ManualPaymentChannelValue = "CASH" | "ZELLE";
 
 /**
  * DEC-079: `DELIVERY` = se envia (con mercancia, lleva envio); `PICKUP` =
@@ -179,6 +186,10 @@ export interface CreateOrderInput {
   readonly provider?: string | null;
   /** DEC-079: ausente = `DELIVERY`. `PICKUP` solo en efectivo y sin envio (CHECK). */
   readonly fulfillmentMethod?: FulfillmentMethodValue;
+  /** 0041: obligatorio en pago manual, ausente en tarjeta (CHECK). */
+  readonly manualPaymentChannel?: ManualPaymentChannelValue;
+  /** 0041: WhatsApp del comprador en E.164. */
+  readonly contactPhone?: string | null;
 }
 
 /** DEC-085: ver `setFulfillment`. */
@@ -310,6 +321,8 @@ function toOrder(row: OrderRow, items: readonly ItemRow[]): OrderRecord {
     fulfilledAt: row.fulfilledAt,
     shippingCarrier: row.shippingCarrier,
     trackingNumber: row.trackingNumber,
+    manualPaymentChannel: row.manualPaymentChannel,
+    contactPhone: row.contactPhone,
     createdAt: row.createdAt,
     paidAt: row.paidAt,
     qualifiedAt: row.qualifiedAt,
@@ -337,6 +350,8 @@ function draftRow(input: CreateOrderInput): typeof orders.$inferInsert {
     shippingAddress: input.shippingAddress,
     provider: input.provider ?? null,
     fulfillmentMethod: input.fulfillmentMethod ?? "DELIVERY",
+    manualPaymentChannel: input.manualPaymentChannel ?? null,
+    contactPhone: input.contactPhone ?? null,
     createdAt: input.createdAt,
   };
 }
@@ -389,7 +404,14 @@ export class DrizzleOrderRepository {
   ): Promise<OrderRecord | null> {
     const inserted = await this.db
       .insert(orders)
-      .values(draftRow({ ...input, provider: "cash" }))
+      .values(
+        draftRow({
+          ...input,
+          provider: "cash",
+          // 0041: sin canal declarado, es efectivo en caja, como antes.
+          manualPaymentChannel: input.manualPaymentChannel ?? "CASH",
+        }),
+      )
       .onConflictDoNothing()
       .returning({ id: orders.id });
 

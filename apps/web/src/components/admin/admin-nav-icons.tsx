@@ -42,6 +42,13 @@ const PATHS: Readonly<Record<AdminNavKey | "account" | "more" | "store" | "signO
       <circle cx="17" cy="17.5" r="1.75" />
     </>
   ),
+  // 0041: una tarjeta con su banda, para "Pagos".
+  payments: (
+    <>
+      <rect x="3" y="5.5" width="18" height="13" rx="2" />
+      <path d="M3 9.5h18M6.5 14.5h4" />
+    </>
+  ),
   promotions: (
     <>
       <path d="M8 3.5h8V9a4 4 0 0 1-8 0z" />

@@ -140,7 +140,8 @@ export default async function AdminDailyCutPage({
           t("columnCarrier"),
           t("columnTracking"),
         ],
-        paymentMethod: (method) => (method === "CASH" ? t("cash") : t("card")),
+        paymentMethod: (method) =>
+          method === "CASH" ? t("cash") : method === "ZELLE" ? t("zelle") : t("card"),
         fulfillment: fulfillmentLabel,
         address: destination,
         productName: (line) => pickLocalized(line.product_name, locale),
@@ -217,10 +218,18 @@ export default async function AdminDailyCutPage({
               <h2 id="cut-totals" className="sr-only">
                 {t("totalsHeading")}
               </h2>
-              <div className="grid grid-cols-1 gap-s4 sm:grid-cols-3">
+              <div className="grid grid-cols-1 gap-s4 sm:grid-cols-2 lg:grid-cols-4">
                 {(
                   [
                     ["cash", result.data.cash],
+                    // 0041: Zelle aparte. Una API anterior no lo manda: cero.
+                    [
+                      "zelle",
+                      result.data.zelle ?? {
+                        orders: 0,
+                        amount: { ...result.data.cash.amount, amount_minor: "0" },
+                      },
+                    ],
                     ["card", result.data.card],
                     ["total", result.data.total],
                   ] as const satisfies readonly (readonly [string, AdminDailyCutTotal])[]
@@ -234,9 +243,11 @@ export default async function AdminDailyCutPage({
                     <p className="text-caption uppercase tracking-wide text-text-subtle">
                       {key === "cash"
                         ? t("cashTotal")
-                        : key === "card"
-                          ? t("cardTotal")
-                          : t("grandTotal")}
+                        : key === "zelle"
+                          ? t("zelleTotal")
+                          : key === "card"
+                            ? t("cardTotal")
+                            : t("grandTotal")}
                     </p>
                     <p className="mt-s2 font-display text-heading-lg font-bold tabular-nums text-text">
                       {formatMoney(total.amount, locale) ?? ""}
@@ -369,7 +380,12 @@ export default async function AdminDailyCutPage({
                       {
                         id: "payment",
                         header: t("columnPayment"),
-                        cell: (row) => (row.payment_method === "CASH" ? t("cash") : t("card")),
+                        cell: (row) =>
+                          row.payment_method === "CASH"
+                            ? t("cash")
+                            : row.payment_method === "ZELLE"
+                              ? t("zelle")
+                              : t("card"),
                       },
                       {
                         id: "shipping",

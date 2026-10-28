@@ -1130,6 +1130,11 @@ export interface SiteConfigResponse {
    * horaria son los que el administrador guardo, en el siguiente render.
    */
   readonly brand?: PublicBrand;
+  /**
+   * 0041: que formas de pago ofrece el checkout. OPCIONAL: una API anterior no
+   * lo manda, y entonces el checkout ofrece lo de siempre (tarjeta y efectivo).
+   */
+  readonly payment_methods?: PublicPaymentMethods;
 }
 
 /**
@@ -1575,10 +1580,37 @@ export interface OrderSummary {
   readonly payment_method?: PaymentMethod;
 }
 
-/** DEC-078: pasarela de pago (`CARD`) o efectivo en caja (`CASH`). */
-export type PaymentMethod = "CARD" | "CASH";
+/**
+ * DEC-078: pasarela de pago (`CARD`) o efectivo en caja (`CASH`). 0041:
+ * `ZELLE` es el mismo pago manual con otro canal: se transfiere por Zelle, se
+ * sube el comprobante y la tienda confirma el cobro.
+ */
+export type PaymentMethod = "CARD" | "CASH" | "ZELLE";
 
-export const PAYMENT_METHODS: readonly PaymentMethod[] = ["CARD", "CASH"];
+export const PAYMENT_METHODS: readonly PaymentMethod[] = ["CARD", "CASH", "ZELLE"];
+
+/** 0041: pago manual, el que confirma una persona del negocio. */
+export function isManualPaymentMethod(method: PaymentMethod | undefined): boolean {
+  return method === "CASH" || method === "ZELLE";
+}
+
+/** 0041: un comprobante de pago subido por el comprador, sin la imagen. */
+export interface PaymentReceipt {
+  readonly id: string;
+  readonly uploaded_at: string;
+  readonly content_type: "image/jpeg" | "image/png" | "image/webp";
+  readonly byte_size: number;
+}
+
+/**
+ * 0041: que formas de pago ofrece el checkout, segun `GET /config`. Con Zelle,
+ * a quien se paga.
+ */
+export interface PublicPaymentMethods {
+  readonly card: boolean;
+  readonly cash: boolean;
+  readonly zelle: { readonly recipient_name: string; readonly recipient: string } | null;
+}
 
 /**
  * DEC-079: como se entrega el pedido. `PICKUP` = pagado en efectivo y entregado
@@ -1685,6 +1717,13 @@ export interface OrderDetail extends OrderSummary {
    * misma razon que `fulfillment_method`: una API anterior no lo manda.
    */
   readonly fulfillment?: OrderFulfillment;
+  /**
+   * 0041: WhatsApp del comprador en E.164. OPCIONAL por la misma razon que
+   * `fulfillment`: una API anterior no lo manda.
+   */
+  readonly contact_phone?: string | null;
+  /** 0041: comprobantes subidos, del mas reciente al mas antiguo. Ausente = ninguno. */
+  readonly payment_receipts?: readonly PaymentReceipt[];
   /** Traza del calculo, o `null` si el pedido no ha generado ninguna. */
   readonly entry_calculation: EntryCalculationSnapshot | null;
 }
@@ -2468,7 +2507,7 @@ export interface AdminDailyCutLine {
   readonly order_id: string;
   readonly order_number: string;
   readonly paid_at: string;
-  readonly payment_method: "CARD" | "CASH";
+  readonly payment_method: PaymentMethod;
   readonly order_status: string;
   readonly customer_name: string | null;
   /** Enmascarado. */
@@ -2488,6 +2527,8 @@ export interface AdminDailyCut {
   readonly from: string;
   readonly to: string;
   readonly cash: AdminDailyCutTotal;
+  /** 0041: cobros por Zelle. OPCIONAL: una API anterior no lo manda. */
+  readonly zelle?: AdminDailyCutTotal;
   readonly card: AdminDailyCutTotal;
   readonly total: AdminDailyCutTotal;
   /** Reembolsos con tarjeta hechos ese dia, de pedidos de cualquier dia. */

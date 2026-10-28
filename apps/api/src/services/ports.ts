@@ -439,6 +439,62 @@ export interface BrandRepository {
   mediaExists(mediaId: string): Promise<boolean>;
 }
 
+// ---------------------------------------------------------------------------
+// Pago por Zelle (migracion 0041)
+// ---------------------------------------------------------------------------
+
+/** La fila unica de `payment_settings`. */
+export interface PaymentSettingsRecord {
+  readonly cashEnabled: boolean;
+  readonly zelleEnabled: boolean;
+  /** A nombre de quien esta la cuenta Zelle. `null` sin configurar. */
+  readonly zelleRecipientName: string | null;
+  /** Correo o telefono registrado en Zelle. `null` sin configurar. */
+  readonly zelleRecipient: string | null;
+  readonly updatedAt: Date;
+  /** `null` mientras nadie haya guardado desde el panel. */
+  readonly updatedByAdminUserId: string | null;
+}
+
+export type PaymentSettingsInput = Pick<
+  PaymentSettingsRecord,
+  "cashEnabled" | "zelleEnabled" | "zelleRecipientName" | "zelleRecipient"
+>;
+
+export interface PaymentSettingsRepository {
+  /** La fila siempre existe: la siembra la migracion 0041. */
+  read(): Promise<PaymentSettingsRecord>;
+  update(input: PaymentSettingsInput, updatedByAdminUserId: string): Promise<PaymentSettingsRecord>;
+}
+
+/** Un comprobante de pago, sin los bytes. */
+export interface PaymentReceiptSummary {
+  readonly id: string;
+  readonly orderId: string;
+  readonly contentType: "image/jpeg" | "image/png" | "image/webp";
+  readonly byteSize: number;
+  readonly createdAt: Date;
+}
+
+export interface PaymentReceiptContent extends PaymentReceiptSummary {
+  readonly sha256: string;
+  readonly content: Buffer;
+}
+
+export interface PaymentReceiptRepository {
+  store(input: {
+    readonly orderId: string;
+    readonly participantId: string;
+    readonly contentType: PaymentReceiptSummary["contentType"];
+    readonly sha256: string;
+    readonly content: Buffer;
+  }): Promise<PaymentReceiptSummary>;
+  /** Los comprobantes del pedido, del mas reciente al mas antiguo. */
+  listForOrder(orderId: string): Promise<readonly PaymentReceiptSummary[]>;
+  /** `null` si no existe o no es de ese pedido. */
+  find(orderId: string, receiptId: string): Promise<PaymentReceiptContent | null>;
+}
+
 export interface Repositories {
   readonly promotions: PromotionRepository;
   readonly catalog: CatalogRepository;
@@ -449,4 +505,8 @@ export interface Repositories {
   readonly shipping: ShippingRateRepository;
   /** La marca del sitio, editable desde el panel. */
   readonly brand: BrandRepository;
+  /** 0041: formas de pago manual y cuenta Zelle, editables desde el panel. */
+  readonly paymentSettings: PaymentSettingsRepository;
+  /** 0041: comprobantes de pago subidos por el comprador. Privados. */
+  readonly paymentReceipts: PaymentReceiptRepository;
 }

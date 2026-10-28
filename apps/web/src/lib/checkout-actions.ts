@@ -143,8 +143,22 @@ function isHttpUrl(value: string): boolean {
  * navegador no abre una tercera via, cae en la tarjeta, que es la que siempre
  * existio. El backend ademas revalida todo -el efectivo tiene su propia ruta-.
  */
-function paymentMethodFrom(formData: FormData): "CARD" | "CASH" {
-  return textFrom(formData, "payment_method") === "CASH" ? "CASH" : "CARD";
+function paymentMethodFrom(formData: FormData): "CARD" | "CASH" | "ZELLE" {
+  const method = textFrom(formData, "payment_method");
+  return method === "CASH" || method === "ZELLE" ? method : "CARD";
+}
+
+/**
+ * 0041: el WhatsApp que pide Zelle, tal como lo escribio el comprador. Solo
+ * se comprueba que tenga pinta de telefono -cifras y lo que se teclea entre
+ * ellas-; el formato definitivo lo decide la API (`contact-phone.ts`), que
+ * responde `contact_phone` si no le sirve.
+ */
+function contactPhoneFrom(formData: FormData): string | null {
+  const typed = textFrom(formData, "contact_phone");
+  if (typed === null) return null;
+  const digits = typed.replace(/\D/gu, "");
+  return /^[+\d\s().-]+$/u.test(typed) && digits.length >= 10 && digits.length <= 15 ? typed : "";
 }
 
 /**
@@ -184,6 +198,37 @@ export async function startCheckoutAction(
   if ("unknownCountry" in address) return invalid("COUNTRY_INVALID", "country");
 
   const session = await mutableSession();
+
+  /*
+   * ZELLE (0041). El mismo pedido pendiente que el efectivo, con otro canal y
+   * con el WhatsApp del comprador. La confirmacion del pedido le dice a quien
+   * transferir y le deja subir el comprobante.
+   */
+  if (paymentMethodFrom(formData) === "ZELLE") {
+    const contactPhone = contactPhoneFrom(formData);
+    if (contactPhone === null) return invalid("FIELD_REQUIRED", "contact_phone");
+    if (contactPhone === "") return invalid("PHONE_INVALID", "contact_phone");
+
+    const order = await createCashOrder(
+      {
+        fulfillment_method: "DELIVERY",
+        shipping_address: address,
+        payment_channel: "ZELLE",
+        contact_phone: contactPhone,
+      },
+      locale,
+      session,
+    );
+    if (!order.ok) {
+      const phoneRejected =
+        order.error.kind === "http" &&
+        order.error.status === 422 &&
+        JSON.stringify(order.error.details ?? null).includes("contact_phone");
+      return phoneRejected ? invalid("PHONE_INVALID", "contact_phone") : fromFailure(order.error);
+    }
+
+    redirect({ href: `/orders/${encodeURIComponent(order.data.id)}/confirmation`, locale });
+  }
 
   /*
    * EFECTIVO EN UN PUNTO DE VENTA FISICO (DEC-078).

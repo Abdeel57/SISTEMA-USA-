@@ -9,6 +9,7 @@ import { AdminSectionError } from "@/components/admin/admin-section-error";
 import { CashPaymentPanel } from "@/components/admin/cash-payment-panel";
 import { OrderCancelPanel } from "@/components/admin/order-cancel-panel";
 import { OrderFulfillmentForm } from "@/components/admin/order-fulfillment-form";
+import { ZelleReviewPanel } from "@/components/admin/zelle-review-panel";
 import { EntryCalculationTrace } from "@/components/entry-calculation-trace";
 import { OrderAddress } from "@/components/order-address";
 import { OrderLineList } from "@/components/order-line-list";
@@ -71,7 +72,11 @@ export default async function AdminOrderDetailPage({
    * quien confirmo un cobro en caja es un dato del panel, no suyo.
    */
   const isCash = result.ok && result.data.payment_method === "CASH";
-  const cash = isCash ? await fetchAdminOrderCashPayment(id, locale, screen.session) : null;
+  // 0041: Zelle es el mismo pago manual con otro canal: misma ficha de cobro.
+  const isZelle = result.ok && result.data.payment_method === "ZELLE";
+  const cash =
+    isCash || isZelle ? await fetchAdminOrderCashPayment(id, locale, screen.session) : null;
+  const brandName = isZelle ? (await loadBrand()).profile.name : "";
 
   // DEC-085: hay algo que enviar si el pedido esta cobrado y lleva mercancia.
   // Sin `product_kind` (API anterior) se supone que si: la ruta lo comprueba.
@@ -132,17 +137,27 @@ export default async function AdminOrderDetailPage({
                   {t("columnPayment")}
                 </dt>
                 <dd className="text-body-sm text-text">
-                  {isCash ? t("paymentCash") : t("paymentCard")}
+                  {isCash ? t("paymentCash") : isZelle ? t("paymentZelle") : t("paymentCard")}
                 </dd>
               </div>
             </dl>
           </Card>
+
+          {isZelle && result.ok ? (
+            <ZelleReviewPanel
+              order={result.data}
+              locale={locale}
+              brandName={brandName}
+              timeZone={businessTimeZone}
+            />
+          ) : null}
 
           {cash === null ? null : cash.ok ? (
             <CashPaymentPanel
               cash={cash.data}
               locale={locale}
               actorCanConfirm={can(screen.actor, "order.cash.confirm")}
+              channel={isZelle ? "ZELLE" : "CASH"}
             />
           ) : (
             <AdminSectionError failure={cash.error} headingLevel="h2" />

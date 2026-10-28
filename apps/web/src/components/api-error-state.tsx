@@ -139,6 +139,16 @@ const TRANSLATED_CODES = [
   "PREFIX_INVALID",
   "PATTERN_OPACITY_INVALID",
   "TEXT_TOO_LONG",
+  /*
+   * Pago por Zelle (0041): el WhatsApp del checkout y el comprobante. Los dos
+   * ultimos los anticipa la web antes de subir nada.
+   */
+  "PHONE_INVALID",
+  "PAYMENT_METHOD_UNAVAILABLE",
+  "ORDER_NOT_ZELLE_PAYMENT",
+  "PAYMENT_RECEIPT_NOT_ACCEPTED",
+  "PAYMENT_RECEIPT_LIMIT",
+  "RECEIPT_FILE_REQUIRED",
 ] as const;
 
 type TranslatedCode = (typeof TRANSLATED_CODES)[number];
@@ -272,6 +282,18 @@ export function useApiErrorMessage(): (code: string | null) => string {
         return t("PATTERN_OPACITY_INVALID");
       case "TEXT_TOO_LONG":
         return t("TEXT_TOO_LONG");
+      case "PHONE_INVALID":
+        return t("PHONE_INVALID");
+      case "PAYMENT_METHOD_UNAVAILABLE":
+        return t("PAYMENT_METHOD_UNAVAILABLE");
+      case "ORDER_NOT_ZELLE_PAYMENT":
+        return t("ORDER_NOT_ZELLE_PAYMENT");
+      case "PAYMENT_RECEIPT_NOT_ACCEPTED":
+        return t("PAYMENT_RECEIPT_NOT_ACCEPTED");
+      case "PAYMENT_RECEIPT_LIMIT":
+        return t("PAYMENT_RECEIPT_LIMIT");
+      case "RECEIPT_FILE_REQUIRED":
+        return t("RECEIPT_FILE_REQUIRED");
     }
   };
 }

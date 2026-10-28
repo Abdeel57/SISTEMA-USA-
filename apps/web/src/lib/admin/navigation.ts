@@ -50,6 +50,8 @@ export const ADMIN_NAV = [
   { key: "catalog", path: "/catalog", capabilities: ["product.read"], group: "store" },
   // DEC-079: la tarifa de envio es un precio de la tienda, con la misma lectura.
   { key: "shipping", path: "/shipping", capabilities: ["product.read"], group: "store" },
+  // 0041: formas de pago y cuenta Zelle. Condiciones de venta, como el envio.
+  { key: "payments", path: "/payments", capabilities: ["product.read"], group: "store" },
   { key: "promotions", path: "/promotions", capabilities: ["promotion.read"], group: "draw" },
   {
     key: "participants",

@@ -139,6 +139,9 @@ function orderFixture(overrides: Record<string, unknown> = {}): Record<string, u
     fulfilledAt: null,
     shippingCarrier: null,
     trackingNumber: null,
+    // 0041: pedido con tarjeta, sin canal manual ni WhatsApp.
+    manualPaymentChannel: null,
+    contactPhone: null,
     ...overrides,
   };
 }

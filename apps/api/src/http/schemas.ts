@@ -507,4 +507,20 @@ export const publicConfigSchema = z.object({
   ),
   /** La marca vigente. Se aplica en el siguiente render, sin redesplegar. */
   brand: publicBrandSchema,
+  /**
+   * 0041: que formas de pago ofrece el checkout. `card` = hay llaves de Stripe;
+   * `cash` y `zelle` los activa la tienda en el panel. Con Zelle, a quien se
+   * paga: el comprador lo necesita para transferir y es lo mismo que vera en
+   * su banco, asi que no es un dato privado.
+   */
+  payment_methods: z.object({
+    card: z.boolean(),
+    cash: z.boolean(),
+    zelle: z
+      .object({
+        recipient_name: z.string(),
+        recipient: z.string(),
+      })
+      .nullable(),
+  }),
 });
