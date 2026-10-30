@@ -48,6 +48,7 @@ import type {
   SessionState,
   SiteConfigResponse,
   PaymentReceipt,
+  TransferMethod,
 } from "./contract";
 import type {
   AdminAmoeTranscriptionInput,
@@ -178,6 +179,7 @@ export const API_PATHS = {
   checkoutSessions: "/checkout/sessions",
   /** DEC-078: pedido para pagar en efectivo en un punto de venta fisico. 0041: o por Zelle. */
   checkoutCashOrder: "/checkout/cash-order",
+  checkoutReserve: "/checkout/reserve",
 
   /*
    * --- AMOE (seccion 7).
@@ -997,8 +999,8 @@ export function createCashOrder(
     | { readonly fulfillment_method: "PICKUP" }
     | { readonly fulfillment_method: "DELIVERY"; readonly shipping_address: PostalAddress }
   ) & {
-    /** 0041: `ZELLE` o `CASH`. Ausente = `CASH`. */
-    readonly payment_channel?: "CASH" | "ZELLE";
+    /** 0041: `ZELLE` o `CASH`. Ausente = `CASH`. 0042: o `VENMO`. */
+    readonly payment_channel?: "CASH" | "ZELLE" | "VENMO";
     /** 0041: WhatsApp como lo escribio el comprador; la API lo normaliza. */
     readonly contact_phone?: string;
   },
@@ -1006,6 +1008,32 @@ export function createCashOrder(
   session: SessionContext,
 ): Promise<ApiResult<OrderSummary>> {
   return apiRequest<OrderSummary>("POST", API_PATHS.checkoutCashOrder, {
+    locale,
+    body: input,
+    ...sessionOptions(session),
+  });
+}
+
+/**
+ * 0042: aparta el pedido SIN cuenta, con el WhatsApp (con su lada) y el nombre.
+ *
+ * Solo cuando la tienda cobra unicamente por Zelle o Venmo
+ * (`payment_methods.guest_checkout`). La API congela el carrito de la cookie,
+ * crea el pedido pendiente y abre la sesion del invitado: la `Set-Cookie` la
+ * propaga `mutableSession()` al navegador, y con ella se ve el pedido y se sube
+ * la captura del pago.
+ */
+export function reserveOrder(
+  input: {
+    readonly contact_phone: string;
+    readonly first_name: string;
+    readonly last_name?: string;
+    readonly language_preference: "en-US" | "es-US";
+  },
+  locale: Locale,
+  session: SessionContext,
+): Promise<ApiResult<OrderSummary>> {
+  return apiRequest<OrderSummary>("POST", API_PATHS.checkoutReserve, {
     locale,
     body: input,
     ...sessionOptions(session),
@@ -1196,7 +1224,8 @@ export function fetchAdminProducts(
 export function fetchAdminOrders(
   query: AdminPageQuery & {
     readonly q?: string;
-    readonly payment_method?: PaymentMethod;
+    /** 0042: `TRANSFER` = Zelle o Venmo, la cola de pagos por revisar. */
+    readonly payment_method?: PaymentMethod | "TRANSFER";
     readonly awaiting_payment?: boolean;
   },
   locale: Locale,
@@ -1865,17 +1894,28 @@ export function updateAdminProductVariant(
  * 0041: sube la captura del comprobante de Zelle de un pedido del propio
  * participante. Solo los bytes, en base64: el tipo lo decide la API leyendo la
  * firma, igual que con las fotos del catalogo.
+ *
+ * 0042: `channel` dice con que app pago (Zelle o Venmo); si es la otra, el
+ * pedido cambia a esa. Ausente = el canal con el que nacio el pedido.
  */
 export function uploadPaymentReceipt(
   orderId: string,
   dataBase64: string,
   locale: Locale,
   session: SessionContext,
+  channel?: TransferMethod,
 ): Promise<ApiResult<PaymentReceipt>> {
   return apiRequest<PaymentReceipt>(
     "POST",
     `${API_PATHS.orders}/${encodeURIComponent(orderId)}/payment-receipts`,
-    { locale, body: { data_base64: dataBase64 }, ...sessionOptions(session) },
+    {
+      locale,
+      body: {
+        data_base64: dataBase64,
+        ...(channel === undefined ? {} : { payment_channel: channel }),
+      },
+      ...sessionOptions(session),
+    },
   );
 }
 

@@ -170,12 +170,15 @@
     "PATTERN_OPACITY_INVALID": "The pattern intensity has to be a whole number from 0 to 40.",
     "TEXT_TOO_LONG": "That text is too long for this field.",
     "ELIGIBILITY_ALREADY_DECLARED": "You already confirmed your date of birth and state. If they are wrong, write to us at [[brand.email]].",
-    "PHONE_INVALID": "Enter a valid WhatsApp number, with area code. Example: (512) 555-0134.",
+    "PHONE_INVALID": "Enter a valid WhatsApp number. Pick your country code and type your number without it.",
     "PAYMENT_METHOD_UNAVAILABLE": "That payment method is no longer available. Please choose another one.",
     "ORDER_NOT_ZELLE_PAYMENT": "This order isn't paid with Zelle, so it doesn't take a receipt.",
     "PAYMENT_RECEIPT_NOT_ACCEPTED": "This order is no longer awaiting payment, so no receipt is needed.",
     "PAYMENT_RECEIPT_LIMIT": "You've already uploaded the maximum number of receipts for this order. Contact us if you need help.",
-    "RECEIPT_FILE_REQUIRED": "Choose the photo or screenshot of your receipt."
+    "RECEIPT_FILE_REQUIRED": "Choose the photo or screenshot of your receipt.",
+    "GUEST_CHECKOUT_UNAVAILABLE": "Reserving without an account isn't available right now. Reload the page and try again.",
+    "ORDER_ALREADY_RESERVED": "Your order is already reserved. Reload the page to see how to pay for it.",
+    "VENMO_HANDLE_INVALID": "Use letters, numbers, hyphens or underscores for the Venmo username. Example: @JoseEduardo-CruzRodriguez"
   },
   "availability": {
     "IN_STOCK": "In stock",
@@ -786,7 +789,8 @@
       "browse": "Browse eligible merchandise",
       "paymentCash": "Cash payment",
       "cashPendingBody": "Pay in cash at a store location and give your order number, {number}. Your order stays pending until the store confirms your payment, and your entries are generated at that moment.",
-      "paymentZelle": "Paid with Zelle"
+      "paymentZelle": "Paid with Zelle",
+      "paymentVenmo": "Paid with Venmo"
     },
     "order": {
       "back": "Back to my orders",
@@ -802,7 +806,7 @@
       "total": "Total",
       "notDetermined": "Not determined yet",
       "addressHeading": "Shipping address",
-      "noAddress": "No shipping address is recorded for this order.",
+      "noAddress": "This order has no shipping address. If it includes merchandise, ask the customer for the address on WhatsApp.",
       "pickupHeading": "Delivery",
       "pickupBody": "Picked up at the store location when paying in cash. No shipping.",
       "shippingPickup": "No shipping (store pickup)",
@@ -948,7 +952,12 @@
         "body": "Send the money from your bank's app and upload a screenshot of the receipt. Your entries are generated once we confirm the payment."
       },
       "zelleCta": "Place order and pay with Zelle",
-      "zelleNote": "Nothing is charged now. On the next step you'll see who to send the payment to and where to upload your receipt."
+      "zelleNote": "Nothing is charged now. On the next step you'll see who to send the payment to and where to upload your receipt.",
+      "venmo": {
+        "title": "Venmo",
+        "body": "You pay from your Venmo app and upload a screenshot of the payment. Your entries are generated once we confirm the payment."
+      },
+      "venmoCta": "Place the order and pay with Venmo"
     },
     "fulfillment": {
       "heading": "How do you get your order?",
@@ -963,7 +972,18 @@
       }
     },
     "noPaymentMethodsTitle": "No payment methods are available right now",
-    "noPaymentMethodsBody": "Please try again later or contact us."
+    "noPaymentMethodsBody": "Please try again later or contact us.",
+    "reserve": {
+      "title": "Fill in your details and tap Reserve",
+      "total": "Total: {total}",
+      "dialLabel": "Country code",
+      "whatsappLabel": "Your WhatsApp",
+      "whatsappPlaceholder": "WhatsApp (10 digits)",
+      "firstNameLabel": "First name",
+      "lastNameLabel": "Last name (optional)",
+      "submit": "Reserve",
+      "note": "Once you reserve, we'll show you how to pay with Zelle or Venmo and you upload your receipt right there!"
+    }
   },
   "orderConfirmation": {
     "title": "Thank you for your order",
@@ -982,31 +1002,42 @@
       "paidBody": "The store confirmed your cash payment. Your entries are generated with the same rules as a card purchase.",
       "pickupBody": "Your order is handed to you right there when you pay. No shipping."
     },
-    "zelle": {
-      "pendingTitle": "Pay with Zelle to complete your order",
-      "reviewTitle": "We're reviewing your payment",
-      "receivedBody": "We got your receipt. As soon as we see the payment in our bank we'll confirm it and let you know on WhatsApp at {phone}.",
-      "receivedBodyWithDate": "We got your receipt on {date}. As soon as we see the payment in our bank we'll confirm it and let you know on WhatsApp at {phone}.",
-      "step1Title": "Send {total} with Zelle to:",
-      "recipientNameLabel": "Recipient name",
-      "recipientLabel": "Zelle email or phone",
+    "reservedTitle": "Your order is reserved!",
+    "reservedIntro": "Pay with Zelle or Venmo and upload your payment screenshot right here.",
+    "transfer": {
+      "pendingTitle": "Pay for your order and upload your receipt",
+      "methodsLabel": "Choose how to pay",
+      "zelleTab": "Zelle",
+      "venmoTab": "Venmo",
+      "step1Title": "Send {total} to:",
+      "recipientNameLabel": "Account name",
+      "zelleRecipientLabel": "Zelle email or phone",
+      "venmoHandleLabel": "Venmo username",
+      "venmoQrAlt": "{name}'s Venmo QR code",
+      "venmoQrHint": "Scan it with your camera or from the Venmo app.",
+      "openVenmo": "Open in Venmo",
       "amountLabel": "Exact amount",
-      "noRecipient": "Contact us to get the payment details.",
-      "step2Title": "In the Zelle memo, write your order number:",
-      "step2Body": "That's how we match your payment to this order.",
-      "step3Title": "Upload a screenshot of your receipt",
-      "step3AgainTitle": "Wrong screenshot? Upload another one",
-      "uploadLabel": "Receipt screenshot",
+      "noRecipient": "Message us on WhatsApp and we'll send you the payment details.",
+      "step2Title": "In the payment note, write your order number:",
+      "step2Body": "That's how we know the payment is for this order.",
+      "step3Title": "Upload your payment screenshot here",
+      "step3AgainTitle": "Upload the right screenshot",
+      "uploadLabel": "Payment screenshot",
       "uploadAnotherLabel": "Another screenshot",
-      "uploadHint": "JPG, PNG or WebP photo or screenshot, up to 5 MB.",
+      "uploadHint": "Photo or screenshot in JPG, PNG or WebP, up to 5 MB.",
       "uploadCta": "Send receipt",
       "uploadAnotherCta": "Send another screenshot",
-      "uploaded": "Done! We got your receipt.",
-      "entriesNote": "Your order stays pending until we confirm the payment. Your entries are generated at that moment.",
-      "paidTitle": "Zelle payment confirmed",
-      "paidBody": "We confirmed your payment. Your entries are generated under the same rules as any other purchase.",
+      "uploaded": "Done! We received your receipt.",
+      "entriesNote": "Your order stays reserved until the organizer confirms the payment. Your entries are generated at that moment.",
+      "reviewTitle": "Done! We received your receipt",
+      "reviewBody": "The organizer will review your payment and confirm it on WhatsApp at {phone}.",
+      "reviewBodyNoPhone": "The organizer will review your payment and confirm it on WhatsApp.",
+      "uploadedOn": "You uploaded it on {date}.",
+      "wrongReceipt": "Uploaded the wrong screenshot? Upload another one",
+      "paidTitle": "Payment confirmed!",
+      "paidBody": "The organizer confirmed your payment. Your entries are generated under the same rules as any other purchase.",
       "cancelledTitle": "Order cancelled",
-      "cancelledBody": "This order was cancelled and can no longer be paid. If you already sent the payment, contact us."
+      "cancelledBody": "This order was cancelled and can no longer be paid. If you already sent the payment, message us."
     }
   },
   "admin": {
@@ -1420,7 +1451,7 @@
         "all": "All orders",
         "cash-pending": "Cash awaiting payment",
         "cash": "All cash orders",
-        "zelle-pending": "Zelle to review"
+        "zelle-pending": "Zelle / Venmo to review"
       },
       "columnPayment": "Payment",
       "paymentCash": "Cash",
@@ -1432,12 +1463,13 @@
       "fulfillmentPickupHeading": "Merchandise handover",
       "fulfillmentPickupPending": "Not handed over yet",
       "fulfillmentNoCapability": "Your account can see the shipping status but can't change it.",
-      "paymentZelle": "Zelle"
+      "paymentZelle": "Zelle",
+      "paymentVenmo": "Venmo"
     },
     "orderCancel": {
       "title": "Cancel this order",
       "introCash": "Nobody has paid this order. If it's a duplicate or the customer isn't coming to pay, cancel it: it leaves the pending-cash queue and can no longer be paid. Nothing is deleted.",
-      "introZelle": "You haven't confirmed this order's payment yet. If the customer isn't going to pay or it's a duplicate, cancel it: it leaves the Zelle queue and can no longer be confirmed. If you already see the money in your bank, don't cancel it: confirm the payment. Nothing is deleted.",
+      "introZelle": "You haven't confirmed this order's payment yet. If the customer isn't going to pay or it's a duplicate, cancel it: it leaves the payments-to-review queue and can no longer be confirmed. If you already see the money in your Zelle or Venmo, don't cancel it: confirm the payment. Nothing is deleted.",
       "introCard": "This card order was never paid. Cancelling it first closes the payment at the gateway so nobody can pay it later; if the customer already paid, it is not cancelled. Nothing is deleted.",
       "impactStatus": "Order status",
       "impactCancel": "cancelled",
@@ -1511,7 +1543,9 @@
       "shippingPending": "Not shipped yet",
       "pickupPending": "Not handed over yet",
       "zelle": "Zelle",
-      "zelleTotal": "Zelle"
+      "zelleTotal": "Zelle",
+      "venmo": "Venmo",
+      "venmoTotal": "Venmo"
     },
     "cashPayment": {
       "title": "Cash payment at a store location",
@@ -1570,7 +1604,8 @@
         "NO_PROMOTION": "The order is not associated with any promotion, so it generates no entries.",
         "NOT_ELIGIBLE": "The participant does not meet the eligibility requirements of the Official Rules, so this order generates no entries. The merchandise is sold all the same.",
         "OUTSIDE_PROMOTION_WINDOW": "The payment was received outside the promotion period, so it generates no entries."
-      }
+      },
+      "guestBuyer": "{name} (bought without an account)"
     },
     "participants": {
       "title": "Participants",
@@ -1823,7 +1858,8 @@
       "ABANDONED_CHECKOUT": "Abandoned or incomplete payment",
       "CUSTOMER_REQUEST": "Customer request",
       "TEST_ORDER": "Test order",
-      "ZELLE_PAYMENT_VERIFIED": "Zelle payment verified in the bank"
+      "ZELLE_PAYMENT_VERIFIED": "Zelle payment verified in the bank",
+      "VENMO_PAYMENT_VERIFIED": "Venmo payment verified in the app"
     },
     "warnings": {
       "ENTRY_CAP_REACHED": "The entry cap for this promotion has been reached.",
@@ -2112,12 +2148,13 @@
     },
     "payments": {
       "title": "Payments",
-      "description": "How your customers can pay and which Zelle account they send money to.",
+      "description": "How your customers can pay and which Zelle and Venmo accounts they send the money to.",
       "currentHeading": "What buyers see today",
       "methods": {
         "zelle": "Zelle",
         "card": "Card",
-        "cash": "Cash"
+        "cash": "Cash",
+        "venmo": "Venmo"
       },
       "on": "on",
       "off": "off",
@@ -2135,18 +2172,28 @@
       "cashEnabledHint": "Only if you have a physical point of sale where buyers pay and pick up.",
       "save": "Save payment methods",
       "saved": "Done. Checkout now shows these payment methods.",
-      "readOnly": "You can see payment methods, but changing them requires permission to edit the catalog."
+      "readOnly": "You can see payment methods, but changing them requires permission to edit the catalog.",
+      "venmoHeading": "Venmo",
+      "venmoEnabledLabel": "Accept Venmo payments",
+      "venmoEnabledHint": "The buyer sees your Venmo QR code and username, pays from their app and uploads the screenshot. You confirm the payment on the order once you see it in your Venmo.",
+      "venmoNameLabel": "Venmo account name",
+      "venmoNameHint": "As it appears on your Venmo profile.",
+      "venmoHandleLabel": "Venmo username",
+      "venmoHandleHint": "With or without the @. Example: @JoseEduardo-CruzRodriguez",
+      "venmoQrLabel": "Venmo QR code",
+      "venmoQrHint": "In the Venmo app tap your photo, then \"Venmo me\", and upload a screenshot of the code. If you don't upload a new one, the current one is kept.",
+      "guestCheckoutOn": "Since you only take Zelle or Venmo, your customers buy without an account: they leave their WhatsApp and name, reserve and pay."
     },
     "zellePayment": {
-      "title": "Zelle payment",
-      "pendingStage": "Pending: review the Zelle payment",
-      "confirmHeading": "Confirm the Zelle payment",
-      "confirmIntro": "Only confirm after you see the money in your bank. Confirming records who confirmed it and when, marks the order as paid and generates its entries under the same rules as any purchase.",
-      "confirmSubmit": "Confirm Zelle payment",
-      "confirmCheckbox": "I saw the {total} Zelle payment for order {number} in my bank.",
+      "title": "{app} payment",
+      "pendingStage": "Pending: review the {app} payment",
+      "confirmHeading": "Confirm the {app} payment",
+      "confirmIntro": "Only confirm after you see the money in your {app}. Confirming records who confirmed it and when, marks the order paid and generates its entries under the same rules as any purchase.",
+      "confirmSubmit": "Confirm {app} payment",
+      "confirmCheckbox": "I saw the {total} payment for order {number} in my {app}.",
       "noCapability": "Your account can't confirm payments. Ask whoever manages panel accounts.",
-      "impactZelle": "via Zelle",
-      "awaitingBody": "A pending Zelle order doesn't generate entries. They're generated when you confirm the payment.",
+      "impactZelle": "by {app}",
+      "awaitingBody": "A pending {app} order generates no entries. They're generated when you confirm the payment.",
       "reviewTitle": "Receipt and customer contact",
       "noReceiptBadge": "No receipt",
       "receiptBadge": "{count, plural, one {# receipt} other {# receipts}}",
@@ -2154,10 +2201,10 @@
       "noPhone": "Not provided",
       "expectedLabel": "What should arrive",
       "expectedValue": "{total} with memo {number}",
-      "verifyTitle": "Check your bank before confirming",
-      "verifyBody": "Open your bank and look for a {total} Zelle payment with memo {number}. A screenshot can be faked: what counts is the money in your account.",
+      "verifyTitle": "Check your account before confirming",
+      "verifyBody": "Open your {app} and look for a {total} payment with the note {number}. A screenshot can be faked: what counts is the money in your account.",
       "noReceiptBody": "The customer hasn't uploaded a receipt yet. You can message them on WhatsApp to ask for it.",
-      "receiptAlt": "Zelle receipt for order {number}",
+      "receiptAlt": "{app} receipt for order {number}",
       "receiptCaption": "Uploaded {date}. Tap the image to see it full size.",
       "olderHeading": "Earlier receipts",
       "olderLink": "Uploaded {date}",
@@ -2167,10 +2214,15 @@
       "whatsappPaidCta": "Tell them on WhatsApp their payment is confirmed",
       "whatsappGreeting": "Hi {name}!",
       "whatsappGreetingNoName": "Hi!",
-      "whatsappAskReceipt": "{greeting} This is {brand} about your order {number}. To complete it, send {total} via Zelle and upload a screenshot of the receipt on your order. Thank you!",
+      "whatsappAskReceipt": "{greeting} This is {brand} about your order {number}. To complete it, send {total} by {app} and upload the payment screenshot on your order. Thank you!",
       "whatsappReviewing": "{greeting} This is {brand}. We got the receipt for your order {number} and we're reviewing the payment. We'll let you know as soon as it's confirmed.",
       "whatsappPaid": "{greeting} 🎉 This is {brand}. We confirmed your {total} payment for order {number}. Thanks for your purchase and good luck!",
-      "whatsappPaidWithEntries": "{greeting} 🎉 This is {brand}. We confirmed your {total} payment for order {number}. You now have {entries} entries in the drawing; you can see them in your account. Thanks for your purchase and good luck!"
+      "whatsappPaidWithEntries": "{greeting} 🎉 This is {brand}. We confirmed your {total} payment for order {number}. You now have {entries} entries in the drawing. Thanks for your purchase and good luck!",
+      "buyerNameLabel": "Customer",
+      "noName": "No name",
+      "paidWithLabel": "Paid with",
+      "numbersJoin": "to",
+      "whatsappPaidWithNumbers": "{greeting} 🎉 This is {brand}. We confirmed your {total} payment for order {number}. Your drawing numbers: {numbers}. Thanks for your purchase and good luck!"
     }
   },
   "eligibility": {

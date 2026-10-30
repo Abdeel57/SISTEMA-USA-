@@ -73,10 +73,13 @@ export default async function AdminOrderDetailPage({
    */
   const isCash = result.ok && result.data.payment_method === "CASH";
   // 0041: Zelle es el mismo pago manual con otro canal: misma ficha de cobro.
+  // 0042: y Venmo, igual que Zelle.
   const isZelle = result.ok && result.data.payment_method === "ZELLE";
+  const isVenmo = result.ok && result.data.payment_method === "VENMO";
+  const isTransfer = isZelle || isVenmo;
   const cash =
-    isCash || isZelle ? await fetchAdminOrderCashPayment(id, locale, screen.session) : null;
-  const brandName = isZelle ? (await loadBrand()).profile.name : "";
+    isCash || isTransfer ? await fetchAdminOrderCashPayment(id, locale, screen.session) : null;
+  const brandName = isTransfer ? (await loadBrand()).profile.name : "";
 
   // DEC-085: hay algo que enviar si el pedido esta cobrado y lleva mercancia.
   // Sin `product_kind` (API anterior) se supone que si: la ruta lo comprueba.
@@ -137,13 +140,19 @@ export default async function AdminOrderDetailPage({
                   {t("columnPayment")}
                 </dt>
                 <dd className="text-body-sm text-text">
-                  {isCash ? t("paymentCash") : isZelle ? t("paymentZelle") : t("paymentCard")}
+                  {isCash
+                    ? t("paymentCash")
+                    : isZelle
+                      ? t("paymentZelle")
+                      : isVenmo
+                        ? t("paymentVenmo")
+                        : t("paymentCard")}
                 </dd>
               </div>
             </dl>
           </Card>
 
-          {isZelle && result.ok ? (
+          {isTransfer && result.ok ? (
             <ZelleReviewPanel
               order={result.data}
               locale={locale}
@@ -157,7 +166,8 @@ export default async function AdminOrderDetailPage({
               cash={cash.data}
               locale={locale}
               actorCanConfirm={can(screen.actor, "order.cash.confirm")}
-              channel={isZelle ? "ZELLE" : "CASH"}
+              channel={isZelle ? "ZELLE" : isVenmo ? "VENMO" : "CASH"}
+              buyerName={result.ok ? (result.data.contact_name ?? null) : null}
             />
           ) : (
             <AdminSectionError failure={cash.error} headingLevel="h2" />

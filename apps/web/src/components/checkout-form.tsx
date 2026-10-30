@@ -91,6 +91,9 @@ export function CheckoutForm({
   const asksFulfillment = method === "CASH" && cashDelivery !== null;
   const needsAddress = !(asksFulfillment && fulfillment === "PICKUP");
   const isZelle = method === "ZELLE" && zelle !== null;
+  // 0042: Venmo pide lo mismo que Zelle: el WhatsApp, para avisar del pago.
+  const isVenmo = method === "VENMO";
+  const isTransfer = isZelle || isVenmo;
 
   return (
     <form action={formAction} className="flex flex-col gap-s5">
@@ -105,7 +108,7 @@ export function CheckoutForm({
        */}
       <PaymentMethodChoice methods={methods} value={method} onChange={setMethod} />
 
-      {isZelle ? (
+      {isTransfer ? (
         <FormField
           label={t("fields.whatsapp")}
           description={t("fields.whatsappHint")}
@@ -178,13 +181,19 @@ export function CheckoutForm({
        * pedido en efectivo por carrito-, es lo que evita que alguien lo pruebe.
        */}
       <Button type="submit" variant="buy" size="lg" fullWidth loading={pending}>
-        {method === "CASH" ? t("payment.cashCta") : isZelle ? t("payment.zelleCta") : t("payCta")}
+        {method === "CASH"
+          ? t("payment.cashCta")
+          : isZelle
+            ? t("payment.zelleCta")
+            : isVenmo
+              ? t("payment.venmoCta")
+              : t("payCta")}
       </Button>
 
       <p className="text-caption text-text-subtle">
         {method === "CASH"
           ? t("payment.cashNote")
-          : isZelle
+          : isTransfer
             ? t("payment.zelleNote")
             : t("providerNote")}
       </p>

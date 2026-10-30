@@ -11,8 +11,9 @@ import { EligibilityDeclarationForm } from "@/components/eligibility-declaration
 import { EntryQuotePanel } from "@/components/entry-quote-panel";
 import type { CashDeliveryOptions } from "@/components/fulfillment-choice";
 import { PageTitle } from "@/components/page-title";
+import { ReserveForm } from "@/components/reserve-form";
 import { formatMoney } from "@/i18n/formatters";
-import type { Locale } from "@/i18n/locales";
+import { localeTag, type Locale } from "@/i18n/locales";
 import { Link } from "@/i18n/navigation";
 import { routing } from "@/i18n/routing";
 import {
@@ -25,6 +26,7 @@ import {
   type PaymentMethod,
   type SiteConfigResponse,
 } from "@/lib/api";
+import { DEFAULT_DIAL_COUNTRY, dialOptions } from "@/lib/dial-codes";
 import { isFeatureEnabled, toFeatureFlags } from "@/lib/flags";
 import { loadParticipant } from "@/lib/participant-server";
 import { readSession } from "@/lib/session-server";
@@ -60,6 +62,14 @@ export default async function CheckoutPage({ params }: { params: Promise<{ local
 
   const t = await getTranslations("checkout");
   const tEligibility = await getTranslations("eligibility");
+
+  // 0042: si la tienda solo cobra por Zelle o Venmo, no se pide cuenta: se
+  // aparta el pedido con el WhatsApp y el nombre. Vale igual con o sin sesion.
+  const siteConfig = await fetchSiteConfig(locale);
+  if (siteConfig.ok && siteConfig.data.payment_methods?.guest_checkout === true) {
+    return <ReserveCheckout locale={locale} />;
+  }
+
   const { session, state } = await loadParticipant(locale);
 
   if (state.kind === "anonymous") {
@@ -68,12 +78,9 @@ export default async function CheckoutPage({ params }: { params: Promise<{ local
     // va a pagar: pedir una cuenta sin decir por cuanto es lo que hace que la
     // gente se vaya. Al volver del alta o del login, el carrito ya es de la
     // cuenta (lo pasa la API) y esta misma pagina sigue con el pago.
-    const [guestCart, guestConfig] = await Promise.all([
-      fetchCart(locale, await readSession()),
-      fetchSiteConfig(locale),
-    ]);
+    const guestCart = await fetchCart(locale, await readSession());
     const hasLines = guestCart.ok && guestCart.data.lines.length > 0;
-    const guestPayments = paymentOptionsOf(guestConfig.ok ? guestConfig.data : null);
+    const guestPayments = paymentOptionsOf(siteConfig.ok ? siteConfig.data : null);
 
     return (
       <CheckoutShell title={t("title")}>
@@ -138,10 +145,8 @@ export default async function CheckoutPage({ params }: { params: Promise<{ local
   // DEC-067: si la promocion comprueba edad o estado y la cuenta no los ha
   // declarado, se piden ANTES de cobrar. Si alguna de las dos lecturas falla no
   // se bloquea el pago: el backend vuelve a comprobarlo al otorgar.
-  const [configResult, eligibilityResult] = await Promise.all([
-    fetchSiteConfig(locale),
-    fetchMyEligibility(locale, session),
-  ]);
+  const configResult = siteConfig;
+  const eligibilityResult = await fetchMyEligibility(locale, session);
   const flags = configResult.ok ? toFeatureFlags(configResult.data) : null;
   const checksEligibility =
     flags !== null &&
@@ -232,6 +237,7 @@ function paymentOptionsOf(config: SiteConfigResponse | null): {
 
   const methods: PaymentMethod[] = [];
   if (published.zelle !== null) methods.push("ZELLE");
+  if ((published.venmo ?? null) !== null) methods.push("VENMO");
   if (published.card) methods.push("CARD");
   if (published.cash) methods.push("CASH");
   return { methods, zelle: published.zelle };
@@ -253,6 +259,59 @@ function cashDeliveryOf(cart: CartWithQuote, locale: Locale): CashDeliveryOption
         ? { shipping, total }
         : null,
   };
+}
+
+/**
+ * 0042: comprar sin cuenta. El formulario de "Apartar" y, al lado, lo que se
+ * va a pagar. El total es el del carrito, envio incluido si lleva mercancia: es
+ * lo que se pagara por Zelle o Venmo.
+ */
+async function ReserveCheckout({ locale }: { readonly locale: Locale }) {
+  const t = await getTranslations("checkout");
+  const cart = await fetchCart(locale, await readSession());
+
+  if (!cart.ok) {
+    return (
+      <CheckoutShell title={t("title")}>
+        <ApiErrorState failure={cart.error} headingLevel="h2" />
+      </CheckoutShell>
+    );
+  }
+
+  if (cart.data.lines.length === 0) {
+    return (
+      <CheckoutShell title={t("title")}>
+        <EmptyState
+          headingLevel="h2"
+          title={t("emptyTitle")}
+          description={t("emptyBody")}
+          action={
+            <Link href="/shop" className={buttonVariants({ variant: "buy" })}>
+              {t("backToCart")}
+            </Link>
+          }
+        />
+      </CheckoutShell>
+    );
+  }
+
+  const total = cart.data.total === null ? null : formatMoney(cart.data.total, locale);
+
+  return (
+    <CheckoutShell title={t("title")}>
+      <div className="grid gap-s6 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] lg:items-start">
+        <ReserveForm
+          locale={locale}
+          dialOptions={dialOptions(localeTag(locale))}
+          defaultCountry={DEFAULT_DIAL_COUNTRY}
+          total={total}
+        />
+        <aside className="flex flex-col gap-s4">
+          <OrderSummary cart={cart.data} locale={locale} offersPickup={false} />
+        </aside>
+      </div>
+    </CheckoutShell>
+  );
 }
 
 /**

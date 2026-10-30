@@ -1459,6 +1459,9 @@ describe("pago por Zelle (0041): checkout, comprobante, revision y confirmacion"
       card: true,
       cash: true,
       zelle: { recipient_name: "Rifas Fixture LLC", recipient: "pagos@example.invalid" },
+      venmo: null,
+      // Con tarjeta y efectivo, el checkout sigue pidiendo cuenta.
+      guest_checkout: false,
     });
   });
 
@@ -1618,6 +1621,17 @@ describe("pago por Zelle (0041): checkout, comprobante, revision y confirmacion"
       stage: "ENTRIES_GENERATED",
       entries: { status: "GENERATED", entries_granted: EXPECTED_ENTRIES },
     });
+
+    // 0042: el pedido trae sus numeros, para mandarlos por WhatsApp.
+    const detail = (await manager.request("GET", `/api/v1/admin/orders/${zelleOrder.id}`)).json<{
+      entry_numbers: { quantity: number; first_number: string; last_number: string }[] | null;
+    }>();
+    expect(detail.entry_numbers).not.toBeNull();
+    expect(detail.entry_numbers?.reduce((total, batch) => total + batch.quantity, 0)).toBe(
+      EXPECTED_ENTRIES,
+    );
+    expect(detail.entry_numbers?.[0]?.first_number).toMatch(/^APP/u);
+    expect(await visibleNumbers(zelleOrder.id)).toContain(detail.entry_numbers?.[0]?.first_number);
 
     const cut = (await manager.request("GET", "/api/v1/admin/reports/daily-cut")).json<{
       zelle: { orders: number; amount: { amount_minor: string } };

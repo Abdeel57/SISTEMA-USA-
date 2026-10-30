@@ -34,7 +34,11 @@ import {
 } from "@app/sweepstakes";
 import { sql } from "drizzle-orm";
 
-import { entryBatches, promotionEntryNumberSequences } from "../schema/entries.js";
+import {
+  entryBatches,
+  entryTransactions,
+  promotionEntryNumberSequences,
+} from "../schema/entries.js";
 import { currentExecutor, isInTransaction, type DbExecutor } from "./executor.js";
 
 type BatchRow = typeof entryBatches.$inferSelect;
@@ -128,6 +132,27 @@ export class DrizzleEntryNumberRepository implements EntryNumberPort {
       .orderBy(asc(entryBatches.createdAt));
 
     return rows.map(toBatch);
+  }
+
+  /**
+   * 0042: los bloques de numeros que otorgo UNA fuente (un pedido: `order:<id>`),
+   * en el orden en que se asignaron. Es lo que el organizador le manda por
+   * WhatsApp a quien compro sin cuenta, y lo que ve en su pedido.
+   */
+  public async listBatchesForSource(
+    promotionId: string,
+    sourceRef: string,
+  ): Promise<readonly EntryBatchRecord[]> {
+    const rows = await this.db
+      .select({ batch: entryBatches })
+      .from(entryBatches)
+      .innerJoin(entryTransactions, eq(entryTransactions.id, entryBatches.entryTransactionId))
+      .where(
+        and(eq(entryBatches.promotionId, promotionId), eq(entryTransactions.sourceRef, sourceRef)),
+      )
+      .orderBy(asc(entryBatches.createdAt));
+
+    return rows.map((row) => toBatch(row.batch));
   }
 
   public async getFormat(promotionId: string): Promise<EntryNumberFormat | null> {

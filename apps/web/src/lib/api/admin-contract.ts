@@ -561,27 +561,42 @@ export interface AdminShippingRateInput {
 }
 
 /**
- * [CONTRATO] Formas de pago manual y cuenta Zelle (0041).
+ * [CONTRATO] Formas de pago manual y cuentas Zelle (0041) y Venmo (0042).
  *
  * `card_enabled` es informativo: depende de las llaves de Stripe del
- * despliegue, no de este panel.
+ * despliegue, no de este panel. `guest_checkout` tambien: dice si, con lo
+ * que hay activado, comprar se hace sin cuenta (solo Zelle o Venmo).
  */
 export interface AdminPaymentSettings {
   readonly cash_enabled: boolean;
   readonly zelle_enabled: boolean;
   readonly zelle_recipient_name: string | null;
   readonly zelle_recipient: string | null;
+  readonly venmo_enabled?: boolean;
+  readonly venmo_recipient_name?: string | null;
+  /** Sin la arroba. */
+  readonly venmo_handle?: string | null;
+  readonly venmo_qr_media_id?: string | null;
+  readonly venmo_qr_url?: string | null;
   readonly card_enabled: boolean;
+  readonly guest_checkout?: boolean;
   readonly updated_at: string;
   readonly updated_by_admin_user_id: string | null;
 }
 
-/** Activar Zelle exige nombre y cuenta (la API responde 422 si faltan). */
+/**
+ * Activar Zelle exige nombre y cuenta; activar Venmo, nombre y usuario (la API
+ * responde 422 si faltan).
+ */
 export interface AdminPaymentSettingsInput {
   readonly cash_enabled: boolean;
   readonly zelle_enabled: boolean;
   readonly zelle_recipient_name: string | null;
   readonly zelle_recipient: string | null;
+  readonly venmo_enabled: boolean;
+  readonly venmo_recipient_name: string | null;
+  readonly venmo_handle: string | null;
+  readonly venmo_qr_media_id: string | null;
 }
 
 /**

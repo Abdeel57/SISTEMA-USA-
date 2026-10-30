@@ -512,6 +512,10 @@ export const publicConfigSchema = z.object({
    * `cash` y `zelle` los activa la tienda en el panel. Con Zelle, a quien se
    * paga: el comprador lo necesita para transferir y es lo mismo que vera en
    * su banco, asi que no es un dato privado.
+   *
+   * 0042: Venmo, con el usuario y la imagen de su codigo QR. `guest_checkout`:
+   * la tienda solo cobra por transferencia (Zelle o Venmo), asi que comprar no
+   * pide cuenta: se aparta el pedido con el WhatsApp y el nombre.
    */
   payment_methods: z.object({
     card: z.boolean(),
@@ -522,5 +526,13 @@ export const publicConfigSchema = z.object({
         recipient: z.string(),
       })
       .nullable(),
+    venmo: z
+      .object({
+        recipient_name: z.string(),
+        handle: z.string(),
+        qr_url: z.string().nullable(),
+      })
+      .nullable(),
+    guest_checkout: z.boolean(),
   }),
 });

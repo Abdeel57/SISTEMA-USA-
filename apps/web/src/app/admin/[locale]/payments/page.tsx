@@ -62,6 +62,7 @@ export default async function AdminPaymentsPage({
               {(
                 [
                   ["zelle", result.data.zelle_enabled],
+                  ["venmo", result.data.venmo_enabled ?? false],
                   ["card", result.data.card_enabled],
                   ["cash", result.data.cash_enabled],
                 ] as const
@@ -76,6 +77,12 @@ export default async function AdminPaymentsPage({
             {result.data.card_enabled ? null : (
               <p className="mt-s3 text-caption text-text-subtle">{t("cardNote")}</p>
             )}
+            {/* 0042: con solo Zelle o Venmo se compra sin cuenta; que se sepa. */}
+            {result.data.guest_checkout === true ? (
+              <div className="mt-s3">
+                <Alert tone="info">{t("guestCheckoutOn")}</Alert>
+              </div>
+            ) : null}
           </Card>
 
           {canWrite ? (

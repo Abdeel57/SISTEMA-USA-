@@ -451,6 +451,16 @@ export interface PaymentSettingsRecord {
   readonly zelleRecipientName: string | null;
   /** Correo o telefono registrado en Zelle. `null` sin configurar. */
   readonly zelleRecipient: string | null;
+  /** 0042: Venmo. */
+  readonly venmoEnabled: boolean;
+  /** Tal como sale en Venmo. `null` sin configurar. */
+  readonly venmoRecipientName: string | null;
+  /** Usuario de Venmo, sin la arroba. `null` sin configurar. */
+  readonly venmoHandle: string | null;
+  /** La imagen del codigo QR, o `null`. */
+  readonly venmoQrMediaId: string | null;
+  /** URL publica de esa imagen, resuelta por el repositorio. */
+  readonly venmoQrUrl: string | null;
   readonly updatedAt: Date;
   /** `null` mientras nadie haya guardado desde el panel. */
   readonly updatedByAdminUserId: string | null;
@@ -458,13 +468,22 @@ export interface PaymentSettingsRecord {
 
 export type PaymentSettingsInput = Pick<
   PaymentSettingsRecord,
-  "cashEnabled" | "zelleEnabled" | "zelleRecipientName" | "zelleRecipient"
+  | "cashEnabled"
+  | "zelleEnabled"
+  | "zelleRecipientName"
+  | "zelleRecipient"
+  | "venmoEnabled"
+  | "venmoRecipientName"
+  | "venmoHandle"
+  | "venmoQrMediaId"
 >;
 
 export interface PaymentSettingsRepository {
   /** La fila siempre existe: la siembra la migracion 0041. */
   read(): Promise<PaymentSettingsRecord>;
   update(input: PaymentSettingsInput, updatedByAdminUserId: string): Promise<PaymentSettingsRecord>;
+  /** 0042: que la imagen del QR de Venmo exista antes de guardarla. */
+  mediaExists(mediaId: string): Promise<boolean>;
 }
 
 /** Un comprobante de pago, sin los bytes. */

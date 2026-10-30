@@ -86,13 +86,14 @@ export function isCashOrder(order: Pick<OrderRecord, "provider">): boolean {
  *
  * `PICKUP`: se lo entregan en el mismo punto de venta donde paga. Sin envio y
  * sin direccion (no hay a donde mandarlo). `DELIVERY`: pide que se lo envien,
- * con su direccion, y paga el envio como con tarjeta.
+ * con su direccion, y paga el envio como con tarjeta. 0042: al apartar sin
+ * cuenta la direccion es `null`; el organizador la pide por WhatsApp.
  */
 export type CashFulfillment =
   | { readonly method: "PICKUP" }
   | {
       readonly method: "DELIVERY";
-      readonly shippingAddress: Readonly<Record<string, string | null>>;
+      readonly shippingAddress: Readonly<Record<string, string | null>> | null;
     };
 
 /**
@@ -103,6 +104,8 @@ export interface ManualPayment {
   readonly channel: ManualPaymentChannelValue;
   /** WhatsApp en E.164, o `null`. */
   readonly contactPhone: string | null;
+  /** 0042: nombre de quien aparta sin cuenta, o `null`. */
+  readonly contactName?: string | null;
 }
 
 export interface CashCheckout {
@@ -150,10 +153,13 @@ export function createCashCheckout(
           taxTotalMinor: null,
           totalMinor: cart.totalMinor,
           shippingAddress:
-            fulfillment.method === "DELIVERY" ? { ...fulfillment.shippingAddress } : null,
+            fulfillment.method === "DELIVERY" && fulfillment.shippingAddress !== null
+              ? { ...fulfillment.shippingAddress }
+              : null,
           fulfillmentMethod: cart.fulfillmentMethod,
           manualPaymentChannel: payment?.channel ?? "CASH",
           contactPhone: payment?.contactPhone ?? null,
+          contactName: payment?.contactName ?? null,
           items: cart.items,
           createdAt: now,
         });

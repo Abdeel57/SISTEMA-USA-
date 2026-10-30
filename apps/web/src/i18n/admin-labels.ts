@@ -237,6 +237,7 @@ const TRANSLATED_REASONS = [
   "CASH_RECEIVED_AT_STORE",
   /* 0041: el pago por Zelle se vio en el banco antes de confirmarlo. */
   "ZELLE_PAYMENT_VERIFIED",
+  "VENMO_PAYMENT_VERIFIED",
   "RETRY_ENTRY_GENERATION",
   /* DEC-085: cancelar un pedido que nunca se cobro. */
   "DUPLICATE_ORDER",
@@ -303,6 +304,8 @@ export async function reasonLabeller(locale: Locale): Promise<(key: string) => s
         return t("CASH_RECEIVED_AT_STORE");
       case "ZELLE_PAYMENT_VERIFIED":
         return t("ZELLE_PAYMENT_VERIFIED");
+      case "VENMO_PAYMENT_VERIFIED":
+        return t("VENMO_PAYMENT_VERIFIED");
       case "RETRY_ENTRY_GENERATION":
         return t("RETRY_ENTRY_GENERATION");
       case "DUPLICATE_ORDER":

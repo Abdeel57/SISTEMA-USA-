@@ -36,7 +36,7 @@ export async function OrderCancelPanel({
   const intro =
     order.payment_method === "CASH"
       ? t("introCash")
-      : order.payment_method === "ZELLE"
+      : order.payment_method === "ZELLE" || order.payment_method === "VENMO"
         ? t("introZelle")
         : t("introCard");
 

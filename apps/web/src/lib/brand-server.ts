@@ -26,3 +26,14 @@ export const loadBrand = cache(async (): Promise<RuntimeBrand> => {
   const result = await fetchSiteConfig("en");
   return runtimeBrandFrom(result.ok ? (result.data.brand ?? null) : null);
 });
+
+/**
+ * 0042: si la tienda vende SIN cuentas -solo cobra por Zelle o Venmo-. Con
+ * ella, la cabecera no ofrece entrar ni "mi cuenta": se compra apartando con
+ * el WhatsApp. La misma lectura de `/config` que la marca. Si la API no
+ * responde, se sigue como siempre (con cuentas).
+ */
+export const loadGuestCheckout = cache(async (): Promise<boolean> => {
+  const result = await fetchSiteConfig("en");
+  return result.ok && result.data.payment_methods?.guest_checkout === true;
+});

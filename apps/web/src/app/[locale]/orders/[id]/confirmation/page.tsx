@@ -7,7 +7,7 @@ import { SignInRequired } from "@/components/account-shell";
 import { ApiErrorState } from "@/components/api-error-state";
 import { OrderLineList } from "@/components/order-line-list";
 import { PageTitle } from "@/components/page-title";
-import { ZellePaymentCard } from "@/components/zelle-payment-card";
+import { TransferPaymentCard } from "@/components/transfer-payment-card";
 import {
   useOrderEntryStateBody,
   useOrderEntryStateLabel,
@@ -89,19 +89,27 @@ export default async function OrderConfirmationPage({
   }
 
   const order = result.data;
+  // 0042: comprando sin cuenta, la pantalla habla de "apartado" y no enlaza a
+  // "Mis pedidos" ni a "Mis participaciones": el aviso llega por WhatsApp.
+  const guestCheckout =
+    configResult.ok && configResult.data.payment_methods?.guest_checkout === true;
   const timeZone =
     promotionResult.ok && promotionResult.data !== null
       ? promotionResult.data.legal_timezone
       : "UTC";
 
   return (
-    <ConfirmationShell title={t("title")} intro={t("intro")}>
+    <ConfirmationShell
+      title={guestCheckout ? t("reservedTitle") : t("title")}
+      intro={guestCheckout ? t("reservedIntro") : t("intro")}
+    >
       <div className="flex flex-col gap-s6">
         {order.payment_method === "CASH" ? <CashPaymentCard order={order} locale={locale} /> : null}
-        {order.payment_method === "ZELLE" ? (
-          <ZellePaymentCard
+        {order.payment_method === "ZELLE" || order.payment_method === "VENMO" ? (
+          <TransferPaymentCard
             order={order}
             zelle={configResult.ok ? (configResult.data.payment_methods?.zelle ?? null) : null}
+            venmo={configResult.ok ? (configResult.data.payment_methods?.venmo ?? null) : null}
             locale={locale}
             timeZone={timeZone}
           />
@@ -112,16 +120,20 @@ export default async function OrderConfirmationPage({
         <p className="text-caption text-text-subtle">{t("rulesNote")}</p>
 
         <div className="flex flex-wrap items-center gap-3">
-          <Link
-            href={`/account/orders/${order.id}`}
-            className={buttonVariants({ variant: "accent" })}
-          >
-            {t("viewOrder")}
-          </Link>
+          {guestCheckout ? null : (
+            <>
+              <Link
+                href={`/account/orders/${order.id}`}
+                className={buttonVariants({ variant: "accent" })}
+              >
+                {t("viewOrder")}
+              </Link>
 
-          <Link href="/account/entries" className={buttonVariants({ variant: "secondary" })}>
-            {t("viewEntries")}
-          </Link>
+              <Link href="/account/entries" className={buttonVariants({ variant: "secondary" })}>
+                {t("viewEntries")}
+              </Link>
+            </>
+          )}
 
           <Link href="/shop" className={buttonVariants({ variant: "ghost" })}>
             {t("continueShopping")}

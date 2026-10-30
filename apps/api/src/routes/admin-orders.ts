@@ -75,8 +75,11 @@ const listQuerySchema = paginationQuerySchema.extend({
    * que se teclea no vuelve en la respuesta: el correo sigue enmascarado.
    */
   q: z.string().trim().min(1).max(120).optional(),
-  /** DEC-078: `CASH` para la cola de caja. 0041: `ZELLE` para la de Zelle. */
-  payment_method: z.enum(["CARD", "CASH", "ZELLE"]).optional(),
+  /**
+   * DEC-078: `CASH` para la cola de caja. 0041: `ZELLE` para la de Zelle.
+   * 0042: `VENMO`, y `TRANSFER` = Zelle o Venmo, la cola de pagos por revisar.
+   */
+  payment_method: z.enum(["CARD", "CASH", "ZELLE", "VENMO", "TRANSFER"]).optional(),
   /** DEC-078: `true` = solo los que siguen esperando el cobro. */
   awaiting_payment: z.enum(["true", "false"]).optional(),
 });
@@ -148,6 +151,8 @@ const dailyCutSchema = z.object({
   cash: dailyCutTotalSchema,
   /** 0041: cobros por Zelle confirmados ese dia. */
   zelle: dailyCutTotalSchema,
+  /** 0042: cobros por Venmo confirmados ese dia. */
+  venmo: dailyCutTotalSchema,
   card: dailyCutTotalSchema,
   total: dailyCutTotalSchema,
   /** Reembolsos con tarjeta hechos ESE dia, de pedidos de cualquier dia. */
@@ -167,7 +172,7 @@ const dailyCutSchema = z.object({
         order_id: z.uuid(),
         order_number: z.string(),
         paid_at: z.string(),
-        payment_method: z.enum(["CARD", "CASH", "ZELLE"]),
+        payment_method: z.enum(["CARD", "CASH", "ZELLE", "VENMO"]),
         order_status: z.string(),
         customer_name: z.string().nullable(),
         /** Enmascarado, como en el listado. */
@@ -203,7 +208,9 @@ const adminOrderRowSchema = z.object({
   participant_email: z.string(),
   participant_id: z.uuid(),
   /** DEC-078: `CASH` se cobra en caja y se confirma desde la ficha. */
-  payment_method: z.enum(["CARD", "CASH", "ZELLE"]),
+  payment_method: z.enum(["CARD", "CASH", "ZELLE", "VENMO"]),
+  /** 0042: el nombre que dejo al apartar, o el de la cuenta. No es un dato sensible del listado. */
+  buyer_name: z.string().nullable(),
 });
 
 export function buildAdminOrdersRoutes(dependencies: AppDependencies): RouteDefinition[] {
@@ -318,6 +325,7 @@ export function buildAdminOrdersRoutes(dependencies: AppDependencies): RouteDefi
               placed_at: summary.placed_at,
               total: summary.total,
               participant_email: maskEmail(row.participantEmail) ?? "",
+              buyer_name: row.buyerName,
               participant_id: order.participantId,
               payment_method: summary.payment_method,
             };
@@ -680,7 +688,7 @@ export function buildAdminOrdersRoutes(dependencies: AppDependencies): RouteDefi
           );
         }
 
-        const sumOf = (method: "CASH" | "ZELLE" | "CARD" | null) => {
+        const sumOf = (method: "CASH" | "ZELLE" | "VENMO" | "CARD" | null) => {
           const rows = cut.totals.filter(
             (row) => row.currency === currency && (method === null || row.method === method),
           );
@@ -744,6 +752,7 @@ export function buildAdminOrdersRoutes(dependencies: AppDependencies): RouteDefi
           to: window.to.toISOString(),
           cash: sumOf("CASH"),
           zelle: sumOf("ZELLE"),
+          venmo: sumOf("VENMO"),
           card: sumOf("CARD"),
           total: sumOf(null),
           refunds: {

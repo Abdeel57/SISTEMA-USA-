@@ -7,7 +7,7 @@ import { localeFrom, textFrom } from "./form-input";
 import { mutableSession } from "./session-server";
 
 /**
- * Sube la captura del comprobante de Zelle de un pedido (0041).
+ * Sube la captura del pago de un pedido por Zelle (0041) o Venmo (0042).
  *
  * El fichero viaja en el formulario hasta aqui y desde aqui a la API, en
  * base64: el navegador no habla con la API. Tipo y tamano se comprueban ANTES
@@ -41,12 +41,18 @@ export async function uploadPaymentReceiptAction(
   }
   if (raw.size > ADMIN_MEDIA_MAX_BYTES) return invalid("MEDIA_TOO_LARGE", FIELD);
 
+  // 0042: la app con la que pago. Solo los dos valores que existen; otro
+  // cualquiera se trata como no dicho y la API usa el canal del pedido.
+  const typedChannel = textFrom(formData, "payment_channel");
+  const channel = typedChannel === "ZELLE" || typedChannel === "VENMO" ? typedChannel : undefined;
+
   const bytes = Buffer.from(await raw.arrayBuffer());
   const uploaded = await uploadPaymentReceipt(
     orderId,
     bytes.toString("base64"),
     locale,
     await mutableSession(),
+    channel,
   );
 
   if (!uploaded.ok) return fromFailure(uploaded.error, FIELD);

@@ -117,6 +117,18 @@ export interface RegisterParticipantWithPhoneInput {
   readonly consents: readonly ConsentAcceptanceInput[];
 }
 
+/**
+ * 0042: quien aparta un pedido sin cuenta. Solo deja su WhatsApp -dato de
+ * CONTACTO, sin verificar- y su nombre.
+ */
+export interface RegisterGuestParticipantInput {
+  /** E.164, ya normalizado. */
+  readonly contactPhone: string;
+  readonly displayName: string;
+  readonly preferredLocale: "en-US" | "es-US";
+  readonly now: Date;
+}
+
 export interface IdentityRepository {
   /**
    * Alta de participante: identidad, credencial y perfil en UNA transaccion.
@@ -141,6 +153,17 @@ export interface IdentityRepository {
   registerParticipantWithPhone(
     input: RegisterParticipantWithPhoneInput,
   ): Promise<IdentityRecord | null>;
+
+  /**
+   * 0042: identidad de invitado y su participante, en UNA transaccion. La
+   * identidad no tiene correo, ni celular verificado, ni credencial: con ella
+   * no se puede iniciar sesion, solo usar la sesion que se abre al apartar. El
+   * WhatsApp va al participante como contacto, nunca a la identidad, asi que
+   * dos personas pueden dejar el mismo numero sin chocar.
+   */
+  registerGuestParticipant(
+    input: RegisterGuestParticipantInput,
+  ): Promise<{ readonly identityId: string; readonly participantId: string }>;
 
   /** DEC-060: la cuenta cuyo participante tiene ese celular VERIFICADO. */
   findByVerifiedPhone(phoneE164: string): Promise<IdentityRecord | null>;

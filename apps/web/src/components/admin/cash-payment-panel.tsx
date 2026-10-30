@@ -8,6 +8,7 @@ import { confirmCashPaymentAction, generateCashEntriesAction } from "@/lib/admin
 import {
   CASH_CONFIRM_REASONS,
   CASH_RETRY_REASONS,
+  VENMO_CONFIRM_REASONS,
   ZELLE_CONFIRM_REASONS,
 } from "@/lib/admin/reason-codes";
 import type { AdminCashPayment, CashPaymentStage } from "@/lib/api";
@@ -41,6 +42,7 @@ export async function CashPaymentPanel({
   locale,
   actorCanConfirm,
   channel = "CASH",
+  buyerName = null,
 }: {
   readonly cash: AdminCashPayment;
   readonly locale: Locale;
@@ -52,11 +54,18 @@ export async function CashPaymentPanel({
    * confirma: con Zelle no recibe billetes, comprueba una transferencia en su
    * banco.
    */
-  readonly channel?: "CASH" | "ZELLE";
+  readonly channel?: "CASH" | "ZELLE" | "VENMO";
+  /**
+   * 0042: el nombre que dejo quien aparto sin cuenta. Sin correo, es lo unico
+   * que dice de quien es el pedido; sin el, la ficha diria "anonimizada".
+   */
+  readonly buyerName?: string | null;
 }) {
   const t = await getTranslations({ locale, namespace: "admin.cashPayment" });
   const tz = await getTranslations({ locale, namespace: "admin.zellePayment" });
-  const zelle = channel === "ZELLE";
+  // 0042: Venmo se revisa igual que Zelle; solo cambia el nombre de la app.
+  const zelle = channel === "ZELLE" || channel === "VENMO";
+  const app = channel === "VENMO" ? "Venmo" : "Zelle";
   const reasonLabel = await reasonLabeller(locale);
   const total = formatMoney(cash.amount, locale) ?? "";
 
@@ -67,11 +76,11 @@ export async function CashPaymentPanel({
     <Card elevation="raised" padding="lg" className="border-brand/40">
       <div className="flex flex-wrap items-center justify-between gap-s3">
         <CardTitle as="h2" size="sm">
-          {zelle ? tz("title") : t("title")}
+          {zelle ? tz("title", { app }) : t("title")}
         </CardTitle>
         <Badge tone={cash.stage === "ENTRIES_GENERATED" ? "success" : "info"} size="sm" wrap>
           {zelle && cash.stage === "PENDING_CASH_PAYMENT"
-            ? tz("pendingStage")
+            ? tz("pendingStage", { app })
             : t(`stages.${cash.stage}`)}
         </Badge>
       </div>
@@ -100,7 +109,7 @@ export async function CashPaymentPanel({
                   {done ? "✓" : String(index + 1)}
                 </span>
                 {zelle && stage === "PENDING_CASH_PAYMENT"
-                  ? tz("pendingStage")
+                  ? tz("pendingStage", { app })
                   : t(`stages.${stage}`)}
               </li>
             );
@@ -122,7 +131,11 @@ export async function CashPaymentPanel({
         <div>
           <dt className="text-caption uppercase tracking-wide text-text-subtle">{t("customer")}</dt>
           <dd className="text-body-sm text-text">
-            {cash.customer_email === "" ? t("anonymized") : cash.customer_email}
+            {cash.customer_email !== ""
+              ? cash.customer_email
+              : buyerName === null || buyerName === undefined
+                ? t("anonymized")
+                : t("guestBuyer", { name: buyerName })}
           </dd>
         </div>
       </dl>
@@ -168,10 +181,10 @@ export async function CashPaymentPanel({
           {actorCanConfirm ? (
             <>
               <h3 className="text-label font-medium text-text">
-                {zelle ? tz("confirmHeading") : t("confirmHeading")}
+                {zelle ? tz("confirmHeading", { app }) : t("confirmHeading")}
               </h3>
               <p className="mt-s1 text-body-sm text-text-muted">
-                {zelle ? tz("confirmIntro") : t("confirmIntro")}
+                {zelle ? tz("confirmIntro", { app }) : t("confirmIntro")}
               </p>
               <div className="mt-s4">
                 <SensitiveConfirmForm
@@ -179,14 +192,19 @@ export async function CashPaymentPanel({
                   action={confirmCashPaymentAction}
                   hiddenFields={{ order_id: cash.order_id }}
                   impact={confirmImpact()}
-                  reasons={(zelle ? ZELLE_CONFIRM_REASONS : CASH_CONFIRM_REASONS).map((key) => ({
+                  reasons={(channel === "VENMO"
+                    ? VENMO_CONFIRM_REASONS
+                    : zelle
+                      ? ZELLE_CONFIRM_REASONS
+                      : CASH_CONFIRM_REASONS
+                  ).map((key) => ({
                     value: key,
                     label: reasonLabel(key),
                   }))}
-                  submitLabel={zelle ? tz("confirmSubmit") : t("confirmSubmit")}
+                  submitLabel={zelle ? tz("confirmSubmit", { app }) : t("confirmSubmit")}
                   confirmLabel={
                     zelle
-                      ? tz("confirmCheckbox", { total, number: cash.order_number })
+                      ? tz("confirmCheckbox", { total, number: cash.order_number, app })
                       : t("confirmCheckbox", { total, number: cash.order_number })
                   }
                 />
@@ -248,14 +266,14 @@ export async function CashPaymentPanel({
     return [
       {
         label: t("impactPayment"),
-        before: zelle ? tz("pendingStage") : t("stages.PENDING_CASH_PAYMENT"),
+        before: zelle ? tz("pendingStage", { app }) : t("stages.PENDING_CASH_PAYMENT"),
         delta: t("impactConfirm"),
         after: t("stages.PAID"),
       },
       {
         label: t("impactAmount"),
         before: total,
-        delta: zelle ? tz("impactZelle") : t("impactCash"),
+        delta: zelle ? tz("impactZelle", { app }) : t("impactCash"),
         after: total,
       },
       {
@@ -283,7 +301,7 @@ export async function CashPaymentPanel({
           {entries.status === "NOT_APPLICABLE" && entries.not_applicable_reason !== null
             ? t(`notApplicable.${entries.not_applicable_reason}`)
             : zelle && entries.status === "AWAITING_PAYMENT"
-              ? tz("awaitingBody")
+              ? tz("awaitingBody", { app })
               : t(`entriesBody.${entries.status}`)}
         </p>
         {entries.entries_granted === null ? null : (

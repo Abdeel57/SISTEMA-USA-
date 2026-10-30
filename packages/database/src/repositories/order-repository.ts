@@ -30,7 +30,7 @@
  * se convierte en participaciones lo decide `@app/sweepstakes`.
  */
 
-import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import type { JsonObject } from "@app/sweepstakes";
 import { toCanonicalJsonObject } from "@app/sweepstakes";
 
@@ -128,14 +128,16 @@ export interface OrderRecord {
   readonly fulfilledAt: Date | null;
   readonly shippingCarrier: string | null;
   readonly trackingNumber: string | null;
-  /** 0041: canal del pago manual (`CASH` o `ZELLE`); `null` en tarjeta. */
+  /** 0041: canal del pago manual (`CASH`, `ZELLE` o `VENMO`); `null` en tarjeta. */
   readonly manualPaymentChannel: ManualPaymentChannelValue | null;
   /** 0041: WhatsApp del comprador en E.164, o `null`. */
   readonly contactPhone: string | null;
+  /** 0042: nombre que dejo quien aparto el pedido sin cuenta, o `null`. */
+  readonly contactName: string | null;
 }
 
 /** 0041: como se entrega el dinero en un pago manual confirmado por una persona. */
-export type ManualPaymentChannelValue = "CASH" | "ZELLE";
+export type ManualPaymentChannelValue = "CASH" | "ZELLE" | "VENMO";
 
 /**
  * DEC-079: `DELIVERY` = se envia (con mercancia, lleva envio); `PICKUP` =
@@ -190,6 +192,8 @@ export interface CreateOrderInput {
   readonly manualPaymentChannel?: ManualPaymentChannelValue;
   /** 0041: WhatsApp del comprador en E.164. */
   readonly contactPhone?: string | null;
+  /** 0042: nombre de quien aparta sin cuenta. */
+  readonly contactName?: string | null;
 }
 
 /** DEC-085: ver `setFulfillment`. */
@@ -323,6 +327,7 @@ function toOrder(row: OrderRow, items: readonly ItemRow[]): OrderRecord {
     trackingNumber: row.trackingNumber,
     manualPaymentChannel: row.manualPaymentChannel,
     contactPhone: row.contactPhone,
+    contactName: row.contactName,
     createdAt: row.createdAt,
     paidAt: row.paidAt,
     qualifiedAt: row.qualifiedAt,
@@ -352,6 +357,7 @@ function draftRow(input: CreateOrderInput): typeof orders.$inferInsert {
     fulfillmentMethod: input.fulfillmentMethod ?? "DELIVERY",
     manualPaymentChannel: input.manualPaymentChannel ?? null,
     contactPhone: input.contactPhone ?? null,
+    contactName: input.contactName ?? null,
     createdAt: input.createdAt,
   };
 }
@@ -630,6 +636,31 @@ export class DrizzleOrderRepository {
    * vuelta a pendiente. Los cuatro campos van juntos: las CHECK de 0038
    * rechazan cualquier combinacion a medias.
    */
+  /**
+   * 0042: cambia el canal de un pago por transferencia (Zelle o Venmo) al que
+   * dijo quien sube la captura. Solo un pedido manual que siga pendiente de
+   * pago y que ya fuera por transferencia: el efectivo y la tarjeta no se
+   * tocan. `false` si no habia pedido asi.
+   */
+  public async setManualPaymentChannel(
+    orderId: string,
+    channel: Exclude<ManualPaymentChannelValue, "CASH">,
+  ): Promise<boolean> {
+    const updated = await this.db
+      .update(orders)
+      .set({ manualPaymentChannel: channel })
+      .where(
+        and(
+          eq(orders.id, orderId),
+          eq(orders.provider, "cash"),
+          eq(orders.status, "PENDING_PAYMENT"),
+          inArray(orders.manualPaymentChannel, ["ZELLE", "VENMO"]),
+        ),
+      )
+      .returning({ id: orders.id });
+    return updated.length > 0;
+  }
+
   public async setFulfillment(orderId: string, patch: FulfillmentPatch): Promise<void> {
     await this.db
       .update(orders)

@@ -100,9 +100,10 @@ export const orderSummarySchema = z.object({
    * alguien de la tienda confirme el cobro en caja.
    *
    * 0041: `ZELLE` es el mismo pago manual con otro canal: el comprador
-   * transfiere por Zelle, sube el comprobante y la tienda confirma.
+   * transfiere por Zelle, sube el comprobante y la tienda confirma. 0042:
+   * `VENMO`, igual que Zelle.
    */
-  payment_method: z.enum(["CARD", "CASH", "ZELLE"]),
+  payment_method: z.enum(["CARD", "CASH", "ZELLE", "VENMO"]),
 });
 
 /**
@@ -159,7 +160,23 @@ export const orderDetailSchema = orderSummarySchema.extend({
   }),
   /** 0041: WhatsApp del comprador en E.164, o `null` si no lo dio. */
   contact_phone: z.string().nullable(),
-  /** 0041: comprobantes subidos, del mas reciente al mas antiguo. Vacio fuera de Zelle. */
+  /** 0042: nombre que dejo quien aparto sin cuenta, o `null`. */
+  contact_name: z.string().nullable(),
+  /**
+   * 0042: los numeros de participacion de este pedido, por bloques. `null` si
+   * la promocion no ensena numeros (`visible_entry_numbers_enabled` apagado,
+   * sin secuencia o sin promocion); vacio si todavia no ha otorgado ninguno.
+   */
+  entry_numbers: z
+    .array(
+      z.object({
+        quantity: z.number().int(),
+        first_number: z.string(),
+        last_number: z.string(),
+      }),
+    )
+    .nullable(),
+  /** 0041: comprobantes subidos, del mas reciente al mas antiguo. Vacio fuera de Zelle y Venmo. */
   payment_receipts: z.array(paymentReceiptSchema),
   /**
    * Traza del calculo que persistio el `EntryCalculationSnapshot`, o `null` si

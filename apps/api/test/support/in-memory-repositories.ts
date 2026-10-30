@@ -597,6 +597,11 @@ export function createFakeRepositories(options: FakeOptions = {}): FakeRepositor
       zelleEnabled: false,
       zelleRecipientName: null,
       zelleRecipient: null,
+      venmoEnabled: false,
+      venmoRecipientName: null,
+      venmoHandle: null,
+      venmoQrMediaId: null,
+      venmoQrUrl: null,
       updatedAt: new Date("2026-01-01T00:00:00.000Z"),
       updatedByAdminUserId: null,
       ...options.paymentSettings,
@@ -605,9 +610,15 @@ export function createFakeRepositories(options: FakeOptions = {}): FakeRepositor
   const paymentSettings: PaymentSettingsRepository = {
     read: () => Promise.resolve(paymentState.record),
     update: (input, updatedByAdminUserId) => {
-      paymentState.record = { ...input, updatedAt: tick(), updatedByAdminUserId };
+      paymentState.record = {
+        ...input,
+        venmoQrUrl: input.venmoQrMediaId === null ? null : `/media/${input.venmoQrMediaId}.png`,
+        updatedAt: tick(),
+        updatedByAdminUserId,
+      };
       return Promise.resolve(paymentState.record);
     },
+    mediaExists: (mediaId) => Promise.resolve((options.knownMediaIds ?? []).includes(mediaId)),
   };
 
   const storedReceipts: PaymentReceiptContent[] = [];

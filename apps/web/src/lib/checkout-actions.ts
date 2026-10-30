@@ -143,9 +143,9 @@ function isHttpUrl(value: string): boolean {
  * navegador no abre una tercera via, cae en la tarjeta, que es la que siempre
  * existio. El backend ademas revalida todo -el efectivo tiene su propia ruta-.
  */
-function paymentMethodFrom(formData: FormData): "CARD" | "CASH" | "ZELLE" {
+function paymentMethodFrom(formData: FormData): "CARD" | "CASH" | "ZELLE" | "VENMO" {
   const method = textFrom(formData, "payment_method");
-  return method === "CASH" || method === "ZELLE" ? method : "CARD";
+  return method === "CASH" || method === "ZELLE" || method === "VENMO" ? method : "CARD";
 }
 
 /**
@@ -200,11 +200,12 @@ export async function startCheckoutAction(
   const session = await mutableSession();
 
   /*
-   * ZELLE (0041). El mismo pedido pendiente que el efectivo, con otro canal y
-   * con el WhatsApp del comprador. La confirmacion del pedido le dice a quien
-   * transferir y le deja subir el comprobante.
+   * ZELLE (0041) O VENMO (0042). El mismo pedido pendiente que el efectivo,
+   * con otro canal y con el WhatsApp del comprador. La confirmacion del pedido
+   * le dice a quien transferir y le deja subir el comprobante.
    */
-  if (paymentMethodFrom(formData) === "ZELLE") {
+  const transfer = paymentMethodFrom(formData);
+  if (transfer === "ZELLE" || transfer === "VENMO") {
     const contactPhone = contactPhoneFrom(formData);
     if (contactPhone === null) return invalid("FIELD_REQUIRED", "contact_phone");
     if (contactPhone === "") return invalid("PHONE_INVALID", "contact_phone");
@@ -213,7 +214,7 @@ export async function startCheckoutAction(
       {
         fulfillment_method: "DELIVERY",
         shipping_address: address,
-        payment_channel: "ZELLE",
+        payment_channel: transfer,
         contact_phone: contactPhone,
       },
       locale,

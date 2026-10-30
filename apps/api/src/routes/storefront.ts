@@ -53,6 +53,7 @@ import {
 import { availabilityFor, CATALOG_PROBE_QUANTITY } from "../services/availability.js";
 import { presentPublicBrand } from "../services/brand.js";
 import { catalogSortKey } from "../services/catalog-order.js";
+import { guestCheckoutEnabled, transferChannelsOf } from "../services/payment-methods.js";
 import type { ProductRecord, PromotionRecord } from "../services/ports.js";
 
 const slugParamsSchema = z.object({
@@ -224,6 +225,8 @@ export function buildStorefrontRoutes(dependencies: AppDependencies): RouteDefin
           repositories.brand.read(),
           repositories.paymentSettings.read(),
         ]);
+        const cardEnabled = dependencies.config.commerce.payment.provider === "stripe";
+        const channels = transferChannelsOf(payments);
         void reply.header("cache-control", "no-store");
         return {
           feature_flags: config.featureFlags,
@@ -236,12 +239,12 @@ export function buildStorefrontRoutes(dependencies: AppDependencies): RouteDefin
           required_consents: REQUIRED_CONSENTS.map((consent) => ({ ...consent })),
           brand: presentPublicBrand(brand),
           payment_methods: {
-            card: dependencies.config.commerce.payment.provider === "stripe",
+            card: cardEnabled,
             cash: payments.cashEnabled,
-            // La CHECK de 0041 impide Zelle activado sin cuenta; el `null` de
-            // los datos solo puede llegar con Zelle apagado.
+            // Las CHECK de 0041 y 0042 impiden activar Zelle o Venmo sin decir a
+            // quien se paga: `transferChannelsOf` solo los da completos.
             zelle:
-              payments.zelleEnabled &&
+              channels.includes("ZELLE") &&
               payments.zelleRecipientName !== null &&
               payments.zelleRecipient !== null
                 ? {
@@ -249,6 +252,17 @@ export function buildStorefrontRoutes(dependencies: AppDependencies): RouteDefin
                     recipient: payments.zelleRecipient,
                   }
                 : null,
+            venmo:
+              channels.includes("VENMO") &&
+              payments.venmoRecipientName !== null &&
+              payments.venmoHandle !== null
+                ? {
+                    recipient_name: payments.venmoRecipientName,
+                    handle: payments.venmoHandle,
+                    qr_url: payments.venmoQrUrl,
+                  }
+                : null,
+            guest_checkout: guestCheckoutEnabled(payments, cardEnabled),
           },
         };
       },

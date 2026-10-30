@@ -141,7 +141,13 @@ export default async function AdminDailyCutPage({
           t("columnTracking"),
         ],
         paymentMethod: (method) =>
-          method === "CASH" ? t("cash") : method === "ZELLE" ? t("zelle") : t("card"),
+          method === "CASH"
+            ? t("cash")
+            : method === "ZELLE"
+              ? t("zelle")
+              : method === "VENMO"
+                ? t("venmo")
+                : t("card"),
         fulfillment: fulfillmentLabel,
         address: destination,
         productName: (line) => pickLocalized(line.product_name, locale),
@@ -218,7 +224,7 @@ export default async function AdminDailyCutPage({
               <h2 id="cut-totals" className="sr-only">
                 {t("totalsHeading")}
               </h2>
-              <div className="grid grid-cols-1 gap-s4 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="grid grid-cols-1 gap-s4 sm:grid-cols-2 lg:grid-cols-5">
                 {(
                   [
                     ["cash", result.data.cash],
@@ -226,6 +232,14 @@ export default async function AdminDailyCutPage({
                     [
                       "zelle",
                       result.data.zelle ?? {
+                        orders: 0,
+                        amount: { ...result.data.cash.amount, amount_minor: "0" },
+                      },
+                    ],
+                    // 0042: Venmo, igual que Zelle.
+                    [
+                      "venmo",
+                      result.data.venmo ?? {
                         orders: 0,
                         amount: { ...result.data.cash.amount, amount_minor: "0" },
                       },
@@ -245,9 +259,11 @@ export default async function AdminDailyCutPage({
                         ? t("cashTotal")
                         : key === "zelle"
                           ? t("zelleTotal")
-                          : key === "card"
-                            ? t("cardTotal")
-                            : t("grandTotal")}
+                          : key === "venmo"
+                            ? t("venmoTotal")
+                            : key === "card"
+                              ? t("cardTotal")
+                              : t("grandTotal")}
                     </p>
                     <p className="mt-s2 font-display text-heading-lg font-bold tabular-nums text-text">
                       {formatMoney(total.amount, locale) ?? ""}
@@ -385,7 +401,9 @@ export default async function AdminDailyCutPage({
                             ? t("cash")
                             : row.payment_method === "ZELLE"
                               ? t("zelle")
-                              : t("card"),
+                              : row.payment_method === "VENMO"
+                                ? t("venmo")
+                                : t("card"),
                       },
                       {
                         id: "shipping",

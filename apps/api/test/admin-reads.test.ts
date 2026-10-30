@@ -142,6 +142,8 @@ function orderFixture(overrides: Record<string, unknown> = {}): Record<string, u
     // 0041: pedido con tarjeta, sin canal manual ni WhatsApp.
     manualPaymentChannel: null,
     contactPhone: null,
+    // 0042: comprado con cuenta, sin nombre de apartado.
+    contactName: null,
     ...overrides,
   };
 }
@@ -199,6 +201,7 @@ function buildDoubles(overrides: ReadsOverrides = {}): {
             orderNumber: row.orderNumber,
             participantId: row.participantId,
             participantEmail: "ada.lovelace@example.test",
+            buyerName: "Ada Lovelace",
           })),
       ),
     participantEmailForOrder: () => Promise.resolve("ada.lovelace@example.test"),
@@ -225,6 +228,8 @@ function buildDoubles(overrides: ReadsOverrides = {}): {
         listReversalsOf: () => Promise.resolve([]),
       },
       snapshots: { findBySource: () => Promise.resolve(null) },
+      // 0042: sin numeros visibles, el detalle no pide ningun bloque.
+      promotions: { readFlags: () => Promise.resolve({ visible_entry_numbers_enabled: false }) },
     },
   };
 

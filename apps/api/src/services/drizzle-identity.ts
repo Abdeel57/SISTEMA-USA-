@@ -237,6 +237,39 @@ export function createIdentityRepositories(db: Database): IdentityRepositories {
         }
       },
 
+      async registerGuestParticipant(input) {
+        return await db.transaction(async (tx) => {
+          const [identity] = await tx
+            .insert(identities)
+            .values({
+              // Sin correo ni celular verificado: lo permite `guest_checkout_at`
+              // (CHECK de 0042). `ACTIVE` para que la sesion que se abre al
+              // apartar valga; sin credencial no hay forma de volver a entrar.
+              email: null,
+              phoneE164: null,
+              guestCheckoutAt: input.now,
+              status: "ACTIVE",
+            })
+            .returning({ id: identities.id });
+
+          if (identity === undefined) throw new Error("identity_insert_returned_no_row");
+
+          const [participant] = await tx
+            .insert(participants)
+            .values({
+              identityId: identity.id,
+              displayName: input.displayName,
+              preferredLocale: input.preferredLocale,
+              phoneE164: input.contactPhone,
+            })
+            .returning({ id: participants.id });
+
+          if (participant === undefined) throw new Error("participant_insert_returned_no_row");
+
+          return { identityId: identity.id, participantId: participant.id };
+        });
+      },
+
       async registerParticipantWithPhone(input): Promise<IdentityRecord | null> {
         try {
           return await db.transaction(async (tx) => {

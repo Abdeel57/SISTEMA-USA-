@@ -232,6 +232,13 @@
       "when": 1787616041000,
       "tag": "0041_zelle_payments",
       "breakpoints": false
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1787616042000,
+      "tag": "0042_reserve_checkout",
+      "breakpoints": false
     }
   ]
 }

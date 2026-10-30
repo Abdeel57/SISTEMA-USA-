@@ -972,43 +972,74 @@ function createBrandRepository(db: Database): BrandRepository {
 // ---------------------------------------------------------------------------
 
 function createPaymentSettingsRepository(db: Database): PaymentSettingsRepository {
-  function toRecord(row: typeof paymentSettings.$inferSelect): PaymentSettingsRecord {
+  function toRecord(
+    row: typeof paymentSettings.$inferSelect,
+    qrContentType: (typeof mediaAssets.$inferSelect)["contentType"] | null,
+  ): PaymentSettingsRecord {
     return {
       cashEnabled: row.cashEnabled,
       zelleEnabled: row.zelleEnabled,
       zelleRecipientName: row.zelleRecipientName,
       zelleRecipient: row.zelleRecipient,
+      venmoEnabled: row.venmoEnabled,
+      venmoRecipientName: row.venmoRecipientName,
+      venmoHandle: row.venmoHandle,
+      venmoQrMediaId: row.venmoQrMediaId,
+      venmoQrUrl:
+        row.venmoQrMediaId === null || qrContentType === null
+          ? null
+          : mediaUrl({ id: row.venmoQrMediaId, contentType: qrContentType }),
       updatedAt: row.updatedAt,
       updatedByAdminUserId: row.updatedByAdminUserId,
     };
   }
 
+  async function read(): Promise<PaymentSettingsRecord> {
+    const [row] = await db
+      .select({ settings: paymentSettings, qrContentType: mediaAssets.contentType })
+      .from(paymentSettings)
+      .leftJoin(mediaAssets, eq(mediaAssets.id, paymentSettings.venmoQrMediaId))
+      .where(eq(paymentSettings.id, 1));
+    if (row === undefined) {
+      // La siembra la migracion 0041: si falta, la base esta a medio migrar.
+      throw new Error("payment_settings_row_missing");
+    }
+    return toRecord(row.settings, row.qrContentType);
+  }
+
   return {
-    read: async () => {
-      const [row] = await db.select().from(paymentSettings).where(eq(paymentSettings.id, 1));
-      if (row === undefined) {
-        // La siembra la migracion 0041: si falta, la base esta a medio migrar.
-        throw new Error("payment_settings_row_missing");
-      }
-      return toRecord(row);
-    },
+    read,
 
     update: async (input, updatedByAdminUserId) => {
-      const [row] = await db
+      const updated = await db
         .update(paymentSettings)
         .set({
           cashEnabled: input.cashEnabled,
           zelleEnabled: input.zelleEnabled,
           zelleRecipientName: input.zelleRecipientName,
           zelleRecipient: input.zelleRecipient,
+          venmoEnabled: input.venmoEnabled,
+          venmoRecipientName: input.venmoRecipientName,
+          venmoHandle: input.venmoHandle,
+          venmoQrMediaId: input.venmoQrMediaId,
           updatedByAdminUserId,
         })
         .where(eq(paymentSettings.id, 1))
-        .returning();
-      if (row === undefined) {
+        .returning({ id: paymentSettings.id });
+      if (updated.length === 0) {
         throw new Error("payment_settings_row_missing");
       }
-      return toRecord(row);
+      // Se relee para resolver la URL del QR con el tipo de la imagen.
+      return await read();
+    },
+
+    mediaExists: async (mediaId) => {
+      const [row] = await db
+        .select({ id: mediaAssets.id })
+        .from(mediaAssets)
+        .where(eq(mediaAssets.id, mediaId))
+        .limit(1);
+      return row !== undefined;
     },
   };
 }

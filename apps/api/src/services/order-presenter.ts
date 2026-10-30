@@ -30,7 +30,7 @@
  * acaba de comprar.
  */
 
-import { entrySourceRef } from "@app/sweepstakes";
+import { entrySourceRef, formatEntryNumber } from "@app/sweepstakes";
 import type { OrderRecord } from "@app/database";
 import type { JsonObject } from "@app/sweepstakes";
 import type { z } from "zod";
@@ -181,7 +181,7 @@ export async function entryStateForOrder(
  * pone el checkout de pago manual al crear el pedido, y cualquier otro valor
  * -o ninguno, si la sesion de pago no llego a abrirse- es la pasarela de
  * tarjeta. 0041: dentro del pago manual, el canal dice si fue en caja o por
- * Zelle; un pedido manual anterior a 0041 es de caja.
+ * Zelle (o Venmo, 0042); un pedido manual anterior a 0041 es de caja.
  */
 export function paymentMethodOf(
   order: Pick<OrderRecord, "provider" | "manualPaymentChannel">,
@@ -278,6 +278,8 @@ export async function presentOrderDetail(
       tracking_number: order.trackingNumber,
     },
     contact_phone: order.contactPhone,
+    contact_name: order.contactName,
+    entry_numbers: await entryNumbersForOrder(domain, order),
     payment_receipts: receipts.map(presentPaymentReceipt),
     entry_calculation:
       snapshot === null
@@ -290,6 +292,37 @@ export async function presentOrderDetail(
             trace: snapshot.trace,
           },
   };
+}
+
+/**
+ * 0042: los numeros de participacion que otorgo ESTE pedido, en bloques
+ * `[primero, ultimo]` con el formato de la promocion. Es lo que el organizador
+ * manda por WhatsApp a quien compro sin cuenta.
+ *
+ * `null` -no "ninguno"- cuando no hay numeros que ensenar: sin promocion, con
+ * `visible_entry_numbers_enabled` apagado o sin secuencia inicializada. Las
+ * mismas condiciones que `GET /account/entry-numbers`.
+ */
+async function entryNumbersForOrder(
+  domain: DomainServices,
+  order: OrderRecord,
+): Promise<OrderDetail["entry_numbers"]> {
+  if (order.promotionId === null) return null;
+  const flags = await domain.repositories.promotions.readFlags();
+  if (!flags.visible_entry_numbers_enabled) return null;
+  const format = await domain.repositories.entryNumbers.getFormat(order.promotionId);
+  if (format === null) return null;
+
+  const batches = await domain.repositories.entryNumbers.listBatchesForSource(
+    order.promotionId,
+    entrySourceRef("order", order.id),
+  );
+  return batches.map((batch) => ({
+    quantity: batch.quantity,
+    first_number: formatEntryNumber(format.prefix, format.digits, batch.range.start),
+    // Rango semiabierto `[start, end)`: el ultimo es `end - 1`.
+    last_number: formatEntryNumber(format.prefix, format.digits, batch.range.end - 1n),
+  }));
 }
 
 /**

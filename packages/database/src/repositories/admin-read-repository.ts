@@ -41,7 +41,7 @@
  *    nadie llego a ver.
  */
 
-import { and, asc, desc, eq, gte, lt, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, lt, sql, type SQL } from "drizzle-orm";
 
 import {
   adjustments,
@@ -89,8 +89,10 @@ export interface AdminOrderRow {
   readonly id: string;
   readonly orderNumber: string;
   readonly participantId: string;
-  /** `null` cuando la identidad no tiene correo (cuenta anonimizada). */
+  /** `null` cuando la identidad no tiene correo (anonimizada, o invitado de 0042). */
   readonly participantEmail: string | null;
+  /** 0042: el nombre que dejo al apartar, o el de la cuenta. `null` si no hay ninguno. */
+  readonly buyerName: string | null;
 }
 
 export interface AdminParticipantRow {
@@ -141,9 +143,10 @@ export interface AdminOrderListOptions {
   readonly search?: string | null;
   /**
    * DEC-078: `CASH` = efectivo en caja; `CARD` = el resto. 0041: `ZELLE` =
-   * pago manual por Zelle.
+   * pago manual por Zelle. 0042: `VENMO`, y `TRANSFER` = Zelle o Venmo, la
+   * cola de pagos por revisar.
    */
-  readonly paymentMethod?: "CARD" | "CASH" | "ZELLE" | null;
+  readonly paymentMethod?: "CARD" | "CASH" | "ZELLE" | "VENMO" | "TRANSFER" | null;
   /** DEC-078: solo los que siguen esperando el cobro (`PENDING_PAYMENT`). */
   readonly awaitingPayment?: boolean;
 }
@@ -180,7 +183,7 @@ export interface AdminAuditListOptions {
  * `refunds`, por el dia en que se devolvio.
  */
 /** 0041: el medio con el que se cobro un pedido, tal como lo agrupa el corte. */
-export type AdminPaymentMethodValue = "CASH" | "ZELLE" | "CARD";
+export type AdminPaymentMethodValue = "CASH" | "ZELLE" | "VENMO" | "CARD";
 
 export interface AdminDailyCut {
   readonly totals: readonly {
@@ -366,6 +369,11 @@ export class DrizzleAdminReadRepository {
       // cliente, asi que se compara solo el final: `-00001234`.
       const dictated = /^(?:[a-z]{2,8}-?|[a-z0-9]{2,8}-)?0*(\d{1,8})$/iu.exec(search);
       const numberSuffix = dictated === null ? null : `%-${(dictated[1] ?? "").padStart(8, "0")}`;
+      // 0042: el WhatsApp de quien aparto sin cuenta, por sus cifras ("(512)
+      // 555-0134" encuentra "+15125550134"). Con menos de cuatro cifras no se
+      // busca por telefono: casi cualquier numero las contendria.
+      const phoneDigits = search.replace(/\D/gu, "");
+      const phonePattern = phoneDigits.length >= 4 ? `%${phoneDigits}%` : null;
 
       filters.push(sql`(
         ${orders.orderNumber} ILIKE ${pattern}
@@ -373,12 +381,17 @@ export class DrizzleAdminReadRepository {
         OR ${identities.email} ILIKE ${pattern}
         OR ${participants.displayName} ILIKE ${pattern}
         OR ${orders.shippingAddress} ->> 'full_name' ILIKE ${pattern}
+        OR ${orders.contactName} ILIKE ${pattern}
+        OR ${orders.contactPhone} LIKE ${phonePattern}
       )`);
     }
 
-    if (options.paymentMethod === "ZELLE") {
+    if (options.paymentMethod === "ZELLE" || options.paymentMethod === "VENMO") {
       filters.push(eq(orders.provider, "cash"));
-      filters.push(eq(orders.manualPaymentChannel, "ZELLE"));
+      filters.push(eq(orders.manualPaymentChannel, options.paymentMethod));
+    } else if (options.paymentMethod === "TRANSFER") {
+      filters.push(eq(orders.provider, "cash"));
+      filters.push(inArray(orders.manualPaymentChannel, ["ZELLE", "VENMO"]));
     } else if (options.paymentMethod === "CASH") {
       // Un pedido manual sin canal es de caja (ver la migracion 0041).
       filters.push(eq(orders.provider, "cash"));
@@ -399,6 +412,7 @@ export class DrizzleAdminReadRepository {
         orderNumber: orders.orderNumber,
         participantId: orders.participantId,
         participantEmail: identities.email,
+        buyerName: sql<string | null>`coalesce(${orders.contactName}, ${participants.displayName})`,
       })
       .from(orders)
       .innerJoin(participants, eq(participants.id, orders.participantId))
@@ -412,6 +426,7 @@ export class DrizzleAdminReadRepository {
       orderNumber: row.orderNumber,
       participantId: row.participantId,
       participantEmail: row.participantEmail,
+      buyerName: row.buyerName,
     }));
   }
 

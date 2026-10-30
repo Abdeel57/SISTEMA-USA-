@@ -72,7 +72,7 @@
       "authorization": "PARTICIPANT_SELF",
       "requires_step_up": false,
       "tags": ["commerce"],
-      "summary": "Subir la captura del comprobante de un pedido pagado por Zelle."
+      "summary": "Subir la captura del comprobante de un pedido pagado por Zelle o Venmo."
     },
     {
       "method": "GET",
@@ -423,7 +423,7 @@
       "authorization": "product.read",
       "requires_step_up": false,
       "tags": ["admin"],
-      "summary": "Formas de pago manual de la tienda y cuenta Zelle."
+      "summary": "Formas de pago manual de la tienda y cuentas Zelle y Venmo."
     },
     {
       "method": "PUT",
@@ -432,7 +432,7 @@
       "authorization": "product.write",
       "requires_step_up": false,
       "tags": ["admin"],
-      "summary": "Activar o desactivar efectivo y Zelle, y poner la cuenta Zelle."
+      "summary": "Activar o desactivar efectivo, Zelle y Venmo, y poner sus cuentas."
     },
     {
       "method": "GET",
@@ -919,6 +919,15 @@
       "requires_step_up": false,
       "tags": ["commerce"],
       "summary": "Pedido para pagar en efectivo en un punto de venta fisico."
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/checkout/reserve",
+      "operation_id": "reserveOrder",
+      "authorization": "PUBLIC",
+      "requires_step_up": false,
+      "tags": ["commerce"],
+      "summary": "Apartar el pedido sin cuenta, con WhatsApp y nombre."
     },
     {
       "method": "POST",

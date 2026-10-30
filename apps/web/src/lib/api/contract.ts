@@ -1583,15 +1583,32 @@ export interface OrderSummary {
 /**
  * DEC-078: pasarela de pago (`CARD`) o efectivo en caja (`CASH`). 0041:
  * `ZELLE` es el mismo pago manual con otro canal: se transfiere por Zelle, se
- * sube el comprobante y la tienda confirma el cobro.
+ * sube el comprobante y la tienda confirma el cobro. 0042: `VENMO`, igual.
  */
-export type PaymentMethod = "CARD" | "CASH" | "ZELLE";
+export type PaymentMethod = "CARD" | "CASH" | "ZELLE" | "VENMO";
 
-export const PAYMENT_METHODS: readonly PaymentMethod[] = ["CARD", "CASH", "ZELLE"];
+export const PAYMENT_METHODS: readonly PaymentMethod[] = ["CARD", "CASH", "ZELLE", "VENMO"];
+
+/** 0042: pago por transferencia con comprobante: Zelle o Venmo. */
+export type TransferMethod = "ZELLE" | "VENMO";
 
 /** 0041: pago manual, el que confirma una persona del negocio. */
 export function isManualPaymentMethod(method: PaymentMethod | undefined): boolean {
-  return method === "CASH" || method === "ZELLE";
+  return method === "CASH" || method === "ZELLE" || method === "VENMO";
+}
+
+/** 0042: transferencia con captura del pago (Zelle o Venmo). */
+export function isTransferPaymentMethod(
+  method: PaymentMethod | undefined,
+): method is TransferMethod {
+  return method === "ZELLE" || method === "VENMO";
+}
+
+/** 0042: un bloque de numeros de participacion de un pedido, `[primero, ultimo]`. */
+export interface OrderEntryNumberBlock {
+  readonly quantity: number;
+  readonly first_number: string;
+  readonly last_number: string;
 }
 
 /** 0041: un comprobante de pago subido por el comprador, sin la imagen. */
@@ -1605,11 +1622,32 @@ export interface PaymentReceipt {
 /**
  * 0041: que formas de pago ofrece el checkout, segun `GET /config`. Con Zelle,
  * a quien se paga.
+ *
+ * 0042: Venmo, con su usuario y la imagen de su codigo QR, y
+ * `guest_checkout`: la tienda solo cobra por transferencia, asi que comprar no
+ * pide cuenta (se aparta con WhatsApp y nombre). Los dos OPCIONALES: una API
+ * anterior no los manda.
  */
 export interface PublicPaymentMethods {
   readonly card: boolean;
   readonly cash: boolean;
-  readonly zelle: { readonly recipient_name: string; readonly recipient: string } | null;
+  readonly zelle: ZellePaymentDetails | null;
+  readonly venmo?: VenmoPaymentDetails | null;
+  readonly guest_checkout?: boolean;
+}
+
+/** 0041: a quien se paga por Zelle. */
+export interface ZellePaymentDetails {
+  readonly recipient_name: string;
+  readonly recipient: string;
+}
+
+/** 0042: a quien se paga por Venmo. `qr_url` es una ruta de `/media`, o `null`. */
+export interface VenmoPaymentDetails {
+  readonly recipient_name: string;
+  /** Sin la arroba. */
+  readonly handle: string;
+  readonly qr_url: string | null;
 }
 
 /**
@@ -1722,6 +1760,14 @@ export interface OrderDetail extends OrderSummary {
    * `fulfillment`: una API anterior no lo manda.
    */
   readonly contact_phone?: string | null;
+  /** 0042: nombre que dejo quien aparto sin cuenta. Opcional por lo mismo. */
+  readonly contact_name?: string | null;
+  /**
+   * 0042: los numeros de participacion del pedido, por bloques. `null` si la
+   * promocion no ensena numeros; vacio si todavia no se otorgo ninguno.
+   * Opcional por lo mismo.
+   */
+  readonly entry_numbers?: readonly OrderEntryNumberBlock[] | null;
   /** 0041: comprobantes subidos, del mas reciente al mas antiguo. Ausente = ninguno. */
   readonly payment_receipts?: readonly PaymentReceipt[];
   /** Traza del calculo, o `null` si el pedido no ha generado ninguna. */
@@ -2439,6 +2485,11 @@ export interface AdminOrderRow {
   readonly participant_id: string;
   /** DEC-078. Opcional por el mismo motivo que en `OrderSummary`. */
   readonly payment_method?: PaymentMethod;
+  /**
+   * 0042: el nombre que dejo al apartar, o el de la cuenta. Quien aparta sin
+   * cuenta no tiene correo: sin esto la fila no diria de quien es.
+   */
+  readonly buyer_name?: string | null;
 }
 
 export type AdminOrderPage = CursorPage<AdminOrderRow>;
@@ -2529,6 +2580,8 @@ export interface AdminDailyCut {
   readonly cash: AdminDailyCutTotal;
   /** 0041: cobros por Zelle. OPCIONAL: una API anterior no lo manda. */
   readonly zelle?: AdminDailyCutTotal;
+  /** 0042: cobros por Venmo. OPCIONAL por lo mismo. */
+  readonly venmo?: AdminDailyCutTotal;
   readonly card: AdminDailyCutTotal;
   readonly total: AdminDailyCutTotal;
   /** Reembolsos con tarjeta hechos ese dia, de pedidos de cualquier dia. */

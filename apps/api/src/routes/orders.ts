@@ -56,9 +56,11 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
 
 import type { AppDependencies } from "../app.js";
+import { clearCartSessionCookie } from "../http/cart-session.js";
 import { ApiError, ApiErrors, errorEnvelopeSchema } from "../http/errors.js";
 import { buildPage, decodeCursor, paginationQuerySchema, pageSchema } from "../http/pagination.js";
-import { cartOwnerOf } from "../http/principal.js";
+import { openSession } from "../http/open-session.js";
+import { cartOwnerOf, type CartOwner } from "../http/principal.js";
 import type { ParticipantPrincipal } from "../http/principal-narrow.js";
 import type { RouteDefinition } from "../http/route-registry.js";
 import {
@@ -72,6 +74,7 @@ import {
 import { freezeOpenCart } from "../services/cart-freeze.js";
 import { createCashCheckout, isCashOrder } from "../services/cash-payments.js";
 import { normalizeContactPhone } from "../services/contact-phone.js";
+import { guestCheckoutEnabled, transferChannelsOf } from "../services/payment-methods.js";
 import {
   MEDIA_MAX_BASE64_LENGTH,
   MEDIA_MAX_BYTES,
@@ -140,9 +143,9 @@ const cashOrderBodySchema = z.object({
   shipping_address: shippingAddressBodySchema.optional(),
   /**
    * 0041: como entrega el dinero. Ausente = `CASH` (efectivo en caja), que es
-   * lo que hacia esta ruta antes de Zelle.
+   * lo que hacia esta ruta antes de Zelle. 0042: `VENMO`, igual que Zelle.
    */
-  payment_channel: z.enum(["CASH", "ZELLE"]).optional(),
+  payment_channel: z.enum(["CASH", "ZELLE", "VENMO"]).optional(),
   /**
    * 0041: WhatsApp del comprador, como lo escriba. Obligatorio con `ZELLE`:
    * es a donde la tienda le confirma el pago. Ver `services/contact-phone.ts`.
@@ -157,6 +160,25 @@ const cashOrderBodySchema = z.object({
  */
 const paymentReceiptBodySchema = z.object({
   data_base64: z.string().min(4).max(MEDIA_MAX_BASE64_LENGTH),
+  /**
+   * 0042: con que app pago, si la tienda ofrece las dos. Ausente = el canal
+   * con el que nacio el pedido.
+   */
+  payment_channel: z.enum(["ZELLE", "VENMO"]).optional(),
+});
+
+/**
+ * 0042: apartar sin cuenta. Lo del formulario de "Apartar": el WhatsApp con su
+ * lada, el nombre y, si se quiere, los apellidos. Nada mas: ni correo, ni
+ * direccion (la pide el organizador por WhatsApp), ni contrasena.
+ */
+const reserveBodySchema = z.object({
+  /** Con la lada del pais delante (`+52 55 1234 5678`). Ver `services/contact-phone.ts`. */
+  contact_phone: z.string().max(32),
+  first_name: z.string().trim().min(1).max(60),
+  last_name: z.string().trim().max(60).optional(),
+  /** Etiqueta BCP-47 completa (DEC-029). Es el idioma de la cuenta de invitado. */
+  language_preference: z.enum(["en-US", "es-US"]),
 });
 
 /**
@@ -787,7 +809,10 @@ export function buildOrdersRoutes(dependencies: AppDependencies): RouteDefinitio
         // 0041: solo los canales que la tienda tiene activados en el panel.
         const channel = body.payment_channel ?? "CASH";
         const settings = await repositories.paymentSettings.read();
-        const channelEnabled = channel === "ZELLE" ? settings.zelleEnabled : settings.cashEnabled;
+        const channelEnabled =
+          channel === "CASH"
+            ? settings.cashEnabled
+            : transferChannelsOf(settings).includes(channel);
         if (!channelEnabled) {
           throw new ApiError({
             statusCode: 409,
@@ -796,14 +821,14 @@ export function buildOrdersRoutes(dependencies: AppDependencies): RouteDefinitio
           });
         }
 
-        // 0041: el WhatsApp. Con Zelle es obligatorio; con efectivo, si viene,
-        // tiene que ser un numero valido igualmente.
+        // 0041: el WhatsApp. Con Zelle o Venmo es obligatorio; con efectivo, si
+        // viene, tiene que ser un numero valido igualmente.
         const typedPhone = (body.contact_phone ?? "").trim();
         const contactPhone = typedPhone === "" ? null : normalizeContactPhone(typedPhone);
         if (typedPhone !== "" && contactPhone === null) {
           throw ApiErrors.validationFailed([{ path: "contact_phone", code: "invalid" }]);
         }
-        if (channel === "ZELLE" && contactPhone === null) {
+        if (channel !== "CASH" && contactPhone === null) {
           throw ApiErrors.validationFailed([{ path: "contact_phone", code: "required" }]);
         }
 
@@ -847,11 +872,136 @@ export function buildOrdersRoutes(dependencies: AppDependencies): RouteDefinitio
 
     {
       method: "POST",
+      url: "/api/v1/checkout/reserve",
+      operationId: "reserveOrder",
+      summary: "Apartar el pedido sin cuenta, con WhatsApp y nombre.",
+      description:
+        "0042. Solo si la tienda cobra unicamente por transferencia (Zelle o Venmo; `payment_methods.guest_checkout` en `/config`); si no, 409 `GUEST_CHECKOUT_UNAVAILABLE`. Congela el carrito del visitante en un pedido PENDING_PAYMENT con el primer canal activado, sin direccion (el organizador la pide por WhatsApp) y con el envio que corresponda. Sin cuenta: crea una identidad de invitado -sin correo ni contrasena, con la que no se puede volver a entrar- y abre su sesion de escaparate, que es la que deja ver el pedido y subir la captura del pago. Con una sesion de participante ya abierta, el pedido es de esa cuenta. NO genera participaciones: llegan cuando el organizador confirma el cobro. 409 `CART_EMPTY` sin carrito o con el carrito vacio.",
+      tags: ["commerce"],
+      authorization: {
+        kind: "PUBLIC",
+        justification:
+          "Es como se compra sin cuenta: no puede exigir una. Solo actua sobre el carrito de la cookie de quien llama, solo crea un participante sin roles ni credencial, y el rate limiting la cubre.",
+      },
+      schema: {
+        body: reserveBodySchema,
+        response: {
+          200: orderSummarySchema,
+          201: orderSummarySchema,
+          409: errorEnvelopeSchema,
+          422: errorEnvelopeSchema,
+        },
+      },
+      handler: async (request, reply) => {
+        const body = request.body as z.infer<typeof reserveBodySchema>;
+        const now = domain.clock.now();
+
+        const settings = await repositories.paymentSettings.read();
+        const cardEnabled = dependencies.config.commerce.payment.provider === "stripe";
+        const [channel] = transferChannelsOf(settings);
+        if (!guestCheckoutEnabled(settings, cardEnabled) || channel === undefined) {
+          throw new ApiError({ statusCode: 409, code: "GUEST_CHECKOUT_UNAVAILABLE" });
+        }
+
+        const contactPhone = normalizeContactPhone(body.contact_phone);
+        if (contactPhone === null) {
+          throw ApiErrors.validationFailed([{ path: "contact_phone", code: "invalid" }]);
+        }
+        const contactName = [body.first_name, body.last_name ?? ""].join(" ").trim();
+
+        // De quien es el carrito: la cuenta abierta, o la cookie de carrito del
+        // visitante. Sin ninguna de las dos no hay nada que apartar.
+        const principal = await request.server.appPrincipalResolver(request);
+        if (principal === null) {
+          throw new ApiError({ statusCode: 409, code: "CART_EMPTY" });
+        }
+        const owner: CartOwner = cartOwnerOf(principal);
+
+        let participantId: string;
+        let guestIdentityId: string | null = null;
+        if (principal.kind === "PARTICIPANT") {
+          participantId = principal.participantId;
+        } else {
+          // Antes de crear a nadie: un carrito vacio no deja un invitado
+          // huerfano. `freezeOpenCart` lo vuelve a comprobar al congelar.
+          const cart = await repositories.carts.findOpen(owner);
+          if (cart === null || cart.lines.length === 0) {
+            throw new ApiError({ statusCode: 409, code: "CART_EMPTY" });
+          }
+          const guest = await dependencies.identity.identities.registerGuestParticipant({
+            contactPhone,
+            displayName: contactName,
+            preferredLocale: body.language_preference,
+            now,
+          });
+          participantId = guest.participantId;
+          guestIdentityId = guest.identityId;
+        }
+
+        const outcome = await cashCheckout.placeOrder(
+          participantId,
+          owner,
+          { method: "DELIVERY", shippingAddress: null },
+          { channel, contactPhone, contactName },
+        );
+
+        // Un doble clic que llego por dos caminos: el carrito ya tenia pedido,
+        // de OTRO invitado recien creado. No se le abre sesion a este: no seria
+        // dueno de nada. La primera peticion ya dejo la suya.
+        if (outcome.order.participantId !== participantId) {
+          throw new ApiError({ statusCode: 409, code: "ORDER_ALREADY_RESERVED" });
+        }
+
+        try {
+          await repositories.carts.convertForPaidOrder(outcome.order.id);
+        } catch (error) {
+          request.log.warn(
+            { event: "reserve.cart_not_converted", order_id: outcome.order.id, err: error },
+            "el pedido apartado quedo creado pero su carrito sigue abierto",
+          );
+        }
+
+        if (guestIdentityId !== null && principal.kind === "ANONYMOUS_SESSION") {
+          // La sesion del invitado: con ella ve su pedido y sube la captura. La
+          // del carrito ya no sirve -su carrito es un pedido- y se cierra.
+          await openSession(dependencies, request, reply, guestIdentityId, "PARTICIPANT", now);
+          try {
+            await dependencies.identity.cartSessions.revoke(
+              principal.sessionRef,
+              "reserved_as_guest",
+              now,
+            );
+            clearCartSessionCookie(reply, dependencies.config);
+          } catch (error) {
+            request.log.warn(
+              { event: "reserve.cart_session_not_revoked", err: error },
+              "no se pudo cerrar la sesion de carrito tras apartar",
+            );
+          }
+        }
+
+        request.log.info(
+          {
+            event: "order.reserved",
+            order_id: outcome.order.id,
+            guest: guestIdentityId !== null,
+            payment_channel: channel,
+          },
+          "pedido apartado",
+        );
+
+        void reply.code(outcome.created ? 201 : 200);
+        return presentOrderSummary(outcome.order, await entryStateForOrder(domain, outcome.order));
+      },
+    },
+
+    {
+      method: "POST",
       url: "/api/v1/account/orders/:order_id/payment-receipts",
       operationId: "uploadPaymentReceipt",
-      summary: "Subir la captura del comprobante de un pedido pagado por Zelle.",
+      summary: "Subir la captura del comprobante de un pedido pagado por Zelle o Venmo.",
       description:
-        "0041. Solo el comprador del pedido, y solo mientras el pedido por Zelle siga pendiente de pago. Acepta JPEG, PNG o WebP de hasta 5 MiB; el tipo se decide por la firma de los bytes. El comprobante NO es publico: lo ve el comprador (sin bytes, en el detalle de su pedido) y el personal con `order.read`, que lo compara con su banco antes de confirmar el cobro. Se puede subir otro si el primero salio mal (hasta 10); se conservan todos. 409 `ORDER_NOT_ZELLE_PAYMENT` si el pedido no es por Zelle, `PAYMENT_RECEIPT_NOT_ACCEPTED` si ya no esta pendiente y `PAYMENT_RECEIPT_LIMIT` si ya tiene diez.",
+        "0041, 0042. Solo el comprador del pedido, y solo mientras el pedido por Zelle o Venmo siga pendiente de pago. `payment_channel` dice con que app se pago: si es la otra y esta activada, el pedido cambia a esa (409 `PAYMENT_METHOD_UNAVAILABLE` si no lo esta). Acepta JPEG, PNG o WebP de hasta 5 MiB; el tipo se decide por la firma de los bytes. El comprobante NO es publico: lo ve el comprador (sin bytes, en el detalle de su pedido) y el personal con `order.read`, que lo compara con su banco antes de confirmar el cobro. Se puede subir otro si el primero salio mal (hasta 10); se conservan todos. 409 `ORDER_NOT_ZELLE_PAYMENT` si el pedido no es por Zelle ni Venmo, `PAYMENT_RECEIPT_NOT_ACCEPTED` si ya no esta pendiente y `PAYMENT_RECEIPT_LIMIT` si ya tiene diez.",
       tags: ["commerce"],
       authorization: { kind: "PARTICIPANT", selfOnly: true },
       bodyLimitBytes: MEDIA_UPLOAD_BODY_LIMIT_BYTES,
@@ -879,7 +1029,11 @@ export function buildOrdersRoutes(dependencies: AppDependencies): RouteDefinitio
         if (order === null) {
           throw new ApiError({ statusCode: 404, code: "ORDER_NOT_FOUND" });
         }
-        if (!isCashOrder(order) || order.manualPaymentChannel !== "ZELLE") {
+        // 0042: Zelle o Venmo. El codigo se conserva por compatibilidad.
+        if (
+          !isCashOrder(order) ||
+          (order.manualPaymentChannel !== "ZELLE" && order.manualPaymentChannel !== "VENMO")
+        ) {
           throw new ApiError({ statusCode: 409, code: "ORDER_NOT_ZELLE_PAYMENT" });
         }
         if (order.status !== "PENDING_PAYMENT") {
@@ -917,6 +1071,22 @@ export function buildOrdersRoutes(dependencies: AppDependencies): RouteDefinitio
             code: "PAYMENT_RECEIPT_LIMIT",
             details: { max_receipts: MAX_RECEIPTS_PER_ORDER },
           });
+        }
+
+        // 0042: el pedido se aparto antes de elegir app. Si quien sube la
+        // captura pago con la otra, el pedido pasa a esa, para que el
+        // organizador la busque donde toca. Solo una que siga activada.
+        const channel = body.payment_channel;
+        if (channel !== undefined && channel !== order.manualPaymentChannel) {
+          const settings = await repositories.paymentSettings.read();
+          if (!transferChannelsOf(settings).includes(channel)) {
+            throw new ApiError({
+              statusCode: 409,
+              code: "PAYMENT_METHOD_UNAVAILABLE",
+              details: { payment_channel: channel },
+            });
+          }
+          await orders.setManualPaymentChannel(order.id, channel);
         }
 
         const stored = await repositories.paymentReceipts.store({

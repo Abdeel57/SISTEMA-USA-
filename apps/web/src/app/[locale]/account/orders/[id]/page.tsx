@@ -8,7 +8,7 @@ import { ApiErrorState } from "@/components/api-error-state";
 import { EntryCalculationTrace } from "@/components/entry-calculation-trace";
 import { OrderAddress } from "@/components/order-address";
 import { OrderLineList } from "@/components/order-line-list";
-import { ZellePaymentCard } from "@/components/zelle-payment-card";
+import { TransferPaymentCard } from "@/components/transfer-payment-card";
 import {
   useOrderEntryStateBody,
   useOrderEntryStateLabel,
@@ -99,10 +99,11 @@ export default async function AccountOrderPage({
         <OrderHeader order={order} locale={locale} timeZone={timeZone} />
 
         {/* 0041: mientras el pago por Zelle no se confirme, esto es lo que hay que hacer. */}
-        {order.payment_method === "ZELLE" ? (
-          <ZellePaymentCard
+        {order.payment_method === "ZELLE" || order.payment_method === "VENMO" ? (
+          <TransferPaymentCard
             order={order}
             zelle={configResult.ok ? (configResult.data.payment_methods?.zelle ?? null) : null}
+            venmo={configResult.ok ? (configResult.data.payment_methods?.venmo ?? null) : null}
             locale={locale}
             timeZone={timeZone}
           />
@@ -176,6 +177,7 @@ function OrderHeader({
         <Badge tone="neutral">{statusLabel(order.status)}</Badge>
         {order.payment_method === "CASH" ? <Badge tone="info">{t("paymentCash")}</Badge> : null}
         {order.payment_method === "ZELLE" ? <Badge tone="info">{t("paymentZelle")}</Badge> : null}
+        {order.payment_method === "VENMO" ? <Badge tone="info">{t("paymentVenmo")}</Badge> : null}
         {placedAt === null ? null : (
           <span className="text-caption text-text-subtle">{t("placedOn", { date: placedAt })}</span>
         )}

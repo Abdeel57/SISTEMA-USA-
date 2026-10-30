@@ -43,6 +43,8 @@ export const identities = pgTable(
     /** DEC-060 (0031): celular VERIFICADO con el que se puede iniciar sesion. */
     phoneE164: text("phone_e164"),
     phoneVerifiedAt: timestamp("phone_verified_at", { withTimezone: true, mode: "date" }),
+    /** 0042: identidad nacida al apartar sin cuenta. No puede iniciar sesion. */
+    guestCheckoutAt: timestamp("guest_checkout_at", { withTimezone: true, mode: "date" }),
     status: identityStatusEnum("status").notNull().default("PENDING_VERIFICATION"),
     anonymizedAt: timestamp("anonymized_at", { withTimezone: true, mode: "date" }),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),

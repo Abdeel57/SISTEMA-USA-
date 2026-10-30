@@ -36,10 +36,12 @@ function iconOf(method: PaymentMethod): string {
       return "💵";
     case "ZELLE":
       return "🏦";
+    case "VENMO":
+      return "📱";
   }
 }
 
-function copyKeyOf(method: PaymentMethod): "card" | "cash" | "zelle" {
+function copyKeyOf(method: PaymentMethod): "card" | "cash" | "zelle" | "venmo" {
   switch (method) {
     case "CARD":
       return "card";
@@ -47,6 +49,8 @@ function copyKeyOf(method: PaymentMethod): "card" | "cash" | "zelle" {
       return "cash";
     case "ZELLE":
       return "zelle";
+    case "VENMO":
+      return "venmo";
   }
 }
 

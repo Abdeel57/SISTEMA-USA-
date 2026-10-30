@@ -47,8 +47,14 @@ export async function ZelleReviewPanel({
   const phone = order.contact_phone ?? null;
   const pending = order.status === "PENDING_PAYMENT";
   const cancelled = order.status === "CANCELLED";
+  // 0042: Zelle o Venmo. Se nombra la app para que se busque el pago donde es.
+  const app = order.payment_method === "VENMO" ? "Venmo" : "Zelle";
+  // 0042: quien aparto sin cuenta dejo su nombre en el pedido; si no, el de la
+  // direccion de envio.
+  const buyerName = (order.contact_name ?? order.shipping_address?.full_name ?? "").trim();
+  const numbers = numbersText(order.entry_numbers ?? null, t("numbersJoin"));
 
-  const firstName = (order.shipping_address?.full_name ?? "").trim().split(/\s+/u)[0] ?? "";
+  const firstName = buyerName.split(/\s+/u)[0] ?? "";
   const greeting =
     firstName === "" ? t("whatsappGreetingNoName") : t("whatsappGreeting", { name: firstName });
   const entries =
@@ -56,17 +62,31 @@ export async function ZelleReviewPanel({
 
   const message = pending
     ? latest === undefined
-      ? t("whatsappAskReceipt", { greeting, total, number: order.order_number, brand: brandName })
-      : t("whatsappReviewing", { greeting, number: order.order_number, brand: brandName })
-    : entries === null
-      ? t("whatsappPaid", { greeting, total, number: order.order_number, brand: brandName })
-      : t("whatsappPaidWithEntries", {
+      ? t("whatsappAskReceipt", {
           greeting,
           total,
           number: order.order_number,
-          entries,
           brand: brandName,
-        });
+          app,
+        })
+      : t("whatsappReviewing", { greeting, number: order.order_number, brand: brandName })
+    : numbers !== null
+      ? t("whatsappPaidWithNumbers", {
+          greeting,
+          total,
+          number: order.order_number,
+          numbers,
+          brand: brandName,
+        })
+      : entries === null
+        ? t("whatsappPaid", { greeting, total, number: order.order_number, brand: brandName })
+        : t("whatsappPaidWithEntries", {
+            greeting,
+            total,
+            number: order.order_number,
+            entries,
+            brand: brandName,
+          });
 
   const whatsappHref =
     phone === null || cancelled
@@ -97,6 +117,18 @@ export async function ZelleReviewPanel({
       <dl className="mt-s5 grid grid-cols-1 gap-s4 sm:grid-cols-2">
         <div>
           <dt className="text-caption uppercase tracking-wide text-text-subtle">
+            {t("buyerNameLabel")}
+          </dt>
+          <dd className="text-body-md text-text">{buyerName === "" ? t("noName") : buyerName}</dd>
+        </div>
+        <div>
+          <dt className="text-caption uppercase tracking-wide text-text-subtle">
+            {t("paidWithLabel")}
+          </dt>
+          <dd className="text-body-md font-semibold text-text">{app}</dd>
+        </div>
+        <div>
+          <dt className="text-caption uppercase tracking-wide text-text-subtle">
             {t("whatsappLabel")}
           </dt>
           <dd className="font-mono text-body-md text-text">
@@ -116,7 +148,7 @@ export async function ZelleReviewPanel({
       {pending ? (
         <div className="mt-s5">
           <Alert tone="warning" title={t("verifyTitle")}>
-            <p>{t("verifyBody", { total, number: order.order_number })}</p>
+            <p>{t("verifyBody", { total, number: order.order_number, app })}</p>
           </Alert>
         </div>
       ) : null}
@@ -137,7 +169,7 @@ export async function ZelleReviewPanel({
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={receiptHref(latest.id)}
-                alt={t("receiptAlt", { number: order.order_number })}
+                alt={t("receiptAlt", { number: order.order_number, app })}
                 className="mx-auto max-h-[36rem] w-auto object-contain"
               />
             </a>
@@ -185,6 +217,21 @@ export async function ZelleReviewPanel({
       )}
     </Card>
   );
+}
+
+/**
+ * 0042: los numeros del pedido para el mensaje: "APP-000101" si el bloque es de
+ * uno, "APP-000101 a APP-000105" si son varios. `null` sin numeros que mandar.
+ */
+function numbersText(batches: OrderDetail["entry_numbers"], join: string): string | null {
+  if (batches === null || batches === undefined || batches.length === 0) return null;
+  return batches
+    .map((batch) =>
+      batch.quantity === 1
+        ? batch.first_number
+        : `${batch.first_number} ${join} ${batch.last_number}`,
+    )
+    .join(", ");
 }
 
 /** `+15125550134` -> `+1 (512) 555-0134`. Otros paises, tal cual. */

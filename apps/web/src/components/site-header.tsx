@@ -3,7 +3,7 @@ import { getTranslations } from "next-intl/server";
 
 import type { Locale } from "@/i18n/locales";
 import { Link } from "@/i18n/navigation";
-import { loadBrand } from "@/lib/brand-server";
+import { loadBrand, loadGuestCheckout } from "@/lib/brand-server";
 import { loadSession } from "@/lib/participant-server";
 
 import { AccountGlyph, AccountMenu, type AccountDestination } from "./account-menu";
@@ -89,6 +89,8 @@ export async function SiteHeader({ locale }: { readonly locale: Locale }) {
   // El logotipo subido desde el panel. Misma lectura que el layout: `loadBrand`
   // la comparte dentro de la peticion.
   const brand = await loadBrand();
+  // 0042: vendiendo sin cuentas no hay a donde entrar.
+  const guestCheckout = await loadGuestCheckout();
 
   const accountDestinations: readonly AccountDestination[] = [
     { href: "/account", label: t("account.nav.overview") },
@@ -177,7 +179,7 @@ export async function SiteHeader({ locale }: { readonly locale: Locale }) {
            * cuenta" a quien quiza no la tenga abierta acaba en una pantalla que
            * le vuelve a pedir la contrasena sin explicar por que.
            */}
-          {state.kind === "active" ? (
+          {guestCheckout ? null : state.kind === "active" ? (
             <AccountMenu
               locale={locale}
               label={t("account.menuLabel")}

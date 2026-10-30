@@ -30,7 +30,6 @@ import {
   audienceForRoles,
   capabilitiesForRoles,
   evaluateSession,
-  generateSessionToken,
   hashPassword,
   hashSessionToken,
   looksLikeSessionToken,
@@ -38,7 +37,6 @@ import {
   MINIMUM_PASSWORD_LENGTH,
   needsRehash,
   PasswordPolicyError,
-  SESSION_POLICIES,
   verifyPassword,
   type RoleId,
   type SessionAudience,
@@ -55,11 +53,11 @@ import {
   residenceStateSchema,
 } from "../http/eligibility-input.js";
 import { ApiErrors, errorEnvelopeSchema } from "../http/errors.js";
+import { openSession as openSharedSession } from "../http/open-session.js";
 import type { RouteDefinition } from "../http/route-registry.js";
 import {
   clearCookieOptionsFor,
   cookieNameFor,
-  cookieOptionsFor,
   type SessionCookieConfig,
 } from "../http/session-cookie.js";
 
@@ -216,12 +214,7 @@ export function buildAuthRoutes(dependencies: AppDependencies): RouteDefinition[
     return null;
   }
 
-  /**
-   * Abre una sesion y emite su cookie.
-   *
-   * Lo comparten el login y el alta para que las dos entradas no puedan
-   * divergir en TTL, scope o atributos de cookie.
-   */
+  /** Ver `http/open-session.ts`: la comparten el login, el alta y el apartado sin cuenta. */
   async function openSession(
     request: FastifyRequest,
     reply: FastifyReply,
@@ -229,23 +222,7 @@ export function buildAuthRoutes(dependencies: AppDependencies): RouteDefinition[
     audience: SessionAudience,
     now: Date,
   ): Promise<void> {
-    const policy = SESSION_POLICIES[audience];
-    const token = generateSessionToken();
-
-    await identity.sessions.create({
-      tokenHash: hashSessionToken(token),
-      identityId,
-      scope: audience,
-      expiresAt: new Date(now.getTime() + policy.absoluteTtlMinutes * 60_000),
-      ipAddress: request.ip ?? null,
-      userAgent: request.headers["user-agent"] ?? null,
-    });
-
-    void reply.setCookie(
-      cookieNameFor(cookieConfig.name, audience),
-      token,
-      cookieOptionsFor(audience, cookieConfig, policy.absoluteTtlMinutes * 60),
-    );
+    await openSharedSession(dependencies, request, reply, identityId, audience, now);
   }
 
   /**

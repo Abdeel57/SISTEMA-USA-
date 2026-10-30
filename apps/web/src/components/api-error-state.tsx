@@ -149,6 +149,10 @@ const TRANSLATED_CODES = [
   "PAYMENT_RECEIPT_NOT_ACCEPTED",
   "PAYMENT_RECEIPT_LIMIT",
   "RECEIPT_FILE_REQUIRED",
+  // 0042: apartar sin cuenta y Venmo.
+  "GUEST_CHECKOUT_UNAVAILABLE",
+  "ORDER_ALREADY_RESERVED",
+  "VENMO_HANDLE_INVALID",
 ] as const;
 
 type TranslatedCode = (typeof TRANSLATED_CODES)[number];
@@ -284,6 +288,12 @@ export function useApiErrorMessage(): (code: string | null) => string {
         return t("TEXT_TOO_LONG");
       case "PHONE_INVALID":
         return t("PHONE_INVALID");
+      case "GUEST_CHECKOUT_UNAVAILABLE":
+        return t("GUEST_CHECKOUT_UNAVAILABLE");
+      case "ORDER_ALREADY_RESERVED":
+        return t("ORDER_ALREADY_RESERVED");
+      case "VENMO_HANDLE_INVALID":
+        return t("VENMO_HANDLE_INVALID");
       case "PAYMENT_METHOD_UNAVAILABLE":
         return t("PAYMENT_METHOD_UNAVAILABLE");
       case "ORDER_NOT_ZELLE_PAYMENT":

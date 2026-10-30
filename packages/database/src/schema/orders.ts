@@ -112,14 +112,16 @@ export const orders = pgTable(
     shippingCarrier: text("shipping_carrier"),
     trackingNumber: text("tracking_number"),
     /**
-     * 0041: canal del pago manual (`provider = 'cash'`): `CASH` en caja o
-     * `ZELLE` por transferencia con comprobante. `null` en tarjeta, y en un
-     * pedido manual anterior a 0041, que se lee como `CASH`. Una CHECK impide
-     * el canal fuera del pago manual.
+     * 0041: canal del pago manual (`provider = 'cash'`): `CASH` en caja, o
+     * `ZELLE` o `VENMO` (0042) por transferencia con comprobante. `null` en
+     * tarjeta, y en un pedido manual anterior a 0041, que se lee como `CASH`.
+     * Una CHECK impide el canal fuera del pago manual.
      */
-    manualPaymentChannel: text("manual_payment_channel", { enum: ["CASH", "ZELLE"] }),
+    manualPaymentChannel: text("manual_payment_channel", { enum: ["CASH", "ZELLE", "VENMO"] }),
     /** 0041: WhatsApp del comprador en E.164, para avisarle del pago. */
     contactPhone: text("contact_phone"),
+    /** 0042: nombre que dejo quien aparto el pedido sin cuenta. */
+    contactName: text("contact_name"),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
     paidAt: timestamp("paid_at", { withTimezone: true, mode: "date" }),

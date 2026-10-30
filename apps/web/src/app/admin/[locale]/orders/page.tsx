@@ -22,9 +22,11 @@ export const dynamic = "force-dynamic";
  * esperando el cobro. Se elige con un enlace y no con un desplegable porque son
  * opciones fijas que tienen que verse a la vez en un telefono.
  *
- * 0041: `zelle-pending` es la cola de Zelle -pedidos por Zelle esperando que
- * alguien compare el comprobante con el banco-, y va primera despues de "todos"
- * porque es la que se revisa a diario.
+ * 0041: `zelle-pending` es la cola de pagos por transferencia -pedidos que
+ * esperan que alguien compare la captura con su banco o su app-, y va primera
+ * despues de "todos" porque es la que se revisa a diario. 0042: incluye Venmo
+ * (`TRANSFER` = Zelle o Venmo). La clave de la vista se conserva para no romper
+ * enlaces guardados.
  */
 const VIEWS = ["all", "zelle-pending", "cash-pending", "cash"] as const;
 type OrdersView = (typeof VIEWS)[number];
@@ -35,12 +37,12 @@ function viewFrom(raw: string | undefined): OrdersView {
 
 /** Lo que cada vista pide al backend. La interfaz no filtra nada por su cuenta. */
 function filtersOf(view: OrdersView): {
-  readonly payment_method?: "CASH" | "ZELLE";
+  readonly payment_method?: "CASH" | "TRANSFER";
   readonly awaiting_payment?: boolean;
 } {
   switch (view) {
     case "zelle-pending":
-      return { payment_method: "ZELLE", awaiting_payment: true };
+      return { payment_method: "TRANSFER", awaiting_payment: true };
     case "cash-pending":
       return { payment_method: "CASH", awaiting_payment: true };
     case "cash":
@@ -231,12 +233,27 @@ export default async function AdminOrdersPage({
                    * PII), y CADENA VACIA cuando la cuenta esta anonimizada. Las
                    * dos cosas se dicen distinto: un hueco se lee como un fallo.
                    */
-                  cell: (row) =>
-                    row.participant_email === "" ? (
-                      <span className="text-text-muted">{t("anonymizedParticipant")}</span>
-                    ) : (
+                  cell: (row) => {
+                    // 0042: quien aparto sin cuenta no tiene correo; su nombre si.
+                    const name = row.buyer_name ?? null;
+                    if (row.participant_email === "") {
+                      return (
+                        name ?? (
+                          <span className="text-text-muted">{t("anonymizedParticipant")}</span>
+                        )
+                      );
+                    }
+                    return name === null ? (
                       row.participant_email
-                    ),
+                    ) : (
+                      <span className="flex flex-col">
+                        <span>{name}</span>
+                        <span className="text-caption text-text-subtle">
+                          {row.participant_email}
+                        </span>
+                      </span>
+                    );
+                  },
                 },
                 {
                   id: "payment",
@@ -249,6 +266,10 @@ export default async function AdminOrdersPage({
                     ) : row.payment_method === "ZELLE" ? (
                       <Badge tone="info" size="sm" wrap>
                         {t("paymentZelle")}
+                      </Badge>
+                    ) : row.payment_method === "VENMO" ? (
+                      <Badge tone="info" size="sm" wrap>
+                        {t("paymentVenmo")}
                       </Badge>
                     ) : (
                       t("paymentCard")

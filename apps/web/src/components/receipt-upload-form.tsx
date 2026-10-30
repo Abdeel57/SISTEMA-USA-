@@ -9,13 +9,14 @@ import { useRouter } from "@/i18n/navigation";
 import { IDLE } from "@/lib/action-result";
 // De la hoja y no del indice: el indice arrastra `http.ts`, que es de servidor.
 import { ADMIN_MEDIA_CONTENT_TYPES, ADMIN_MEDIA_MAX_BYTES } from "@/lib/api/admin-contract";
+import type { TransferMethod } from "@/lib/api/contract";
 import { downscale, replaceInputFile } from "@/lib/image-downscale";
 import { uploadPaymentReceiptAction } from "@/lib/payment-receipt-actions";
 
 import { FormError, useFieldError } from "./auth-form-shell";
 
 /**
- * Subida del comprobante de Zelle (0041).
+ * Subida de la captura del pago por Zelle (0041) o Venmo (0042).
  *
  * Un `<input type="file">` dentro de un formulario normal: funciona sin
  * JavaScript, como el resto del sitio. Con JavaScript, la captura se reduce en
@@ -26,13 +27,16 @@ export function ReceiptUploadForm({
   orderId,
   locale,
   hasReceipt,
+  channel,
 }: {
   readonly orderId: string;
   readonly locale: Locale;
   /** Ya hay uno subido: el boton dice "subir otro". */
   readonly hasReceipt: boolean;
+  /** 0042: con que app se pago. Ausente = la del pedido. */
+  readonly channel?: TransferMethod;
 }) {
-  const t = useTranslations("orderConfirmation.zelle");
+  const t = useTranslations("orderConfirmation.transfer");
   const [state, formAction, pending] = useActionState(uploadPaymentReceiptAction, IDLE);
   const fieldError = useFieldError(state);
   const router = useRouter();
@@ -45,6 +49,9 @@ export function ReceiptUploadForm({
     <form action={formAction} className="flex flex-col gap-s3">
       <input type="hidden" name="locale" value={locale} />
       <input type="hidden" name="order_id" value={orderId} />
+      {channel === undefined ? null : (
+        <input type="hidden" name="payment_channel" value={channel} />
+      )}
 
       <FormError result={state} />
 
