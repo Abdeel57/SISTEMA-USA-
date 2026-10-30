@@ -480,3 +480,74 @@ describe("apartar sin cuenta", () => {
     expect(errorCode(response)).toBe("PAYMENT_METHOD_UNAVAILABLE");
   });
 });
+
+describe("el inventario es el tope (0043)", () => {
+  async function stockLeft(): Promise<number> {
+    return Number(
+      await one<string>(
+        sql`SELECT stock_quantity::text FROM product_variants WHERE id = ${variantId}`,
+      ),
+    );
+  }
+
+  async function setStock(quantity: number): Promise<void> {
+    await db.execute(
+      sql`UPDATE product_variants SET stock_quantity = ${quantity} WHERE id = ${variantId}`,
+    );
+  }
+
+  it("apartar descuenta lo que queda, y cancelar lo devuelve", async () => {
+    await setStock(5);
+    const visitor = new Browser();
+    await fillCart(visitor);
+    const order = await visitor.request("POST", "/api/v1/checkout/reserve", RESERVE);
+    expect(order.statusCode, order.body).toBe(201);
+    expect(await stockLeft()).toBe(4);
+
+    const panel = await manager();
+    const cancelled = await panel.request(
+      "POST",
+      `/api/v1/admin/orders/${order.json<{ id: string }>().id}/cancel`,
+      { reason_code: "DUPLICATE_ORDER" },
+    );
+    expect(cancelled.statusCode, cancelled.body).toBe(200);
+    expect(await stockLeft()).toBe(5);
+  });
+
+  it("sin existencias no se puede apartar, ni aunque estuviera en el carrito", async () => {
+    await setStock(1);
+    const first = new Browser();
+    const second = new Browser();
+    await fillCart(first);
+    await fillCart(second);
+
+    const won = await first.request("POST", "/api/v1/checkout/reserve", RESERVE);
+    expect(won.statusCode, won.body).toBe(201);
+    expect(await stockLeft()).toBe(0);
+
+    const late = await second.request("POST", "/api/v1/checkout/reserve", RESERVE);
+    expect(late.statusCode, late.body).toBe(409);
+    expect(errorCode(late)).toBe("INSUFFICIENT_STOCK");
+    expect(await stockLeft()).toBe(0);
+  });
+
+  it("dos compras a la vez de la ultima unidad: solo una pasa", async () => {
+    await setStock(1);
+    const buyers = [new Browser(), new Browser(), new Browser()];
+    for (const buyer of buyers) await fillCart(buyer);
+
+    const responses = await Promise.all(
+      buyers.map((buyer) => buyer.request("POST", "/api/v1/checkout/reserve", RESERVE)),
+    );
+    const codes = responses.map((response) => response.statusCode).sort();
+    expect(codes, responses.map((response) => response.body).join("\n")).toEqual([201, 409, 409]);
+    expect(await stockLeft()).toBe(0);
+
+    // Ningun pedido quedo sin lineas por el rechazo.
+    const orphans = await one<string>(
+      sql`SELECT count(*)::text FROM orders o
+           WHERE NOT EXISTS (SELECT 1 FROM order_items i WHERE i.order_id = o.id)`,
+    );
+    expect(orphans).toBe("0");
+  });
+});

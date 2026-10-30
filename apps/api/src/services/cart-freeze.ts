@@ -15,7 +15,8 @@
 
 import type { CreateOrderItemInput, FulfillmentMethodValue } from "@app/database";
 
-import { ApiError } from "../http/errors.js";
+import { ApiError, ApiErrors } from "../http/errors.js";
+import { fitsStock } from "./availability.js";
 import type { CartLineRecord, CartOwnerRef, Repositories } from "./ports.js";
 import { shippingAmountOf, shippingFor } from "./shipping.js";
 
@@ -63,6 +64,15 @@ export async function freezeOpenCart(
   }
   if (cart.currency === null) {
     throw new ApiError({ statusCode: 409, code: "CART_EMPTY" });
+  }
+
+  // 0043: lo que queda puede haber bajado desde que se anadio al carrito. Se
+  // dice aqui, antes de crear nada; la garantia contra dos compras simultaneas
+  // la da el motor al escribir las lineas (`services/stock.ts`).
+  for (const line of cart.lines) {
+    if (!fitsStock(line.stockQuantity, line.quantity)) {
+      throw ApiErrors.insufficientStock(line.stockQuantity ?? 0);
+    }
   }
 
   const promotion = await repositories.promotions.findActive();

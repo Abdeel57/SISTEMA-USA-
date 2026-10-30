@@ -74,6 +74,8 @@ import {
 import { freezeOpenCart } from "../services/cart-freeze.js";
 import { createCashCheckout, isCashOrder } from "../services/cash-payments.js";
 import { normalizeContactPhone } from "../services/contact-phone.js";
+import { fitsStock } from "../services/availability.js";
+import { withStockCheck } from "../services/stock.js";
 import { guestCheckoutEnabled, transferChannelsOf } from "../services/payment-methods.js";
 import {
   MEDIA_MAX_BASE64_LENGTH,
@@ -620,24 +622,33 @@ export function buildOrdersRoutes(dependencies: AppDependencies): RouteDefinitio
         const subtotal = cart.subtotalMinor;
 
         const orderId = domain.ids.next();
-        const draft = await orders.createDraft({
-          id: orderId,
-          participantId: principal.participantId,
-          promotionId: cart.promotionId,
-          rulesVersionId: cart.rulesVersionId,
-          cartId: cart.cartId,
-          currency: cart.currency,
-          subtotalMinor: subtotal,
-          // DEC-079: la tarifa fija si el pedido lleva mercancia; `null` si
-          // solo lleva paquetes, que no se envian. Impuestos: `null`, pendiente
-          // legal (no es "cero impuestos", es "todavia no se cobran").
-          shippingTotalMinor: cart.shippingMinor,
-          taxTotalMinor: null,
-          totalMinor: cart.totalMinor,
-          shippingAddress: { ...body.shipping_address, line2: body.shipping_address.line2 ?? null },
-          items: cart.items,
-          createdAt: domain.clock.now(),
-        });
+        // 0043: pedido y lineas en UNA transaccion. Sin existencias, el motor
+        // rechaza las lineas y no queda un pedido sin ellas.
+        const draft = await withStockCheck(() =>
+          domain.repositories.unitOfWork.withTransaction(() =>
+            orders.createDraft({
+              id: orderId,
+              participantId: principal.participantId,
+              promotionId: cart.promotionId,
+              rulesVersionId: cart.rulesVersionId,
+              cartId: cart.cartId,
+              currency: cart.currency,
+              subtotalMinor: subtotal,
+              // DEC-079: la tarifa fija si el pedido lleva mercancia; `null` si
+              // solo lleva paquetes, que no se envian. Impuestos: `null`, pendiente
+              // legal (no es "cero impuestos", es "todavia no se cobran").
+              shippingTotalMinor: cart.shippingMinor,
+              taxTotalMinor: null,
+              totalMinor: cart.totalMinor,
+              shippingAddress: {
+                ...body.shipping_address,
+                line2: body.shipping_address.line2 ?? null,
+              },
+              items: cart.items,
+              createdAt: domain.clock.now(),
+            }),
+          ),
+        );
 
         // La pantalla de vuelta necesita saber QUE pedido consultar, y quien la
         // compone -`apps/web`- no puede saberlo: el pedido nace aqui. Se anade
@@ -927,6 +938,13 @@ export function buildOrdersRoutes(dependencies: AppDependencies): RouteDefinitio
           const cart = await repositories.carts.findOpen(owner);
           if (cart === null || cart.lines.length === 0) {
             throw new ApiError({ statusCode: 409, code: "CART_EMPTY" });
+          }
+          // 0043: ni sin existencias. La garantia la da el motor al escribir
+          // las lineas; esto solo evita crear a alguien para nada.
+          for (const line of cart.lines) {
+            if (!fitsStock(line.stockQuantity, line.quantity)) {
+              throw ApiErrors.insufficientStock(line.stockQuantity ?? 0);
+            }
           }
           const guest = await dependencies.identity.identities.registerGuestParticipant({
             contactPhone,

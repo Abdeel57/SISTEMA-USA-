@@ -61,6 +61,7 @@ import { isSweepstakesError, type DomainActor } from "@app/sweepstakes";
 import type { AppDependencies } from "../app.js";
 import { ApiError } from "../http/errors.js";
 import { freezeOpenCart } from "./cart-freeze.js";
+import { withStockCheck } from "./stock.js";
 import { toCommerceOrder, type DomainServices } from "./domain-services.js";
 import { entryStateForOrder, type OrderEntryFacts } from "./order-presenter.js";
 import type { CartOwnerRef } from "./ports.js";
@@ -136,49 +137,52 @@ export function createCashCheckout(
       const orderId = domain.ids.next();
       const now = domain.clock.now();
 
-      const created = await domain.repositories.unitOfWork.withTransaction(async () => {
-        const draft = await orders.createCashDraft({
-          id: orderId,
-          participantId,
-          promotionId: cart.promotionId,
-          rulesVersionId: cart.rulesVersionId,
-          cartId: cart.cartId,
-          currency: cart.currency,
-          subtotalMinor: cart.subtotalMinor,
-          // DEC-079: el envio sale de la MISMA foto que en la tarjeta
-          // (`freezeOpenCart`). Si se recoge en el punto de venta no hay envio,
-          // y lo que se cobra en caja es el subtotal; si se envia, el total con
-          // envio. Impuestos: pendiente legal.
-          shippingTotalMinor: cart.shippingMinor,
-          taxTotalMinor: null,
-          totalMinor: cart.totalMinor,
-          shippingAddress:
-            fulfillment.method === "DELIVERY" && fulfillment.shippingAddress !== null
-              ? { ...fulfillment.shippingAddress }
-              : null,
-          fulfillmentMethod: cart.fulfillmentMethod,
-          manualPaymentChannel: payment?.channel ?? "CASH",
-          contactPhone: payment?.contactPhone ?? null,
-          contactName: payment?.contactName ?? null,
-          items: cart.items,
-          createdAt: now,
-        });
+      // 0043: sin existencias, el motor rechaza las lineas y con ellas el pedido.
+      const created = await withStockCheck(() =>
+        domain.repositories.unitOfWork.withTransaction(async () => {
+          const draft = await orders.createCashDraft({
+            id: orderId,
+            participantId,
+            promotionId: cart.promotionId,
+            rulesVersionId: cart.rulesVersionId,
+            cartId: cart.cartId,
+            currency: cart.currency,
+            subtotalMinor: cart.subtotalMinor,
+            // DEC-079: el envio sale de la MISMA foto que en la tarjeta
+            // (`freezeOpenCart`). Si se recoge en el punto de venta no hay envio,
+            // y lo que se cobra en caja es el subtotal; si se envia, el total con
+            // envio. Impuestos: pendiente legal.
+            shippingTotalMinor: cart.shippingMinor,
+            taxTotalMinor: null,
+            totalMinor: cart.totalMinor,
+            shippingAddress:
+              fulfillment.method === "DELIVERY" && fulfillment.shippingAddress !== null
+                ? { ...fulfillment.shippingAddress }
+                : null,
+            fulfillmentMethod: cart.fulfillmentMethod,
+            manualPaymentChannel: payment?.channel ?? "CASH",
+            contactPhone: payment?.contactPhone ?? null,
+            contactName: payment?.contactName ?? null,
+            items: cart.items,
+            createdAt: now,
+          });
 
-        if (draft === null) {
-          // Este carrito ya tenia pedido en efectivo: un doble envio.
-          return null;
-        }
+          if (draft === null) {
+            // Este carrito ya tenia pedido en efectivo: un doble envio.
+            return null;
+          }
 
-        // DRAFT -> PENDING_PAYMENT, con el pago PENDING: el cobro esta
-        // pendiente en caja. Lo decide la maquina de `@app/commerce`, no este
-        // archivo. El estado cualificante que se pasa es irrelevante aqui
-        // -PENDING no satisface ninguno- y no se lee de la version de reglas
-        // para que un pedido en efectivo se pueda crear aunque esta este a
-        // medio configurar: crearlo no otorga nada.
-        const pending = applyPaymentState(toCommerceOrder(draft), "PENDING", now, "PAID").order;
-        await orders.applyPaymentState(draft.id, cashPatch(pending));
-        return await orders.findById(draft.id);
-      });
+          // DRAFT -> PENDING_PAYMENT, con el pago PENDING: el cobro esta
+          // pendiente en caja. Lo decide la maquina de `@app/commerce`, no este
+          // archivo. El estado cualificante que se pasa es irrelevante aqui
+          // -PENDING no satisface ninguno- y no se lee de la version de reglas
+          // para que un pedido en efectivo se pueda crear aunque esta este a
+          // medio configurar: crearlo no otorga nada.
+          const pending = applyPaymentState(toCommerceOrder(draft), "PENDING", now, "PAID").order;
+          await orders.applyPaymentState(draft.id, cashPatch(pending));
+          return await orders.findById(draft.id);
+        }),
+      );
 
       if (created !== null) {
         return { created: true, order: created };

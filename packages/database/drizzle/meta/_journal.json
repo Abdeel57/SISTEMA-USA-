@@ -239,6 +239,13 @@
       "when": 1787616042000,
       "tag": "0042_reserve_checkout",
       "breakpoints": false
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1787616043000,
+      "tag": "0043_stock_reservation",
+      "breakpoints": false
     }
   ]
 }
