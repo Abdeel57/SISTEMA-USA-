@@ -914,6 +914,7 @@ function createBrandRepository(db: Database): BrandRepository {
       colorAccent: profile.colorAccent,
       patternOpacityPercent: profile.patternOpacityPercent,
       logoMediaId: profile.logoMediaId,
+      metaPixelId: profile.metaPixelId,
       logoUrl:
         profile.logoMediaId === null || row.logoContentType === null
           ? null
@@ -948,6 +949,7 @@ function createBrandRepository(db: Database): BrandRepository {
           colorAccent: input.colorAccent,
           patternOpacityPercent: input.patternOpacityPercent,
           logoMediaId: input.logoMediaId,
+          metaPixelId: input.metaPixelId,
           updatedByAdminUserId,
           // `updated_at` lo pone el trigger `brand_profile_set_updated_at`.
         })

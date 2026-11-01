@@ -42,6 +42,12 @@ export const brandProfile = pgTable("brand_profile", {
   /** Fila de `media_assets` con el logotipo, o null para el simbolo de la plantilla. */
   logoMediaId: uuid("logo_media_id").references(() => mediaAssets.id, { onDelete: "set null" }),
 
+  /**
+   * Pixel de Meta del sitio (migracion 0044): solo cifras, o null si no hay
+   * pixel y la tienda no carga el codigo de Meta.
+   */
+  metaPixelId: text("meta_pixel_id"),
+
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
   updatedByAdminUserId: uuid("updated_by_admin_user_id").references(() => adminUsers.id, {
     onDelete: "set null",

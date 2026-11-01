@@ -9,7 +9,8 @@ import type { ReactNode } from "react";
 
 import { AnnouncementBar } from "@/components/announcement-bar";
 import { LanguageBar } from "@/components/language-bar";
-import { MetaPixel } from "@/components/meta-pixel";
+import { MetaPixelBase, MetaPixelNoscript } from "@/components/meta-pixel";
+import { MetaPixelTracker } from "@/components/meta-pixel-tracker";
 import { ScrollReveal } from "@/components/scroll-reveal";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
@@ -19,7 +20,8 @@ import { routing } from "@/i18n/routing";
 import { brandIconsMetadata, brandIconUrl } from "@/lib/brand-icon";
 import { storeLightThemeCss } from "@/lib/brand-palette";
 import { loadBrand } from "@/lib/brand-server";
-import { resolveMetaPixelId } from "@/lib/meta-pixel";
+import { metaPixelHosts } from "@/lib/meta-pixel";
+import { metaNoscriptAllowed, requestNonce } from "@/lib/meta-pixel-server";
 
 import { bodyFont, displayFont, headlineFont } from "../fonts";
 
@@ -134,7 +136,6 @@ export default async function LocaleLayout({
   const messages = await getMessages();
   const t = await getTranslations({ locale, namespace: "a11y" });
   const showMockNotice = process.env.NODE_ENV !== "production";
-  const metaPixelId = resolveMetaPixelId(process.env);
   /*
    * LA MARCA GUARDADA DESDE EL PANEL (migracion 0040), en cada peticion.
    *
@@ -146,6 +147,19 @@ export default async function LocaleLayout({
    * ni una cadena del usuario sin pasar por `parseHex`.
    */
   const brand = await loadBrand();
+
+  /*
+   * DEC-087: el pixel de Meta del sitio, configurado en Panel -> Marca. Sin
+   * identificador no se pinta nada de Meta. El nonce es el de la CSP de esta
+   * peticion: sin el, el codigo base en linea no correria.
+   */
+  const metaPixelId = brand.metaPixelId;
+  // El dominio de Marca y el del despliegue (`SITE_URL`): ver `metaPixelHosts`.
+  const metaHosts = metaPixelHosts(brand.siteHosts, process.env);
+  const [nonce, noscriptAllowed] =
+    metaPixelId === null
+      ? [null, false]
+      : await Promise.all([requestNonce(), metaNoscriptAllowed(metaHosts)]);
 
   return (
     /*
@@ -169,8 +183,21 @@ export default async function LocaleLayout({
           id="brand-theme"
           dangerouslySetInnerHTML={{ __html: brand.themeCss + storeLightThemeCss(brand.colors) }}
         />
+
+        {/* DEC-087: codigo base del pixel de Meta, en el <head> de TODAS las
+            paginas de la tienda (el panel tiene otro layout). Inicializa una
+            vez y manda el primer PageView, antes de hidratar. */}
+        <MetaPixelBase
+          pixelId={metaPixelId}
+          hosts={metaHosts}
+          locales={routing.locales}
+          nonce={nonce}
+        />
       </head>
       <body className="flex min-h-svh flex-col bg-bg text-text">
+        {/* Y su PageView para quien navega sin JavaScript. */}
+        <MetaPixelNoscript pixelId={metaPixelId} allowed={noscriptAllowed} />
+
         <NextIntlClientProvider messages={messages}>
           <a href="#main" className="app-skip-link">
             {t("skipToContent")}
@@ -208,11 +235,9 @@ export default async function LocaleLayout({
           {/* DEC-075: aparicion al desplazarse. No pinta nada. */}
           <ScrollReveal />
 
-          {/* DEC-086: pixel de Meta, solo en la tienda (el panel tiene su
-              propio layout y no lo carga). Tampoco pinta nada. */}
-          {metaPixelId === null ? null : (
-            <MetaPixel pixelId={metaPixelId} hosts={brand.siteHosts} />
-          )}
+          {/* DEC-086/087: PageView en cada navegacion sin recarga y eventos al
+              pulsar. Tampoco pinta nada. */}
+          {metaPixelId === null ? null : <MetaPixelTracker />}
         </NextIntlClientProvider>
       </body>
     </html>

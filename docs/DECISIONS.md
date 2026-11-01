@@ -4358,3 +4358,75 @@ Affected areas: `apps/web` (`lib/meta-pixel.ts`, `components/meta-pixel.tsx`,
 Proposed by: sesión del usuario (2026-10-09, petición del cliente)
 Agreed by: frontend-ux, security (petición directa del usuario); pendiente:
 abogado (pregunta 22)
+
+## DEC-087
+
+Status: Accepted
+
+Date: 2026-10-31
+
+Decision:
+**El píxel de Meta se configura en el panel, por sitio, y mide el embudo de
+compra completo.** Sustituye a la configuración y a los límites 1 y 4 de
+DEC-086; los límites 2 y 3 (dominio real, GPC y exclusión de
+`/privacychoices`) se conservan.
+
+1. **El identificador sale del panel**, Marca → Publicidad → "ID del Meta
+   Pixel": columna `brand_profile.meta_pixel_id` (migración 0044, CHECK
+   `^[0-9]{8,20}$`, `NULL` = sin píxel), `PUT /admin/brand` (`meta_pixel_id`
+   opcional: ausente conserva el guardado, `""`/`null` lo quita, otra forma
+   es 422) y `GET /config` → `brand.meta_pixel_id`. Cada sitio tiene su base
+   de datos, así que cada sitio tiene su píxel. Desaparece la variable
+   `NEXT_PUBLIC_META_PIXEL_ID`: ningún identificador vive en el código ni en
+   el despliegue.
+2. **Código base oficial en el `<head>`** de todas las páginas de la tienda,
+   en línea con el nonce de la CSP de la petición (`metaPixelBaseScript`):
+   corre antes de hidratar, comprueba dominio, GPC, exclusión y ruta, hace
+   `init` una sola vez por documento y manda el primer `PageView`. Más el
+   `<noscript><img></noscript>` de Meta, que el layout pinta solo si el
+   servidor ve el host del sitio, sin `Sec-GPC` y sin la cookie de exclusión.
+   `MetaPixelTracker` manda un `PageView` en cada navegación sin recarga. La
+   CSP de la tienda abre siempre los dos orígenes de Meta (el middleware no lee
+   la base de datos); la del panel sigue cerrada.
+3. **Eventos con valores reales** (todos por `lib/meta-pixel-events.ts`, que
+   nunca lanza y no hace nada sin píxel): `ViewContent` en la ficha (nombre,
+   SKU de las variantes, precio mostrado), `AddToCart` cuando el carrito
+   confirma el alta (SKU, cantidad, precio × cantidad), `InitiateCheckout` en
+   el checkout (total del carrito con envío, SKU, artículos) y `Purchase` SOLO
+   en `/orders/<id>/confirmation` (total real del pedido, SKU, `eventID` = id
+   del pedido). `Purchase` sale una vez por pedido: marca en `localStorage`,
+   `eventID` para la deduplicación de Meta, y no cuenta pedidos cancelados,
+   devueltos o con contracargo. Moneda: la de los importes (USD). Sigue sin
+   "advanced matching": ni nombre, ni correo, ni teléfono, ni dirección.
+4. **Dónde dispara**: el dominio de Marca y además el del despliegue
+   (`SITE_URL`), si es un dominio público (nunca `localhost`, IP, `.test`,
+   `.local`…). Así un sitio con el dominio de Marca aún de plantilla mide
+   igual. El checkout y la confirmación del pedido entran; quedan fuera
+   `/account` y `/checkout/return` (vuelta de la pasarela, con datos en la URL).
+
+**Política corregida, pendiente del abogado (pregunta 22).** La Política de
+Privacidad y el Aviso de California decían que el píxel no recibía detalles de
+compra ni se usaba en checkout o confirmación. Se corrigieron a mano (versión
+del 31 de octubre de 2026): declaran productos vistos, añadidos y pedidos,
+importes y referencia del pedido como información comercial compartida con
+Meta.
+
+Alternatives considered: A — Mantener la variable de entorno (descartada: el
+usuario quiere editarlo desde el panel, por sitio). B — Leer el píxel en el
+middleware para abrir la CSP solo si hay (descartada: una lectura de la API en
+cada petición por dos orígenes concretos). C — Disparar `Purchase` al confirmar
+el pago en el panel (descartada: el usuario lo pidió en la página de
+confirmación; con "Apartar" eso es al apartar, antes de que el organizador
+verifique la transferencia).
+
+Affected areas: `packages/database` (0044, esquema), `apps/api` (marca,
+`/config`, pruebas, OpenAPI), `apps/web` (layout de `[locale]`,
+`components/meta-pixel*.tsx`, `components/meta-events.tsx`,
+`lib/meta-pixel*.ts`, ficha, checkout, confirmación, añadir al carrito,
+middleware, Marca en el panel, mensajes, pruebas, textos legales),
+`packages/security` (registro de entorno), `docker-compose.yml`, guías de
+despliegue, `docs/API_CONTRACT.md`.
+
+Proposed by: sesión del usuario (2026-10-31)
+Agreed by: frontend-ux, backend, security (petición directa del usuario);
+pendiente: abogado (pregunta 22)

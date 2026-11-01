@@ -4582,6 +4582,7 @@ Response: 200
   "colors": { "brand": "#38bdf8", "accent": "#2563eb" },
   "pattern_opacity_percent": 16,
   "logo_url": "/media/<id>.png" | null,
+  "meta_pixel_id": "1234567890123456" | null,   // 0044: pixel de Meta del sitio
   "updated_at": "2026-10-13T12:00:00.000Z",
   "logo_media_id": "uuid" | null,
   "updated_by_admin_user_id": "uuid" | null   // null = valores iniciales
@@ -4624,12 +4625,19 @@ Request:
   "numbering": { "order_prefix": "^[A-Z0-9]{2,8}$", "entry_prefix": "^[A-Z0-9]{2,8}$" },
   "colors": { "brand": "#rrggbb", "accent": "#rrggbb" },
   "pattern_opacity_percent": 0..40,
-  "logo_media_id": "uuid de POST /admin/media" | null
+  "logo_media_id": "uuid de POST /admin/media" | null,
+  "meta_pixel_id": "^[0-9]{8,20}$" | "" | null   // OPCIONAL (0044, DEC-087)
 }
 
 Los prefijos y los colores se normalizan (mayúsculas y minúsculas
 respectivamente). Un `logo_media_id` que no exista es 422, no un error del
 motor.
+
+`meta_pixel_id` es el único campo opcional: `""` o `null` quitan el pixel y,
+si no viaja, se conserva el guardado (un cliente que no conoce el campo no
+apaga el pixel). Con otra forma es 422. `GET /config` lo publica en
+`brand.meta_pixel_id`: la tienda lo necesita para cargar el pixel, y no es
+secreto (va impreso en cada página).
 
 Response: 200, misma forma que GET.
 

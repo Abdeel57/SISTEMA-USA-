@@ -126,6 +126,12 @@ async function BrandSummary({
         </Fact>
         <Fact label={t("summaryDomain")}>{brand.domain}</Fact>
         <Fact label={t("summaryTimeZone")}>{brand.time_zone}</Fact>
+        {/* DEC-087: si la tienda carga el pixel de Meta, y cual. */}
+        <Fact label={t("summaryMetaPixel")}>
+          {brand.meta_pixel_id === undefined || brand.meta_pixel_id === null
+            ? t("metaPixelOff")
+            : t("metaPixelOn", { id: brand.meta_pixel_id })}
+        </Fact>
         <Fact label={t("summaryColors")}>
           <span className="flex flex-wrap items-center gap-s3">
             <Swatch color={brand.colors.brand} />

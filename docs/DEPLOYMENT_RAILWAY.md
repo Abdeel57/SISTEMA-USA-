@@ -110,8 +110,6 @@ Las opcionales se añaden aparte, cuando el cliente las tenga:
 - `api`: `PAYMENT_PROVIDER=stripe`, `PAYMENT_PROVIDER_API_KEY` y
   `PAYMENT_WEBHOOK_SIGNING_SECRET` para cobrar con tarjeta (sin ellas, solo
   efectivo).
-- `web`: `NEXT_PUBLIC_META_PIXEL_ID` con el pixel de Meta del cliente (sin
-  ella, el pixel no se carga).
 
 Los `${{...}}` son referencias de Railway y **se pegan tal cual**: Railway los
 resuelve al desplegar. No los sustituyas a mano.

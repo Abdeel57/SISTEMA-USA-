@@ -117,6 +117,21 @@ export function isEmailLike(raw: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(raw);
 }
 
+/**
+ * Pixel de Meta (DEC-087, migracion 0044). `null` o vacio = sin pixel, que es
+ * valido. Si no, solo cifras, de 8 a 20 (la misma forma que la API y la CHECK);
+ * los espacios de en medio se quitan, porque al copiarlo de Meta a veces viene
+ * agrupado. `{ valid: false }` para cualquier otra cosa.
+ */
+export function parseMetaPixelId(
+  raw: string | null,
+): { readonly valid: true; readonly value: string | null } | { readonly valid: false } {
+  if (raw === null) return { valid: true, value: null };
+  const compact = raw.replace(/\s+/gu, "");
+  if (compact === "") return { valid: true, value: null };
+  return /^\d{8,20}$/u.test(compact) ? { valid: true, value: compact } : { valid: false };
+}
+
 /** Si es un UUID, que es la forma del `id` de `POST /admin/media`. */
 export function isUuid(raw: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(raw);

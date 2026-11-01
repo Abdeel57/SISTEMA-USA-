@@ -7,6 +7,7 @@ import { AddToCartForm } from "@/components/add-to-cart-form";
 import { ApiErrorState } from "@/components/api-error-state";
 import { AvailabilityBadge } from "@/components/availability-badge";
 import { EntryPackagePanel } from "@/components/entry-package-panel";
+import { MetaEventOnMount } from "@/components/meta-events";
 import { formatMoney } from "@/i18n/formatters";
 import type { Locale } from "@/i18n/locales";
 import { Link } from "@/i18n/navigation";
@@ -25,6 +26,7 @@ import { normalizeEntryOffer } from "@/lib/entry-offer";
 import { isFeatureEnabled } from "@/lib/flags";
 import { loadFeatureFlags } from "@/lib/flags-server";
 import { safeImageUrl } from "@/lib/media-url";
+import { metaMoneyParams } from "@/lib/meta-pixel-events";
 import { priceFrom } from "@/lib/product-price";
 import { productAvailabilityStatus } from "@/lib/product-availability";
 
@@ -108,6 +110,20 @@ export default async function ProductDetailPage({
 
   return (
     <div className="app-container py-s10 pb-s16">
+      {/* DEC-087: `ViewContent` del pixel de Meta. El precio es el que se
+          muestra arriba ("desde", si hay varias variantes); los ids, los SKU de
+          sus variantes, los mismos que llevan el carrito y la compra. Sin pixel
+          en el sitio, no hace nada. */}
+      <MetaEventOnMount
+        event="ViewContent"
+        params={{
+          content_ids: product.variants.map((variant) => variant.sku),
+          content_name: pickLocalized(product.name, locale),
+          content_type: "product",
+          ...metaMoneyParams(priceFrom(product)),
+        }}
+      />
+
       <Link href="/shop" className={BACK_LINK}>
         {t("product.backToShop")}
       </Link>

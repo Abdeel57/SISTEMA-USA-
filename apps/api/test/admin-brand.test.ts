@@ -243,6 +243,9 @@ describe("PUT /api/v1/admin/brand", () => {
     ["correo sin arroba", { contact_email: "contacto.mimarca.com" }],
     ["patron fuera de rango", { pattern_opacity_percent: 41 }],
     ["nombre vacio", { name: "   " }],
+    ["pixel de Meta con letras", { meta_pixel_id: "12345abc6789" }],
+    ["pixel de Meta con codigo", { meta_pixel_id: "123'); alert(1);//" }],
+    ["pixel de Meta demasiado corto", { meta_pixel_id: "1234567" }],
   ])("rechaza con 422: %s (invariante 5)", async (_label, overrides) => {
     const app = await appAllowingPermissions();
     const response = await app.inject({
@@ -254,6 +257,66 @@ describe("PUT /api/v1/admin/brand", () => {
     expect(response.statusCode).toBe(422);
     expect(response.json<ErrorBody>().error.code).toBe("VALIDATION_FAILED");
     expect(shared.emitted).toHaveLength(0);
+    await app.close();
+  });
+});
+
+/*
+ * PIXEL DE META (0044): se configura en la marca, por sitio. Vale solo con
+ * cifras, se publica en `GET /config` (la web lo necesita para cargarlo) y un
+ * guardado que no trae el campo NO lo apaga.
+ */
+describe("PUT /api/v1/admin/brand (pixel de Meta)", () => {
+  const PIXEL = "1234567890123456";
+
+  async function putBrand(app: FastifyInstance, overrides: Record<string, unknown>) {
+    return app.inject({ method: "PUT", url: "/api/v1/admin/brand", payload: validBody(overrides) });
+  }
+
+  async function publishedPixel(app: FastifyInstance): Promise<unknown> {
+    const config = await app.inject({ method: "GET", url: "/api/v1/config" });
+    return config.json<{ brand: { meta_pixel_id: unknown } }>().brand.meta_pixel_id;
+  }
+
+  it("sin pixel guardado, `GET /config` publica null (la tienda no lo carga)", async () => {
+    const app = await createApp(buildDependencies());
+    expect(await publishedPixel(app)).toBeNull();
+    await app.close();
+  });
+
+  it("guarda las cifras, sin espacios, y las publica en `GET /config`", async () => {
+    const app = await appAllowingPermissions();
+    const response = await putBrand(app, { meta_pixel_id: `  ${PIXEL} ` });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json<{ meta_pixel_id: string }>().meta_pixel_id).toBe(PIXEL);
+    expect(await publishedPixel(app)).toBe(PIXEL);
+    // Y entra en la traza como un campo cambiado mas.
+    const event = shared.emitted[0] as { metadata: { changed_fields: string[] } };
+    expect(event.metadata.changed_fields).toContain("metaPixelId");
+    await app.close();
+  });
+
+  it("vacio o null lo quitan", async () => {
+    for (const empty of ["", "   ", null]) {
+      const app = await appAllowingPermissions();
+      await putBrand(app, { meta_pixel_id: PIXEL });
+      const response = await putBrand(app, { meta_pixel_id: empty });
+
+      expect(response.statusCode).toBe(200);
+      expect(await publishedPixel(app)).toBeNull();
+      await app.close();
+    }
+  });
+
+  it("un guardado SIN el campo conserva el pixel que ya habia", async () => {
+    const app = await appAllowingPermissions();
+    await putBrand(app, { meta_pixel_id: PIXEL });
+    // `validBody()` no lleva `meta_pixel_id`: un panel o un script que no lo conoce.
+    const response = await putBrand(app, { name: "Otro Nombre" });
+
+    expect(response.statusCode).toBe(200);
+    expect(await publishedPixel(app)).toBe(PIXEL);
     await app.close();
   });
 });

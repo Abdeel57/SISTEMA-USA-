@@ -111,13 +111,6 @@ const RUNTIME_AND_DATA_VARS: readonly EnvVarSpec[] = Object.freeze([
     NO_ENVIRONMENT,
     "Interruptor de los mocks de red de apps/web (MSW). Prohibido en entornos desplegados: ver PRODUCTION_HARDENING_RULES.",
   ),
-  v(
-    "NEXT_PUBLIC_META_PIXEL_ID",
-    "web",
-    "string",
-    NO_ENVIRONMENT,
-    "Pixel de Meta del cliente (DEC-086). Sin ella, el pixel no se carga.",
-  ),
 
   // ----- PostgreSQL (DEC-003) ------------------------------------------
   v(

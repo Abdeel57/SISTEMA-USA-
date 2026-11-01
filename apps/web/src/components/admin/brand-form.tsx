@@ -375,6 +375,28 @@ export function BrandForm({
         </div>
       </Group>
 
+      {/* --- Publicidad (DEC-087): el pixel de Meta de ESTE sitio. Vacio =
+          sin pixel. Solo dispara en el dominio publico del sitio. */}
+      <Group legend={t("adsLegend")} intro={t("adsIntro")}>
+        <div className="grid grid-cols-1 gap-s4 sm:grid-cols-2">
+          <FormField
+            label={t("metaPixelLabel")}
+            description={t("metaPixelHint")}
+            error={fieldError("meta_pixel_id")}
+          >
+            <Input
+              name="meta_pixel_id"
+              inputMode="numeric"
+              autoComplete="off"
+              spellCheck={false}
+              maxLength={40}
+              placeholder={t("metaPixelPlaceholder")}
+              defaultValue={brand.meta_pixel_id ?? ""}
+            />
+          </FormField>
+        </div>
+      </Group>
+
       <Button
         type="submit"
         variant="primary"

@@ -7,6 +7,7 @@ import {
   patternVersion,
   type BrandColors,
 } from "./brand-palette";
+import { normalizeMetaPixelId } from "./meta-pixel";
 
 /**
  * La marca en tiempo de ejecucion: lo que la API publico en `GET /config`
@@ -26,6 +27,11 @@ export interface RuntimeBrand {
   readonly logoUrl: string | null;
   /** El dominio con y sin `www`, en minusculas: lo que decide si un enlace es "de este sitio". */
   readonly siteHosts: readonly string[];
+  /**
+   * Pixel de Meta del sitio (Panel -> Marca, migracion 0044), ya validado: solo
+   * cifras, o `null` y la tienda no carga nada de Meta.
+   */
+  readonly metaPixelId: string | null;
   /** Version del patron topografico (color + intensidad), para su URL cacheable. */
   readonly patternVersion: string;
   /** La hoja en linea que sobreescribe los tokens de color del design system. */
@@ -85,6 +91,8 @@ export function runtimeBrandFrom(brand: PublicBrand | null): RuntimeBrand {
     patternOpacityPercent,
     logoUrl: brand?.logo_url ?? null,
     siteHosts: siteHostsOf(profile.domain),
+    // Una API anterior a la 0044 no lo publica: sin pixel, como antes.
+    metaPixelId: normalizeMetaPixelId(brand?.meta_pixel_id),
     patternVersion: patternVersion(colors, patternOpacityPercent),
     themeCss: brandThemeCss(colors, patternOpacityPercent),
     fromApi: brand !== null,

@@ -74,10 +74,15 @@ estas:
 | `SERVICE_PASSWORD_ADMIN`                                                         | Su contrasena. Cambiarla + redesplegar = contrasena nueva.               |
 | `CLIENT_ADMIN_EMAIL`, `CLIENT_ADMIN_PASSWORD`                                    | Cuenta del panel para el cliente (solo se crea una vez).                 |
 | `PAYMENT_PROVIDER`, `PAYMENT_PROVIDER_API_KEY`, `PAYMENT_WEBHOOK_SIGNING_SECRET` | Stripe: `stripe` + las dos llaves del cliente. Sin ellas, solo efectivo. |
-| `NEXT_PUBLIC_META_PIXEL_ID`                                                      | Pixel de Meta del cliente.                                               |
 
 El webhook de Stripe de cada cliente va a
 `https://api.cliente.com/api/v1/webhooks/payments/stripe`.
+
+El **Meta Pixel** no es una variable (DEC-087): se escribe en el panel del
+sitio, **Marca → Publicidad → ID del Meta Pixel**. Cada sitio guarda el suyo
+en su base de datos; vacío, la tienda no carga nada de Meta. Solo dispara en
+el dominio que diga **Marca → Dominio**, así que ese campo tiene que ser el
+dominio real del sitio.
 
 ## Comprobar que salio bien
 

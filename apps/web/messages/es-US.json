@@ -165,6 +165,7 @@
     "MULTIPLIER_INVALID": "El multiplicador tiene que ser un entero mayor que cero.",
     "COLOR_INVALID": "Elige un color en formato #rrggbb, por ejemplo #38bdf8.",
     "DOMAIN_INVALID": "Escribe solo el dominio, por ejemplo mimarca.com, sin https:// ni barras.",
+    "META_PIXEL_ID_INVALID": "El ID del Meta Pixel son solo números (de 8 a 20 cifras). Cópialo del Administrador de eventos de Meta, o déjalo vacío.",
     "EMAIL_INVALID": "Eso no parece un correo electrónico válido.",
     "PREFIX_INVALID": "Los prefijos llevan de 2 a 8 letras o cifras, sin espacios ni símbolos.",
     "PATTERN_OPACITY_INVALID": "La intensidad del patrón tiene que ser un número entero de 0 a 40.",
@@ -1337,7 +1338,15 @@
       "entryPrefixLabel": "Prefijo de las participaciones",
       "entryPrefixHint": "Por ejemplo NUM da NUM26-00000001. Una promoción que ya repartió números conserva su prefijo.",
       "timeZoneLabel": "Zona horaria del negocio",
-      "timeZoneHint": "Decide cuándo empieza y acaba el día del corte de caja. Elige una de la lista o escribe una zona IANA como America/Chicago."
+      "timeZoneHint": "Decide cuándo empieza y acaba el día del corte de caja. Elige una de la lista o escribe una zona IANA como America/Chicago.",
+      "summaryMetaPixel": "Meta Pixel",
+      "metaPixelOff": "Sin configurar (la tienda no lo carga)",
+      "metaPixelOn": "Activo · {id}",
+      "adsLegend": "Publicidad (Meta Pixel)",
+      "adsIntro": "El Meta Pixel mide las visitas, los carritos y las compras de tu tienda para tus anuncios de Facebook e Instagram. Solo funciona en el dominio público de tu tienda, nunca en este panel ni en pruebas locales, y respeta a quien pide no compartir en la página de opciones de privacidad.",
+      "metaPixelLabel": "ID del Meta Pixel",
+      "metaPixelHint": "Solo números. Está en el Administrador de eventos de Meta → Orígenes de datos → tu pixel. Déjalo vacío para apagar el pixel.",
+      "metaPixelPlaceholder": "1234567890123456"
     },
     "catalog": {
       "title": "Catálogo",

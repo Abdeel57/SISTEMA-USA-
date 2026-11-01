@@ -475,6 +475,11 @@ export const publicBrandSchema = z.object({
   pattern_opacity_percent: z.number().int(),
   /** Ruta del logotipo en el propio sitio (`/media/<id>.<ext>`), o `null`. */
   logo_url: z.string().nullable(),
+  /**
+   * Pixel de Meta del sitio (0044), solo cifras, o `null` si no hay: la tienda
+   * no carga el codigo de Meta. No es secreto: va impreso en cada pagina.
+   */
+  meta_pixel_id: z.string().nullable(),
   updated_at: z.string(),
 });
 

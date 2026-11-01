@@ -152,6 +152,34 @@ describe("updateBrandAction: lo que se rechaza antes de llamar a la API", () => 
     expect(result).toMatchObject({ code: "DOMAIN_INVALID", field: "domain" });
   });
 
+  it.each([["12345abc6789"], ["1234567"], ["123');alert(1);//"]])(
+    "un pixel de Meta que no son solo cifras (%s) es META_PIXEL_ID_INVALID",
+    async (value) => {
+      const puts = capturePut();
+
+      const result = await updateBrandAction(IDLE, formWith({ meta_pixel_id: value }));
+
+      expect(result).toMatchObject({
+        status: "error",
+        code: "META_PIXEL_ID_INVALID",
+        field: "meta_pixel_id",
+      });
+      expect(puts.bodies).toHaveLength(0);
+    },
+  );
+
+  it("el pixel de Meta pegado con espacios viaja en cifras; vacio, como null", async () => {
+    const puts = capturePut();
+
+    await updateBrandAction(IDLE, formWith({ meta_pixel_id: " 1234 5678 9012 3456 " }));
+    await updateBrandAction(IDLE, formWith({ meta_pixel_id: "" }));
+
+    expect(puts.bodies.map((body) => (body as { meta_pixel_id: unknown }).meta_pixel_id)).toEqual([
+      "1234567890123456",
+      null,
+    ]);
+  });
+
   it("un correo sin arroba es EMAIL_INVALID", async () => {
     const result = await updateBrandAction(
       IDLE,
@@ -226,6 +254,8 @@ describe("updateBrandAction: lo que sale por el cable", () => {
         pattern_opacity_percent: 16,
         // El logotipo actual, repetido por el campo oculto: el PUT reemplaza la fila.
         logo_media_id: LOGO_ID,
+        // DEC-087: sin pixel escrito en el formulario, viaja vacio = sin pixel.
+        meta_pixel_id: null,
       },
     ]);
   });

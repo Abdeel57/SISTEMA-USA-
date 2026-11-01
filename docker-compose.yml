@@ -125,7 +125,6 @@ services:
       # `web` habla con `api` por la red privada del recurso, nunca por Internet.
       API_BASE_URL: http://api:8080/api/v1
       WEB_ENABLE_API_MOCKS: "false"
-      NEXT_PUBLIC_META_PIXEL_ID: ${NEXT_PUBLIC_META_PIXEL_ID:-}
     healthcheck:
       test:
         - CMD

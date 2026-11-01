@@ -415,6 +415,8 @@ export interface BrandProfileRecord {
   /** 0..40. */
   readonly patternOpacityPercent: number;
   readonly logoMediaId: string | null;
+  /** Pixel de Meta del sitio (0044): solo cifras, o `null` sin pixel. */
+  readonly metaPixelId: string | null;
   readonly logoUrl: string | null;
   readonly updatedAt: Date;
   /** `null` mientras nadie haya guardado desde el panel (valores iniciales). */

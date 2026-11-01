@@ -45,6 +45,9 @@ export function presentPublicBrand(record: BrandProfileRecord): PublicBrand {
     colors: { brand: record.colorBrand, accent: record.colorAccent },
     pattern_opacity_percent: record.patternOpacityPercent,
     logo_url: record.logoUrl,
+    // Publico a proposito: el identificador del pixel acaba en el codigo de
+    // cada pagina de la tienda, y es lo que la web necesita para cargarlo.
+    meta_pixel_id: record.metaPixelId,
     updated_at: record.updatedAt.toISOString(),
   };
 }
@@ -103,6 +106,7 @@ const COMPARABLE_FIELDS: readonly (keyof BrandProfileInput)[] = [
   "colorAccent",
   "patternOpacityPercent",
   "logoMediaId",
+  "metaPixelId",
 ];
 
 /** Que campos cambian entre dos perfiles. Para la traza, no para decidir nada. */

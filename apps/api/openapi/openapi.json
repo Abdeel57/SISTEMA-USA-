@@ -4122,6 +4122,16 @@
                         }
                       ]
                     },
+                    "meta_pixel_id": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
                     "name": {
                       "type": "string"
                     },
@@ -4192,6 +4202,7 @@
                     "colors",
                     "pattern_opacity_percent",
                     "logo_url",
+                    "meta_pixel_id",
                     "updated_at",
                     "logo_media_id",
                     "updated_by_admin_user_id"
@@ -4297,7 +4308,7 @@
         }
       },
       "put": {
-        "description": "Reemplaza la fila entera: nombre, logotipo tipografico, logotipo (id de `POST /admin/media` o `null`), colores `#rrggbb`, intensidad del patron (0-40), datos legales, correo de contacto, dominio (solo el host), prefijos de numeracion (2-8 mayusculas o cifras) y zona horaria IANA. Los prefijos valen para los pedidos y promociones NUEVOS; nada ya numerado cambia. Queda en la auditoria como `brand.updated`.",
+        "description": "Reemplaza la fila entera: nombre, logotipo tipografico, logotipo (id de `POST /admin/media` o `null`), colores `#rrggbb`, intensidad del patron (0-40), datos legales, correo de contacto, dominio (solo el host), prefijos de numeracion (2-8 mayusculas o cifras), zona horaria IANA y, opcional, el pixel de Meta (`meta_pixel_id`: solo cifras; vacio o null lo quita, ausente lo conserva). Los prefijos valen para los pedidos y promociones NUEVOS; nada ya numerado cambia. Queda en la auditoria como `brand.updated`.",
         "operationId": "updateAdminBrand",
         "requestBody": {
           "content": {
@@ -4379,6 +4390,18 @@
                       {
                         "format": "uuid",
                         "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "meta_pixel_id": {
+                    "anyOf": [
+                      {
+                        "maxLength": 20,
+                        "pattern": "^(\\d{8,20})?$",
                         "type": "string"
                       },
                       {
@@ -4538,6 +4561,16 @@
                         }
                       ]
                     },
+                    "meta_pixel_id": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
                     "name": {
                       "type": "string"
                     },
@@ -4608,6 +4641,7 @@
                     "colors",
                     "pattern_opacity_percent",
                     "logo_url",
+                    "meta_pixel_id",
                     "updated_at",
                     "logo_media_id",
                     "updated_by_admin_user_id"
@@ -37557,6 +37591,16 @@
                             }
                           ]
                         },
+                        "meta_pixel_id": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
                         "name": {
                           "type": "string"
                         },
@@ -37615,6 +37659,7 @@
                         "colors",
                         "pattern_opacity_percent",
                         "logo_url",
+                        "meta_pixel_id",
                         "updated_at"
                       ],
                       "type": "object"

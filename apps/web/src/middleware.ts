@@ -10,7 +10,6 @@ import {
 } from "./i18n/admin-routing";
 import { routing } from "./i18n/routing";
 import { canonicalRedirectUrl } from "./lib/canonical-host";
-import { resolveMetaPixelId } from "./lib/meta-pixel";
 import { apiConnectOrigins, contentSecurityPolicy, createNonce } from "./lib/security-headers";
 
 /**
@@ -81,7 +80,10 @@ function policyFor(request: NextRequest): { nonce: string; csp: string } {
       connectOrigins: apiConnectOrigins(process.env, request.nextUrl.origin),
       // DEC-086: el pixel de Meta solo existe en la tienda. El panel, donde se
       // ven datos de clientes, sigue sin ningun origen de publicidad.
-      metaPixel: !isAdminPath(request.nextUrl.pathname) && resolveMetaPixelId(process.env) !== null,
+      // DEC-087: el identificador se guarda en el panel (base de datos) y el
+      // middleware no lo lee, asi que la tienda abre SIEMPRE los dos origenes de
+      // Meta; si el sitio no tiene pixel, la pagina simplemente no los usa.
+      metaPixel: !isAdminPath(request.nextUrl.pathname),
     }),
   };
 }

@@ -520,7 +520,17 @@ function PackagePass({
               {t("viewLabel", { name: title })}
             </Link>
           ) : (
-            <PackageQuickAdd variantId={onlyVariant.id} locale={locale} soldOut={soldOut} />
+            <PackageQuickAdd
+              variantId={onlyVariant.id}
+              locale={locale}
+              soldOut={soldOut}
+              metaItem={{
+                variantId: onlyVariant.id,
+                sku: onlyVariant.sku,
+                name,
+                unitPrice: onlyVariant.price,
+              }}
+            />
           )}
         </div>
       </div>

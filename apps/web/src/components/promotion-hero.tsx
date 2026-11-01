@@ -1047,7 +1047,7 @@ function HeroLink({
 }: {
   readonly href: string;
   readonly className: string;
-  /** DEC-086: evento del pixel de Meta al pulsarlo (lo envia `MetaPixel`). */
+  /** DEC-086: evento del pixel de Meta al pulsarlo (lo envia `MetaPixelTracker`). */
   readonly metaEvent?: string;
   readonly children: ReactNode;
 }) {

@@ -11,6 +11,9 @@
  * mano la categoria de actividad en internet, un proposito y el apartado de
  * venta y compartir, para declarar el pixel de Meta. Regenerar desde el .docx
  * del 2026-09-30 DESHARIA ese cambio (LEGAL_PENDING 22).
+ *
+ * DEC-087 (2026-10-31): tambien a mano, esos dos apartados dicen que el pixel
+ * envia ahora informacion comercial (lo que se ve, se anade y se pide).
  */
 
 import { withBrand } from "@app/brand";
@@ -26,7 +29,7 @@ export const CALIFORNIA_NOTICE_TEMPLATE = {
   version: "2026-10-09",
   language: "en-US",
   title: "California Notice at Collection",
-  lastUpdated: "Last updated and effective: October 9, 2026",
+  lastUpdated: "Last updated and effective: October 31, 2026",
   source: "CA Notice at Collection.docx",
   blocks: [
     {
@@ -64,7 +67,7 @@ export const CALIFORNIA_NOTICE_TEMPLATE = {
         ],
         [
           {
-            x: "Internet or other network activity, such as your IP address, browser or device type, essential session cookies, security logs, and the pages you visit on the Site’s store collected through the Meta Pixel, including cookie identifiers",
+            x: "Internet or other network activity, such as your IP address, browser or device type, essential session cookies, security logs, and the pages you visit and the products you view, add to your cart, and order on the Site’s store collected through the Meta Pixel, including cookie identifiers",
           },
         ],
         [
@@ -164,7 +167,7 @@ export const CALIFORNIA_NOTICE_TEMPLATE = {
       items: [
         [
           {
-            x: "We do not sell personal information for money. We share internet or network activity information and identifiers such as cookie identifiers with Meta Platforms, Inc. through the Meta Pixel for cross-context behavioral advertising. You can opt out of this sharing by selecting “Don’t share my activity for advertising” on our privacy choices page at [[brand.url]]/privacychoices or by enabling Global Privacy Control in your browser. You can also submit privacy requests through that page or by contacting us using the information below.",
+            x: "We do not sell personal information for money. We share internet or network activity information, commercial information about the products you view, add to your cart, and order, and identifiers such as cookie identifiers with Meta Platforms, Inc. through the Meta Pixel for cross-context behavioral advertising. You can opt out of this sharing by selecting “Don’t share my activity for advertising” on our privacy choices page at [[brand.url]]/privacychoices or by enabling Global Privacy Control in your browser. You can also submit privacy requests through that page or by contacting us using the information below.",
           },
         ],
       ],

@@ -217,6 +217,7 @@ export const FIXTURE_BRAND: BrandProfileRecord = {
   colorAccent: "#2563eb",
   patternOpacityPercent: 16,
   logoMediaId: null,
+  metaPixelId: null,
   logoUrl: null,
   updatedAt: new Date("2026-09-15T00:00:00.000Z"),
   updatedByAdminUserId: null,

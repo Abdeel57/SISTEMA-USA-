@@ -135,6 +135,8 @@ const TRANSLATED_CODES = [
    */
   "COLOR_INVALID",
   "DOMAIN_INVALID",
+  // DEC-087: el identificador del pixel de Meta (Marca -> Publicidad).
+  "META_PIXEL_ID_INVALID",
   "EMAIL_INVALID",
   "PREFIX_INVALID",
   "PATTERN_OPACITY_INVALID",
@@ -278,6 +280,8 @@ export function useApiErrorMessage(): (code: string | null) => string {
         return t("COLOR_INVALID");
       case "DOMAIN_INVALID":
         return t("DOMAIN_INVALID");
+      case "META_PIXEL_ID_INVALID":
+        return t("META_PIXEL_ID_INVALID");
       case "EMAIL_INVALID":
         return t("EMAIL_INVALID");
       case "PREFIX_INVALID":

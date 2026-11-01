@@ -11,6 +11,11 @@
  * mano los parrafos que negaban pixeles y publicidad de terceros, para declarar
  * el pixel de Meta. Regenerar desde el .docx del 2026-09-30 DESHARIA ese cambio:
  * el Word del abogado tiene que incorporarlo primero (LEGAL_PENDING 22).
+ *
+ * DEC-087 (2026-10-31): tambien a mano, los parrafos del pixel dicen que ahora
+ * envia lo que se ve, se anade al carrito y se pide (SKU, cantidades, importes,
+ * referencia del pedido) y que se carga en checkout y confirmacion. Mismo aviso:
+ * el Word del abogado tiene que incorporarlo.
  */
 
 import { withBrand } from "@app/brand";
@@ -26,7 +31,7 @@ export const PRIVACY_POLICY_TEMPLATE = {
   version: "2026-10-09",
   language: "en-US",
   title: "Privacy Policy",
-  lastUpdated: "Last updated and effective: October 9, 2026",
+  lastUpdated: "Last updated and effective: October 31, 2026",
   source: "Privacy Policy.docx",
   blocks: [
     {
@@ -209,7 +214,7 @@ export const PRIVACY_POLICY_TEMPLATE = {
       t: "p",
       runs: [
         {
-          x: "Our servers automatically record your IP address and browser or device type for security purposes. We also use essential cookies for sessions and operation of the Site. On the Site’s store pages, the Meta Pixel, a technology provided by Meta Platforms, Inc., collects the pages you visit together with your IP address, browser and device information, and cookie identifiers, as described under “Analytics and Advertising.”",
+          x: "Our servers automatically record your IP address and browser or device type for security purposes. We also use essential cookies for sessions and operation of the Site. On the Site’s store pages, the Meta Pixel, a technology provided by Meta Platforms, Inc., collects the pages you visit and the products you view, add to your cart, and order on the Site (product identifiers, quantities, prices, order totals, and an order reference number), together with your IP address, browser and device information, and cookie identifiers, as described under “Analytics and Advertising.”",
         },
       ],
     },
@@ -421,7 +426,7 @@ export const PRIVACY_POLICY_TEMPLATE = {
       t: "p",
       runs: [
         {
-          x: "We use the Meta Pixel, provided by Meta Platforms, Inc., to measure visits to the Site and to show and measure our advertisements on Facebook and Instagram. Through the Meta Pixel, Meta receives the pages you visit on the Site, your IP address, browser and device information, and cookie identifiers, and Meta may combine this information with other information it holds about you under its own privacy policy. We do not send Meta your name, email address, telephone number, or purchase details. You can opt out as described under “Analytics and Advertising.”",
+          x: "We use the Meta Pixel, provided by Meta Platforms, Inc., to measure visits to the Site and to show and measure our advertisements on Facebook and Instagram. Through the Meta Pixel, Meta receives the pages you visit on the Site, the products you view, add to your cart, and order on the Site (product identifiers, quantities, prices, order totals, and an order reference number), your IP address, browser and device information, and cookie identifiers, and Meta may combine this information with other information it holds about you under its own privacy policy. We do not send Meta your name, email address, telephone number, shipping address, or payment information. You can opt out as described under “Analytics and Advertising.”",
         },
       ],
     },
@@ -481,7 +486,7 @@ export const PRIVACY_POLICY_TEMPLATE = {
       t: "p",
       runs: [
         {
-          x: "We use the Meta Pixel on the Site’s store pages to count page visits and to show and measure our advertisements on Facebook and Instagram. It is not used on account, checkout, or order confirmation pages or in the Site’s administration area, and it does not receive your name, email address, telephone number, or purchase details. We have turned off Meta’s automatic event collection, so the Meta Pixel reports only the store pages you view and when you select the “Shop now” button on the home page. You can stop the Meta Pixel from loading in your browser by selecting “Don’t share my activity for advertising” on our Privacy Choices page at [[brand.url]]/privacychoices; that choice is stored in your browser. If your browser sends a Global Privacy Control signal, we treat it as a request to opt out and the Meta Pixel does not load. The following links provide general information about privacy and advertising choices:",
+          x: "We use the Meta Pixel on the Site’s store pages, including the cart, checkout, and order confirmation pages, to count page visits and purchases and to show and measure our advertisements on Facebook and Instagram. It is not used on account pages or in the Site’s administration area, and it does not receive your name, email address, telephone number, shipping address, or payment information. We have turned off Meta’s automatic event collection, so the Meta Pixel reports only the store pages you view, the products you view and add to your cart, when you start checkout, the orders you place (product identifiers, quantities, prices, the order total, and an order reference number), and when you select the “Shop now” button on the home page. You can stop the Meta Pixel from loading in your browser by selecting “Don’t share my activity for advertising” on our Privacy Choices page at [[brand.url]]/privacychoices; that choice is stored in your browser. If your browser sends a Global Privacy Control signal, we treat it as a request to opt out and the Meta Pixel does not load. The following links provide general information about privacy and advertising choices:",
         },
       ],
     },
@@ -943,7 +948,7 @@ export const PRIVACY_POLICY_TEMPLATE = {
           [
             [
               {
-                x: "IP address, browser or device type, essential session cookies, security logs, and the pages you visit on the Site’s store collected through the Meta Pixel.",
+                x: "IP address, browser or device type, essential session cookies, security logs, and the pages you visit and the products you view, add to your cart, and order on the Site’s store collected through the Meta Pixel.",
               },
             ],
           ],
@@ -1103,7 +1108,7 @@ export const PRIVACY_POLICY_TEMPLATE = {
       t: "p",
       runs: [
         {
-          x: "We do not sell personal information for money. Through the Meta Pixel, we share internet or network activity information (the pages you visit on the Site, your IP address, and browser and device information) and identifiers such as cookie identifiers with Meta Platforms, Inc. for cross-context behavioral advertising. We may disclose identifiers, customer records, and commercial information to hosting, payment, email, shipping, and sweepstakes providers for business purposes. Age information may be disclosed to a sweepstakes administrator for eligibility verification. Internet or network activity information may be disclosed to hosting and security providers. General location information in shipping addresses may be disclosed to hosting, payment, shipping, and sweepstakes providers as needed. Account credentials are processed through our hosting and database services for authentication. Required winner tax information may be disclosed to tax advisers and tax authorities. The purposes and recipients are described above under Use of Your Information and Third-Party Service Providers.",
+          x: "We do not sell personal information for money. Through the Meta Pixel, we share internet or network activity information (the pages you visit on the Site, your IP address, and browser and device information), commercial information (the products you view, add to your cart, and order on the Site, order totals, and an order reference number), and identifiers such as cookie identifiers with Meta Platforms, Inc. for cross-context behavioral advertising. We may disclose identifiers, customer records, and commercial information to hosting, payment, email, shipping, and sweepstakes providers for business purposes. Age information may be disclosed to a sweepstakes administrator for eligibility verification. Internet or network activity information may be disclosed to hosting and security providers. General location information in shipping addresses may be disclosed to hosting, payment, shipping, and sweepstakes providers as needed. Account credentials are processed through our hosting and database services for authentication. Required winner tax information may be disclosed to tax advisers and tax authorities. The purposes and recipients are described above under Use of Your Information and Third-Party Service Providers.",
         },
       ],
     },
@@ -1208,7 +1213,7 @@ export const PRIVACY_POLICY_TEMPLATE = {
       t: "p",
       runs: [
         {
-          x: "We don’t sell personal information for money or other valuable consideration. We share internet or network activity information with Meta Platforms, Inc. through the Meta Pixel for cross-context behavioral advertising. You can opt out of this sharing by selecting “Don’t share my activity for advertising” on our Privacy Choices page at [[brand.url]]/privacychoices, by enabling Global Privacy Control in your browser, or by contacting us using the privacy request methods described in this Policy.",
+          x: "We don’t sell personal information for money or other valuable consideration. We share internet or network activity information and commercial information about the products you view, add to your cart, and order with Meta Platforms, Inc. through the Meta Pixel for cross-context behavioral advertising. You can opt out of this sharing by selecting “Don’t share my activity for advertising” on our Privacy Choices page at [[brand.url]]/privacychoices, by enabling Global Privacy Control in your browser, or by contacting us using the privacy request methods described in this Policy.",
         },
       ],
     },

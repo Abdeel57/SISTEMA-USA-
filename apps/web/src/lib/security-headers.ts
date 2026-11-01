@@ -55,8 +55,9 @@ export interface CspOptions {
   /** Origenes de `connect-src`, ya normalizados. Ver `apiConnectOrigins`. */
   readonly connectOrigins: readonly string[];
   /**
-   * DEC-086: abrir los origenes del pixel de Meta. Solo en la TIENDA y solo si
-   * hay pixel configurado; el panel no lo carga y su politica sigue cerrada.
+   * DEC-086: abrir los origenes del pixel de Meta. Solo en la TIENDA; el panel
+   * no lo carga y su politica sigue cerrada. DEC-087: el identificador vive en
+   * la base de datos, asi que la tienda los abre siempre.
    */
   readonly metaPixel?: boolean;
 }

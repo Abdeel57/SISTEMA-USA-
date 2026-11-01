@@ -99,8 +99,8 @@ PORT=8080
 API_BASE_URL=http://\${{api.RAILWAY_PRIVATE_DOMAIN}}:8080/api/v1
 WEB_ENABLE_API_MOCKS=false`;
 
-// Meta Pixel: apagado salvo que se anada NEXT_PUBLIC_META_PIXEL_ID con el ID
-// del pixel del cliente en el servicio "web".
+// Meta Pixel: no es una variable (DEC-087). Se escribe en Panel -> Marca ->
+// Publicidad; sin el, la tienda no carga nada de Meta.
 
 const rule = "=".repeat(74);
 

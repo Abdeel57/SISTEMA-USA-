@@ -9,7 +9,8 @@
  *   logotipo tipografico, logotipo grafico, los dos colores de la paleta, la
  *   intensidad del patron de fondo, los datos legales que llevan los Terminos y
  *   la Politica de Privacidad, el correo de contacto, el dominio, los prefijos
- *   de numeracion y la zona horaria del corte de caja. Se guarda aqui y
+ *   de numeracion, la zona horaria del corte de caja y el pixel de Meta del
+ *   sitio (0044). Se guarda aqui y
  *   `GET /config` lo publica: la web lo aplica en el siguiente render, sin
  *   redesplegar.
  *
@@ -50,6 +51,8 @@ const HEX_COLOR = /^#[0-9a-f]{6}$/u;
 const PREFIX = /^[A-Z0-9]{2,8}$/u;
 const HOST = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/u;
 const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/u;
+/** Pixel de Meta (0044): solo cifras, de 8 a 20. Vacio = sin pixel. */
+const META_PIXEL_ID = /^(\d{8,20})?$/u;
 
 const required = (max: number) => z.string().trim().min(1).max(max);
 
@@ -82,6 +85,20 @@ export const brandUpdateBodySchema = z.object({
   pattern_opacity_percent: z.number().int().min(0).max(40),
   /** Id devuelto por `POST /admin/media`, o `null` para el simbolo de la plantilla. */
   logo_media_id: z.uuid().nullable(),
+  /**
+   * Pixel de Meta del sitio (0044). Cifras, o `""`/`null` para quitarlo.
+   *
+   * OPCIONAL, a diferencia del resto: un panel que aun no conoce el campo
+   * (o un script que guarda la marca) no lo manda, y eso NO puede apagar el
+   * pixel de un sitio que ya lo tenia. Ausente = se conserva el guardado.
+   */
+  meta_pixel_id: z
+    .string()
+    .trim()
+    .max(20)
+    .regex(META_PIXEL_ID, { error: "must_be_meta_pixel_id" })
+    .nullable()
+    .optional(),
 });
 
 const adminBrandSchema = publicBrandSchema.extend({
@@ -90,8 +107,23 @@ const adminBrandSchema = publicBrandSchema.extend({
   updated_by_admin_user_id: z.uuid().nullable(),
 });
 
-function toInput(body: z.infer<typeof brandUpdateBodySchema>): BrandProfileInput {
+/**
+ * El cuerpo, como fila. `current` es el pixel ya guardado: se conserva si el
+ * cuerpo no trae el campo, y `""` o `null` lo quitan.
+ */
+function toInput(
+  body: z.infer<typeof brandUpdateBodySchema>,
+  current: { readonly metaPixelId: string | null },
+): BrandProfileInput {
+  const metaPixelId =
+    body.meta_pixel_id === undefined
+      ? current.metaPixelId
+      : body.meta_pixel_id === null || body.meta_pixel_id === ""
+        ? null
+        : body.meta_pixel_id;
+
   return {
+    metaPixelId,
     name: body.name,
     wordmarkLead: body.wordmark.lead,
     wordmarkTail: body.wordmark.tail,
@@ -145,7 +177,7 @@ export function buildAdminBrandRoutes(dependencies: AppDependencies): RouteDefin
       operationId: "updateAdminBrand",
       summary: "Guardar la marca del sitio. Se aplica en el acto en la web publica.",
       description:
-        "Reemplaza la fila entera: nombre, logotipo tipografico, logotipo (id de `POST /admin/media` o `null`), colores `#rrggbb`, intensidad del patron (0-40), datos legales, correo de contacto, dominio (solo el host), prefijos de numeracion (2-8 mayusculas o cifras) y zona horaria IANA. Los prefijos valen para los pedidos y promociones NUEVOS; nada ya numerado cambia. Queda en la auditoria como `brand.updated`.",
+        "Reemplaza la fila entera: nombre, logotipo tipografico, logotipo (id de `POST /admin/media` o `null`), colores `#rrggbb`, intensidad del patron (0-40), datos legales, correo de contacto, dominio (solo el host), prefijos de numeracion (2-8 mayusculas o cifras), zona horaria IANA y, opcional, el pixel de Meta (`meta_pixel_id`: solo cifras; vacio o null lo quita, ausente lo conserva). Los prefijos valen para los pedidos y promociones NUEVOS; nada ya numerado cambia. Queda en la auditoria como `brand.updated`.",
       tags: ["admin"],
       authorization: { kind: "PERMISSION", permission: "brand.update" },
       schema: {
@@ -160,7 +192,8 @@ export function buildAdminBrandRoutes(dependencies: AppDependencies): RouteDefin
       handler: async (request) => {
         const staff = await requireStaffContext(dependencies, request);
         const body = request.body as z.infer<typeof brandUpdateBodySchema>;
-        const input = toInput(body);
+        const before = await repositories.brand.read();
+        const input = toInput(body, before);
 
         // La MISMA comprobacion que `db:bootstrap` hace con el archivo inicial:
         // lo que no valdria para arrancar tampoco vale para guardar.
@@ -178,7 +211,6 @@ export function buildAdminBrandRoutes(dependencies: AppDependencies): RouteDefin
           throw ApiErrors.validationFailed([{ path: "logo_media_id", code: "unknown_media" }]);
         }
 
-        const before = await repositories.brand.read();
         const after = await repositories.brand.update(input, staff.adminUserId);
         const changed = changedBrandFields(before, after);
 

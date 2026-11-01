@@ -10,6 +10,7 @@ import { CheckoutForm } from "@/components/checkout-form";
 import { EligibilityDeclarationForm } from "@/components/eligibility-declaration-form";
 import { EntryQuotePanel } from "@/components/entry-quote-panel";
 import type { CashDeliveryOptions } from "@/components/fulfillment-choice";
+import { MetaEventOnMount } from "@/components/meta-events";
 import { PageTitle } from "@/components/page-title";
 import { ReserveForm } from "@/components/reserve-form";
 import { formatMoney } from "@/i18n/formatters";
@@ -28,6 +29,7 @@ import {
 } from "@/lib/api";
 import { DEFAULT_DIAL_COUNTRY, dialOptions } from "@/lib/dial-codes";
 import { isFeatureEnabled, toFeatureFlags } from "@/lib/flags";
+import { metaMoneyParams, metaValueOf, type MetaEventParams } from "@/lib/meta-pixel-events";
 import { loadParticipant } from "@/lib/participant-server";
 import { readSession } from "@/lib/session-server";
 
@@ -315,6 +317,31 @@ async function ReserveCheckout({ locale }: { readonly locale: Locale }) {
 }
 
 /**
+ * DEC-087: el `InitiateCheckout` del pixel con el TOTAL del carrito tal como lo
+ * calcula el backend (envio incluido); sin total, el subtotal. Los ids son los
+ * SKU, los mismos del `AddToCart` y del `Purchase`.
+ */
+function initiateCheckoutParams(cart: CartWithQuote): MetaEventParams {
+  const contents = cart.lines.map((line) => {
+    const unit = metaValueOf(line.unit_price);
+    return {
+      id: line.sku,
+      quantity: line.quantity,
+      ...(unit === null ? {} : { item_price: unit }),
+    };
+  });
+
+  return {
+    content_ids: cart.lines.map((line) => line.sku),
+    content_type: "product",
+    contents,
+    // La cuenta de articulos la hace el backend (R13: el cliente no suma).
+    num_items: cart.item_count,
+    ...metaMoneyParams(cart.total ?? cart.subtotal),
+  };
+}
+
+/**
  * Lo que se va a pagar: lineas, y subtotal, envio y total (DEC-079).
  *
  * Lo comparten el checkout con cuenta y el del visitante sin cuenta. Ninguna
@@ -335,6 +362,11 @@ async function OrderSummary({
 
   return (
     <Card elevation="raised" padding="md">
+      {/* DEC-087: `InitiateCheckout` del pixel de Meta. Este resumen sale en
+          las tres formas del checkout (con cuenta, sin cuenta y "Apartar")
+          siempre que el carrito tenga lineas. Sin pixel, no hace nada. */}
+      <MetaEventOnMount event="InitiateCheckout" params={initiateCheckoutParams(cart)} />
+
       <CardTitle as="h2" size="sm">
         {t("reviewHeading")}
       </CardTitle>

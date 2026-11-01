@@ -632,4 +632,6 @@ export interface AdminBrandInput {
   readonly pattern_opacity_percent: number;
   /** Id de `POST /admin/media`, o `null` para el simbolo de la plantilla. */
   readonly logo_media_id: string | null;
+  /** Pixel de Meta (0044): solo cifras, o `null` para quitarlo. */
+  readonly meta_pixel_id: string | null;
 }

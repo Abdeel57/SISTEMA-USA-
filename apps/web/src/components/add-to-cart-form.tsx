@@ -2,8 +2,9 @@
 
 import { Alert, Button, FormField, Input, MediaFrame, Select } from "@app/ui";
 import { useTranslations } from "next-intl";
-import { useActionState, useState } from "react";
+import { useActionState, useMemo, useState } from "react";
 
+import { useMetaAddToCart, type MetaCartItem } from "@/components/meta-events";
 import { formatMoney } from "@/i18n/formatters";
 import type { Locale } from "@/i18n/locales";
 import { useAvailabilityLabel } from "@/i18n/storefront-labels";
@@ -107,6 +108,22 @@ export function AddToCartForm({
    * abajo antes de usarla.
    */
   const [selectedId, setSelectedId] = useState<string>(purchasable[0]?.id ?? "");
+
+  // DEC-087: `AddToCart` del pixel de Meta cuando el carrito confirma el alta.
+  // Antes de los retornos tempranos, por la misma regla de hooks de arriba.
+  const metaItems = useMemo<readonly MetaCartItem[]>(() => {
+    const productName = pickLocalized(product.name, locale);
+    return product.variants.map((variant) => {
+      const name = variant.name ?? null;
+      return {
+        variantId: variant.id,
+        sku: variant.sku,
+        name: name === null ? productName : `${productName} - ${pickLocalized(name, locale)}`,
+        unitPrice: variant.price,
+      };
+    });
+  }, [product, locale]);
+  useMetaAddToCart(state, metaItems);
 
   if (product.variants.length === 0) {
     return <Alert tone="info">{t("noVariants")}</Alert>;

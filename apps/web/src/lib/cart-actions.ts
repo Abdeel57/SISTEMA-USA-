@@ -43,6 +43,12 @@ export interface CartActionResult {
    */
   readonly code: string | null;
   readonly requestId: string | null;
+  /**
+   * Solo al anadir con exito: que variante y cuantas. Lo usa el `AddToCart`
+   * del pixel de Meta (DEC-087) para decir que se anadio sin volver a leer el
+   * formulario. Es lo que el propio formulario envio, ya validado.
+   */
+  readonly added?: { readonly variantId: string; readonly quantity: number };
 }
 
 function toResult(failure: ApiFailure): CartActionResult {
@@ -123,7 +129,7 @@ export async function addToCartAction(
   if (!result.ok) return toResult(result.error);
 
   revalidatePath(`/${locale}/cart`);
-  return { ...SUCCESS, ok: true };
+  return { ...SUCCESS, ok: true, added: { variantId, quantity } };
 }
 
 /**

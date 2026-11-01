@@ -1,154 +1,68 @@
-"use client";
-
-import { useLocale } from "next-intl";
-import { useEffect, useRef } from "react";
-
-import { usePathname } from "@/i18n/navigation";
-import {
-  isMetaPixelExcludedPath,
-  META_CLICK_EVENTS,
-  META_EVENT_ATTRIBUTE,
-  META_SCRIPT_URL,
-  metaPixelAllowed,
-} from "@/lib/meta-pixel";
-
-/** La funcion global que publica `fbevents.js`, con su cola previa a la carga. */
-type Fbq = ((...args: unknown[]) => void) & {
-  callMethod?: (...args: unknown[]) => void;
-  queue: unknown[][];
-  push: Fbq;
-  loaded: boolean;
-  version: string;
-  /** Apaga el `PageView` automatico de Meta en cada `pushState`. */
-  disablePushState?: boolean;
-  /** Sin esto, Meta descarta el segundo `PageView` del mismo documento. */
-  allowDuplicatePageViews?: boolean;
-};
-
-declare global {
-  interface Window {
-    fbq?: Fbq;
-    _fbq?: Fbq;
-  }
-  interface Navigator {
-    readonly globalPrivacyControl?: boolean;
-  }
-}
+import { metaPixelBaseScript, metaPixelNoscriptUrl, normalizeMetaPixelId } from "@/lib/meta-pixel";
 
 /**
- * La cola de Meta, la misma que crea su fragmento oficial, escrita aqui para no
- * necesitar un script en linea: hasta que llega `fbevents.js`, cada llamada se
- * guarda y el fichero las procesa al cargar.
- */
-function installFbq(): Fbq {
-  if (window.fbq !== undefined) return window.fbq;
-
-  const fbq = function (...args: unknown[]): void {
-    if (fbq.callMethod !== undefined) fbq.callMethod(...args);
-    else fbq.queue.push(args);
-  } as Fbq;
-  fbq.push = fbq;
-  fbq.loaded = true;
-  fbq.version = "2.0";
-  fbq.queue = [];
-  // Los `PageView` los decide ESTE componente, ruta a ruta: el automatico de
-  // Meta en cada cambio de URL se los mandaria tambien desde la cuenta o el
-  // checkout, que estan excluidos (`META_PIXEL_EXCLUDED_PATHS`).
-  fbq.disablePushState = true;
-  // Y como la tienda navega sin recargar, cada ruta es un `PageView` aunque el
-  // documento sea el mismo; sin esto Meta se queda solo con el primero.
-  fbq.allowDuplicatePageViews = true;
-
-  window.fbq = fbq;
-  window._fbq ??= fbq;
-
-  const script = document.createElement("script");
-  script.async = true;
-  script.src = META_SCRIPT_URL;
-  document.head.appendChild(script);
-
-  return fbq;
-}
-
-/**
- * Pixel de Meta en la tienda (DEC-086). Las reglas -donde dispara, cuando no-
- * estan en `src/lib/meta-pixel.ts`.
+ * Pixel de Meta de la tienda (DEC-086, DEC-087): el codigo base, para el
+ * `<head>` del layout de la tienda.
  *
- * Un `PageView` al entrar y otro en cada cambio de ruta: la tienda navega sin
- * recargar la pagina, y sin esto Meta solo veria la primera.
+ * Es un `<script>` EN LINEA renderizado en el servidor: corre al parsear la
+ * pagina, antes de hidratar, y por eso el primer `PageView` sale aunque la
+ * persona se vaya antes de que cargue React. Lleva el nonce de la CSP de esta
+ * peticion (la tienda no admite scripts en linea sin el).
+ *
+ * `suppressHydrationWarning`: el navegador oculta el valor de `nonce` en el
+ * DOM, y React veria una diferencia que no lo es. React no vuelve a ejecutar un
+ * `<script>` al hidratar, y el layout raiz no se vuelve a montar al navegar:
+ * el pixel se inicializa una sola vez por documento.
+ *
+ * Sin identificador valido no pinta nada: el sitio no tiene pixel.
  */
-export function MetaPixel({
+export function MetaPixelBase({
   pixelId,
   hosts,
+  locales,
+  nonce,
 }: {
-  readonly pixelId: string;
-  /**
-   * Hosts del sitio segun la marca guardada desde el panel (dominio con y sin
-   * `www`). Sin el, los de los valores iniciales de `packages/brand`.
-   */
-  readonly hosts?: readonly string[] | undefined;
+  readonly pixelId: string | null;
+  /** Dominio del sitio con y sin `www` (`RuntimeBrand.siteHosts`). */
+  readonly hosts: readonly string[];
+  readonly locales: readonly string[];
+  readonly nonce: string | null;
 }) {
-  // La ruta de next-intl llega SIN el idioma: cambiar de idioma tambien es
-  // una pagina nueva, asi que la clave lleva los dos.
-  const pathname = usePathname();
-  const page = `${useLocale()}:${pathname}`;
-  const lastTracked = useRef<string | null>(null);
-  // Una clave estable para los efectos: la lista llega nueva en cada render.
-  const hostsKey = hosts === undefined ? null : hosts.join(",");
+  const id = normalizeMetaPixelId(pixelId);
+  if (id === null) return null;
 
-  useEffect(() => {
-    if (lastTracked.current === page) return;
+  return (
+    <script
+      id="meta-pixel-base"
+      {...(nonce === null ? {} : { nonce })}
+      suppressHydrationWarning
+      dangerouslySetInnerHTML={{ __html: metaPixelBaseScript({ pixelId: id, hosts, locales }) }}
+    />
+  );
+}
 
-    // Cuenta, checkout y confirmacion de pedido: ni se carga ni se registra.
-    // Llegar a la tienda desde un enlace con token deja el token fuera, porque
-    // el pixel no existe todavia en esa pagina.
-    if (isMetaPixelExcludedPath(pathname)) return;
+/**
+ * El `PageView` de quien navega SIN JavaScript: el `<img>` del fragmento
+ * oficial de Meta. Va al principio del `<body>` (en el `<head>` un `<img>` no
+ * es HTML valido; el navegador lo moveria igual).
+ *
+ * `allowed` lo decide el layout en el servidor con lo que si sabe ahi: el
+ * host de la peticion, la cabecera `Sec-GPC` y la cookie de exclusion.
+ */
+export function MetaPixelNoscript({
+  pixelId,
+  allowed,
+}: {
+  readonly pixelId: string | null;
+  readonly allowed: boolean;
+}) {
+  const id = normalizeMetaPixelId(pixelId);
+  if (id === null || !allowed) return null;
 
-    const allowed = metaPixelAllowed({
-      hostname: window.location.hostname,
-      globalPrivacyControl: navigator.globalPrivacyControl === true,
-      cookieHeader: document.cookie,
-      ...(hostsKey === null ? {} : { hosts: hostsKey.split(",") }),
-    });
-    if (!allowed) return;
-
-    const firstTime = window.fbq === undefined;
-    const fbq = installFbq();
-    if (firstTime) {
-      // Sin eventos automaticos (clics en botones, metadatos de la pagina):
-      // solo los `PageView` que manda este componente.
-      fbq("set", "autoConfig", false, pixelId);
-      fbq("init", pixelId);
-    }
-    fbq("track", "PageView");
-    lastTracked.current = page;
-  }, [page, pathname, pixelId, hostsKey]);
-
-  // Eventos al pulsar (DEC-086): los botones marcados con `data-meta-event` no
-  // necesitan ser componentes de cliente; este componente escucha los clics.
-  // Solo envia si el pixel ya esta cargado en esta pagina -es decir, si se
-  // permitio- y si la persona no se excluyo despues.
-  useEffect(() => {
-    function onClick(event: MouseEvent): void {
-      const marked =
-        event.target instanceof Element ? event.target.closest(`[${META_EVENT_ATTRIBUTE}]`) : null;
-      const name = marked?.getAttribute(META_EVENT_ATTRIBUTE) ?? null;
-      if (name === null || !META_CLICK_EVENTS.includes(name)) return;
-      if (window.fbq === undefined) return;
-
-      const allowed = metaPixelAllowed({
-        hostname: window.location.hostname,
-        globalPrivacyControl: navigator.globalPrivacyControl === true,
-        cookieHeader: document.cookie,
-        ...(hostsKey === null ? {} : { hosts: hostsKey.split(",") }),
-      });
-      if (allowed) window.fbq("track", name);
-    }
-
-    // En captura: sale antes de que el enlace navegue.
-    document.addEventListener("click", onClick, true);
-    return () => document.removeEventListener("click", onClick, true);
-  }, [hostsKey]);
-
-  return null;
+  return (
+    <noscript>
+      {/* eslint-disable-next-line @next/next/no-img-element -- un pixel de 1x1 sin JavaScript no pasa por `next/image` */}
+      <img height="1" width="1" style={{ display: "none" }} alt="" src={metaPixelNoscriptUrl(id)} />
+    </noscript>
+  );
 }

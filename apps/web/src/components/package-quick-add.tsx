@@ -2,8 +2,9 @@
 
 import { Button, cn } from "@app/ui";
 import { useTranslations } from "next-intl";
-import { useActionState } from "react";
+import { useActionState, useMemo } from "react";
 
+import { useMetaAddToCart, type MetaCartItem } from "@/components/meta-events";
 import type { Locale } from "@/i18n/locales";
 import { Link } from "@/i18n/navigation";
 import { addToCartAction, type CartActionResult } from "@/lib/cart-actions";
@@ -35,17 +36,25 @@ export function PackageQuickAdd({
   variantId,
   locale,
   soldOut,
+  metaItem,
   className,
 }: {
   readonly variantId: string;
   readonly locale: Locale;
   readonly soldOut: boolean;
+  /** Lo que se anade, para el `AddToCart` del pixel de Meta (DEC-087). */
+  readonly metaItem?: MetaCartItem;
   readonly className?: string;
 }) {
   const t = useTranslations("entryPackages");
   const tProduct = useTranslations("product");
   const tErrors = useTranslations("apiErrors");
   const [state, formAction, pending] = useActionState(addToCartAction, INITIAL);
+  const metaItems = useMemo<readonly MetaCartItem[]>(
+    () => (metaItem === undefined ? [] : [metaItem]),
+    [metaItem],
+  );
+  useMetaAddToCart(state, metaItems);
 
   return (
     <form action={formAction} className={cn("flex flex-col gap-s2", className)}>

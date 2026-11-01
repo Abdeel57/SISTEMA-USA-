@@ -5,6 +5,7 @@ import { getTranslations, setRequestLocale } from "next-intl/server";
 
 import { SignInRequired } from "@/components/account-shell";
 import { ApiErrorState } from "@/components/api-error-state";
+import { MetaPurchaseOnMount } from "@/components/meta-events";
 import { OrderLineList } from "@/components/order-line-list";
 import { PageTitle } from "@/components/page-title";
 import { TransferPaymentCard } from "@/components/transfer-payment-card";
@@ -18,9 +19,47 @@ import type { Locale } from "@/i18n/locales";
 import { Link } from "@/i18n/navigation";
 import { routing } from "@/i18n/routing";
 import { fetchActivePromotion, fetchOrder, fetchSiteConfig, type OrderDetail } from "@/lib/api";
+import { metaMoneyParams, metaValueOf, type MetaEventParams } from "@/lib/meta-pixel-events";
 import { loadParticipant } from "@/lib/participant-server";
 
 export const dynamic = "force-dynamic";
+
+/**
+ * DEC-087: si este pedido se cuenta como compra en el pixel de Meta.
+ *
+ * Es la pantalla a la que se llega al TERMINAR de pedir (tarjeta, efectivo o
+ * "Apartar" por Zelle/Venmo), y la conversion es haber hecho el pedido. Un
+ * pedido cancelado, devuelto o con contracargo que alguien vuelva a abrir no es
+ * una compra nueva.
+ */
+function countsAsPurchase(order: OrderDetail): boolean {
+  return (
+    order.status !== "CANCELLED" && order.status !== "REFUNDED" && order.status !== "CHARGEBACK"
+  );
+}
+
+/**
+ * El `Purchase`: el TOTAL REAL del pedido tal como lo guarda el backend (envio
+ * incluido), en su moneda, y las lineas por SKU. El id del pedido viaja aparte,
+ * como `eventID`, para que Meta no lo cuente dos veces.
+ */
+function purchaseParams(order: OrderDetail): MetaEventParams {
+  return {
+    content_ids: order.items.map((line) => line.sku),
+    content_type: "product",
+    contents: order.items.map((line) => {
+      const unit = metaValueOf(line.unit_price);
+      return {
+        id: line.sku,
+        quantity: line.quantity,
+        ...(unit === null ? {} : { item_price: unit }),
+      };
+    }),
+    // La cuenta de articulos la hace el backend (R13: el cliente no suma).
+    num_items: order.item_count,
+    ...metaMoneyParams(order.total),
+  };
+}
 
 /**
  * Confirmacion de pedido.
@@ -103,6 +142,12 @@ export default async function OrderConfirmationPage({
       title={guestCheckout ? t("reservedTitle") : t("title")}
       intro={guestCheckout ? t("reservedIntro") : t("intro")}
     >
+      {/* DEC-087: `Purchase` del pixel de Meta, SOLO aqui y UNA vez por
+          pedido (ver `purchaseParams`). Sin pixel, no hace nada. */}
+      {countsAsPurchase(order) ? (
+        <MetaPurchaseOnMount orderId={order.id} params={purchaseParams(order)} />
+      ) : null}
+
       <div className="flex flex-col gap-s6">
         {order.payment_method === "CASH" ? <CashPaymentCard order={order} locale={locale} /> : null}
         {order.payment_method === "ZELLE" || order.payment_method === "VENMO" ? (

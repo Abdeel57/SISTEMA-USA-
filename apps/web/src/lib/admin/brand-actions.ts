@@ -14,6 +14,7 @@ import {
   normalizeColor,
   normalizeDomain,
   normalizePrefix,
+  parseMetaPixelId,
   parsePatternOpacity,
 } from "./brand-input";
 import { isIanaTimeZone } from "./catalog-input";
@@ -146,6 +147,10 @@ export async function updateBrandAction(
   if (timeZone === null) return invalid("FIELD_REQUIRED", "time_zone");
   if (!isIanaTimeZone(timeZone)) return invalid("TIMEZONE_INVALID", "time_zone");
 
+  // --- Publicidad (DEC-087): pixel de Meta. Vacio = sin pixel.
+  const metaPixel = parseMetaPixelId(textFrom(formData, "meta_pixel_id"));
+  if (!metaPixel.valid) return invalid("META_PIXEL_ID_INVALID", "meta_pixel_id");
+
   // --- Logotipo actual (campo oculto): UUID o vacio.
   const currentLogoId = textFrom(formData, "logo_media_id");
   if (currentLogoId !== null && !isUuid(currentLogoId)) {
@@ -179,6 +184,7 @@ export async function updateBrandAction(
     colors: { brand: brandColor, accent: accentColor },
     pattern_opacity_percent: patternOpacity,
     logo_media_id: logoMediaId,
+    meta_pixel_id: metaPixel.value,
   };
 
   const result = await updateAdminBrand(input, locale, session);

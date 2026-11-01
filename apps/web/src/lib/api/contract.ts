@@ -1168,6 +1168,11 @@ export interface PublicBrand {
   readonly pattern_opacity_percent: number;
   /** Ruta del logotipo en el propio sitio (`/media/<id>.<ext>`), o `null`. */
   readonly logo_url: string | null;
+  /**
+   * Pixel de Meta del sitio (migracion 0044): solo cifras, o `null` sin pixel.
+   * Opcional en el tipo: una API anterior no lo publica, y eso es "sin pixel".
+   */
+  readonly meta_pixel_id?: string | null;
   readonly updated_at: string;
 }
 

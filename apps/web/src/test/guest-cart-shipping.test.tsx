@@ -111,7 +111,13 @@ describe("anadir al carrito", () => {
     form.set("quantity", "1");
 
     const result = await addToCartAction({ ok: false, code: null, requestId: null }, form);
-    expect(result).toEqual({ ok: true, code: null, requestId: null });
+    // `added` lo usa el `AddToCart` del pixel de Meta (DEC-087).
+    expect(result).toEqual({
+      ok: true,
+      code: null,
+      requestId: null,
+      added: { variantId: "var_tee_s", quantity: 1 },
+    });
   });
 });
 

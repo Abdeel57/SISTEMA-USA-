@@ -165,6 +165,7 @@
     "MULTIPLIER_INVALID": "The multiplier has to be a whole number greater than zero.",
     "COLOR_INVALID": "Pick a color in #rrggbb format, for example #38bdf8.",
     "DOMAIN_INVALID": "Enter just the domain, for example mimarca.com, without https:// or slashes.",
+    "META_PIXEL_ID_INVALID": "The Meta Pixel ID is numbers only (8 to 20 digits). Copy it from Meta Events Manager, or leave it empty.",
     "EMAIL_INVALID": "That does not look like a valid email address.",
     "PREFIX_INVALID": "Prefixes use 2 to 8 letters or digits, with no spaces or symbols.",
     "PATTERN_OPACITY_INVALID": "The pattern intensity has to be a whole number from 0 to 40.",
@@ -1337,7 +1338,15 @@
       "entryPrefixLabel": "Entry number prefix",
       "entryPrefixHint": "For example NUM gives NUM26-00000001. A promotion that already assigned numbers keeps its prefix.",
       "timeZoneLabel": "Business time zone",
-      "timeZoneHint": "Decides when the day of the daily cash report starts and ends. Pick one from the list or type an IANA zone such as America/Chicago."
+      "timeZoneHint": "Decides when the day of the daily cash report starts and ends. Pick one from the list or type an IANA zone such as America/Chicago.",
+      "summaryMetaPixel": "Meta Pixel",
+      "metaPixelOff": "Not set up (the store does not load it)",
+      "metaPixelOn": "On · {id}",
+      "adsLegend": "Advertising (Meta Pixel)",
+      "adsIntro": "The Meta Pixel measures visits, carts and purchases on your store for your Facebook and Instagram ads. It only runs on your store’s public domain, never in this panel or in local tests, and it respects visitors who opt out on the Privacy Choices page.",
+      "metaPixelLabel": "Meta Pixel ID",
+      "metaPixelHint": "Numbers only. Find it in Meta Events Manager → Data sources → your pixel. Leave it empty to turn the pixel off.",
+      "metaPixelPlaceholder": "1234567890123456"
     },
     "catalog": {
       "title": "Catalog",
