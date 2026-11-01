@@ -1114,7 +1114,8 @@
       "signInBody": "Esta zona es para cuentas de personal.",
       "signInCta": "Ir a iniciar sesión",
       "notStaffTitle": "Esta cuenta no tiene acceso al panel de administración",
-      "notStaffBody": "Has iniciado sesión con una cuenta de cliente. No le pasa nada; sencillamente no tiene rol administrativo.",
+      "notStaffBody": "Has iniciado sesión con una cuenta de cliente, que no tiene rol administrativo. Si eres administrador, entra con tu cuenta de administrador.",
+      "notStaffSignIn": "Entrar como administrador",
       "backToStore": "Volver a la tienda",
       "forbiddenTitle": "No tienes acceso a esta pantalla",
       "forbiddenBody": "Tu cuenta no tiene permiso para abrir esta pantalla. Si la necesitas, pide acceso a quien administra las cuentas del panel."

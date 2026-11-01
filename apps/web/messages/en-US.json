@@ -1114,7 +1114,8 @@
       "signInBody": "This area is for staff accounts.",
       "signInCta": "Go to sign in",
       "notStaffTitle": "This account does not have access to the admin panel",
-      "notStaffBody": "You are signed in with a customer account. Nothing is wrong with it; it simply has no admin role.",
+      "notStaffBody": "You are signed in with a customer account, which has no administrative role. If you are an administrator, sign in with your administrator account.",
+      "notStaffSignIn": "Sign in as administrator",
       "backToStore": "Back to the store",
       "forbiddenTitle": "You do not have access to this screen",
       "forbiddenBody": "Your account is not allowed to open this screen. If you need it, ask whoever manages the panel accounts for access."

@@ -69,7 +69,7 @@ export async function openAdminScreen(options: {
   }
 
   if (state.kind === "notStaff") {
-    return { ok: false, node: <NotStaffNotice locale={locale} /> };
+    return { ok: false, node: <NotStaffNotice locale={locale} returnPath={path} /> };
   }
 
   if (state.kind === "unavailable") {
@@ -135,13 +135,26 @@ export async function StaffSignInRequired({
  * asi que viaja tambien a `/admin`, y cualquiera que escriba la URL con su
  * sesion de cliente abierta cae aqui.
  *
- * SE RESPONDE CON UN 403 DELIBERADO Y NO CON EL FORMULARIO DE PERSONAL.
- * Ofrecer un login de administracion a quien acaba de demostrar que tiene una
- * cuenta valida es invitar a probar credenciales, y ademas confirmaria que el
- * panel existe y donde esta. Lo unico que se ofrece es volver a la tienda.
+ * Y LE PASA AL PROPIO DUENO (2026-10-31). Desde "Apartar" (0042), probar una
+ * compra en el mismo navegador deja una sesion de cliente de un mes; cuando la
+ * de personal caduca (ocho horas), el panel caia aqui y la unica salida era
+ * "Volver a la tienda": el dueno no podia entrar a su propio panel. Por eso se
+ * ofrece tambien ENTRAR COMO ADMINISTRADOR. El formulario de personal ya
+ * aceptaba una sesion de cliente -esta en `/admin/<idioma>/login`, a la vista,
+ * y es el sitio donde alguien con las dos cuentas entra con la de trabajo-,
+ * asi que esconder el enlace no protegia nada: solo dejaba fuera al dueno. Los
+ * intentos siguen limitados por el bloqueo de la cuenta y por el rate limit.
  */
-export async function NotStaffNotice({ locale }: { readonly locale: Locale }) {
+export async function NotStaffNotice({
+  locale,
+  returnPath,
+}: {
+  readonly locale: Locale;
+  /** Ruta INTERNA del panel a la que volver tras iniciar sesion. */
+  readonly returnPath: string;
+}) {
   const t = await getTranslations({ locale, namespace: "admin.access" });
+  const destination = adminHref(locale, returnPath);
 
   return (
     <AdminAccessFrame locale={locale}>
@@ -150,9 +163,17 @@ export async function NotStaffNotice({ locale }: { readonly locale: Locale }) {
         title={t("notStaffTitle")}
         description={t("notStaffBody")}
         action={
-          <Link href={`/${locale}`} className={buttonVariants({ variant: "secondary" })}>
-            {t("backToStore")}
-          </Link>
+          <div className="flex flex-col items-stretch gap-s3 sm:flex-row sm:justify-center">
+            <Link
+              href={`${adminHref(locale, "/login")}?next=${encodeURIComponent(destination)}`}
+              className={buttonVariants({ variant: "accent" })}
+            >
+              {t("notStaffSignIn")}
+            </Link>
+            <Link href={`/${locale}`} className={buttonVariants({ variant: "secondary" })}>
+              {t("backToStore")}
+            </Link>
+          </div>
         }
       />
     </AdminAccessFrame>
