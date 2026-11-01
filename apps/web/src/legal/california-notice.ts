@@ -26,7 +26,7 @@ import type { LegalDocument } from "./types";
  */
 export const CALIFORNIA_NOTICE_TEMPLATE = {
   key: "california-notice",
-  version: "2026-10-09",
+  version: "2026-10-31",
   language: "en-US",
   title: "California Notice at Collection",
   lastUpdated: "Last updated and effective: October 31, 2026",

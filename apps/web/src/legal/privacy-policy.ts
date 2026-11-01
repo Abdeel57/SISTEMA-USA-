@@ -28,7 +28,7 @@ import type { LegalDocument } from "./types";
  */
 export const PRIVACY_POLICY_TEMPLATE = {
   key: "privacy",
-  version: "2026-10-09",
+  version: "2026-10-31",
   language: "en-US",
   title: "Privacy Policy",
   lastUpdated: "Last updated and effective: October 31, 2026",
